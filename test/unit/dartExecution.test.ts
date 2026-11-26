@@ -9420,6 +9420,18 @@ Future<void> main() async {
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '200\nthen 2\nawait 2\n' });
 });
 
+test('await of a FutureOr<Future<int>> keeps the inner future, as the VM checks a FutureOr operand', () => {
+  const source = `import 'dart:async';
+Future<void> main() async {
+  Future<int> fi = Future.value(4);
+  FutureOr<Future<int>> q = fi;
+  var y = await q;
+  FutureOr<int> a = Future.value(5);
+  print([y is Future<int>, await a]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[true, 5]\n' });
+});
+
 test('an error thrown at the bottom of a deep chain of awaiting calls reaches the outermost catch', () => {
   const source = `Future<int> level(int k) async {
   if (k == 0) { await null; throw StateError('deep'); }
