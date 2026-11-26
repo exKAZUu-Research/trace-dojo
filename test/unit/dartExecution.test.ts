@@ -9449,6 +9449,18 @@ Future<void> main() async {
   });
 });
 
+test('an async* body a yield* attaches while its listener is paused runs once it resumes', () => {
+  const source = `import 'dart:async';
+Stream<int> b() async* { yield 1; yield 2; }
+Stream<int> a() async* { yield* b(); }
+Future<void> main() async {
+  final sub = a().listen((v) => print('got $v'), onDone: () => print('done'));
+  sub.pause();
+  Timer(Duration(milliseconds: 10), () { print('resume'); sub.resume(); });
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'resume\ngot 1\ngot 2\ndone\n' });
+});
+
 test('an async* stream a yield* forwarded counts as listened to, for a later listen or yield*', () => {
   const twice = `Stream<int> c(int n) async* { for (var i = n; i > 0; i--) yield i; }
 Stream<int> twice() async* { final s = c(2); yield* s; try { yield* s; } catch (e) { print('inner \${e.runtimeType}'); } yield 99; }

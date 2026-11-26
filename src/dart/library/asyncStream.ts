@@ -3259,6 +3259,12 @@ class _AsyncStarStreamController<T> {
       body._forwarder = this;
       _attached = body;
       body.controller.stream.listen(null);
+      // Its own controller is not paused when its listen starts it, even while the root is: the subscription pauses
+      // only after the listen, and the root holds what the body adds until it resumes.
+      if (!body.isScheduled) {
+        body.isScheduled = true;
+        scheduleMicrotask(body.runBody);
+      }
       return false;
     }
     final whenDoneAdding = controller.addStream(stream, cancelOnError: false);
