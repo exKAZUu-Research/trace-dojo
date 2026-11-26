@@ -1386,7 +1386,8 @@ export abstract class ExpressionConverter {
       init = this.convertLocalDeclaration(initNodes[0]);
     } else if (initNodes.length > 0) {
       // The SDK's parser reads `await` followed by a name as a declaration of a variable of type await.
-      const leadingName = /^await\s+([A-Za-z_$][\w$]*)/u.exec(initNodes[0].text)?.[1];
+      // Comments between await and the name separate them as whitespace does.
+      const leadingName = /^await(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)+([A-Za-z_$][\w$]*)/u.exec(initNodes[0].text)?.[1];
       if (leadingName !== undefined && !EXPRESSION_KEYWORDS.has(leadingName)) {
         syntaxError(initNodes[0], "'await' は型ではありません（for の初期化で await の後に名前は書けません）。");
       }

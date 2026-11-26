@@ -10786,7 +10786,7 @@ test('Dart DateTime computes and prints dates as the SDK does', () => {
 
 test('a for initializer that begins with await and a name is a declaration of type await, as the SDK reads it', () => {
   const message = "'await' は型ではありません（for の初期化で await の後に名前は書けません）。";
-  for (const init of ['await f(0)', 'await f(0) + 1']) {
+  for (const init of ['await f(0)', 'await f(0) + 1', 'await/* c */f(0)']) {
     for (const loop of [`for (${init}; k < 3; k++) {}`, `print([for (${init}; k < 3; k++) k]);`]) {
       const program = `Future<int> f(int x) async => x;\nFuture<void> main() async {\n  var k = 0;\n  ${loop}\n}`;
       expect(executeProgram('dart', program)).toMatchObject({
