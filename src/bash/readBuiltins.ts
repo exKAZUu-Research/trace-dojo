@@ -1,4 +1,5 @@
 import type { TextReader } from '../interpreter/programIo';
+import { isVariableReference } from './arithmetic';
 import { parseBuiltinOptions } from './builtinOptions';
 import { rejectUnsupportedFeature } from './capabilities';
 import type { Shell } from './shell';
@@ -31,7 +32,9 @@ export const readBuiltin: Builtin = (shell, args) => {
   if (typeof parsed === 'number') return parsed;
   const { options, operands: names } = parsed;
   const arrayName = options.get('a');
-  const invalid = (arrayName === undefined ? names : [arrayName, ...names]).find((name) => !isIdentifier(name));
+  // `-a` takes a plain name, while the other names may be array elements.
+  const invalid =
+    arrayName !== undefined && !isIdentifier(arrayName) ? arrayName : names.find((name) => !isVariableReference(name));
   if (invalid !== undefined) {
     shell.reportError(`read: \`${invalid}': not a valid identifier`);
     return 1;

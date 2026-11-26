@@ -1,3 +1,4 @@
+import { isVariableReference } from './arithmetic';
 import { legalNumber } from './characters';
 import { cdBuiltin, dirsBuiltin, popdBuiltin, pushdBuiltin, pwdBuiltin } from './directoryBuiltins';
 import { getoptsBuiltin } from './getopts';
@@ -155,8 +156,7 @@ function parsePrintfOptions(shell: Shell, args: string[]): { target: string | un
       shell.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
       return 2;
     }
-    const split = shell.splitSubscript(candidate);
-    if (split ? !isIdentifier(split.name) || split.subscript === '' : !isIdentifier(candidate)) {
+    if (!isVariableReference(candidate)) {
       shell.reportError(`printf: \`${candidate}': not a valid identifier`);
       return 2;
     }
