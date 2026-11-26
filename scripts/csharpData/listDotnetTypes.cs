@@ -22,6 +22,7 @@ string[] namespaces =
     "System.Net.Http",
     "System.Numerics",
     "System.Reflection",
+    "System.Runtime.InteropServices",
     "System.Text",
     "System.Text.RegularExpressions",
     "System.Threading",
