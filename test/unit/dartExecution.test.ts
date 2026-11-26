@@ -6956,6 +6956,12 @@ Future<void> main() async {
     ['FutureOr<String>', 'int', 'FutureOr<Object>'],
     ['FutureOr<Object>', 'int?', 'FutureOr<Object>?'],
     ['FutureOr<int?>', 'int?', 'FutureOr<int?>?'],
+    // A top type is the bound as written, and of two, the one MORETOP picks.
+    ['FutureOr<void>', 'String', 'FutureOr<void>'],
+    ['FutureOr<Object>?', 'int', 'FutureOr<Object>?'],
+    ['FutureOr<Object?>', 'Object?', 'FutureOr<Object?>'],
+    ['Object?', 'FutureOr<Object>?', 'Object?'],
+    ['FutureOr<void>', 'FutureOr<dynamic>', 'FutureOr<void>'],
   ]) {
     const source = `import 'dart:async';\nvoid f(${left} a, ${right} b) { bool s = true ? a : b; }\nvoid main() {}`;
     expect(executeProgram('dart', source)).toMatchObject({
@@ -6963,6 +6969,10 @@ Future<void> main() async {
       diagnostics: [{ row: 1, message: `'${bound}' 型の値は、'bool' 型の変数 s に代入できません。` }],
     });
   }
+  // void is more top than dynamic, so their bound cannot be used, as the SDK reports.
+  expect(executeProgram('dart', 'void f(dynamic a, void b) { bool s = true ? a : b; }\nvoid main() {}')).toMatchObject({
+    kind: 'compileError',
+  });
   const literal = 'import "dart:async"; void main() { Future<int>? Function() f = () async {}; print(f); }';
   expect(executeProgram('dart', literal)).toMatchObject({ kind: 'compileError' });
 });

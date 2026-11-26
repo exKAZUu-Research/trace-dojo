@@ -678,15 +678,37 @@ export function upperBound(a: DartType, b: DartType): DartType {
   return isObject(bound) && !(isSubtype(a, bound) && isSubtype(b, bound)) ? objectType(true) : bound;
 }
 
+/** The specification's MORETOP: which of two top types, as written, their upper bound is. */
+function moreTop(a: DartType, b: DartType): boolean {
+  if (a.kind === 'void') return true;
+  if (b.kind === 'void') return false;
+  if (a.kind === 'dynamic') return true;
+  if (b.kind === 'dynamic') return false;
+  if (isObjectNormal(a)) return true;
+  if (isObjectNormal(b)) return false;
+  const aNullable = isWrittenNullable(a);
+  const bNullable = isWrittenNullable(b);
+  if (aNullable && bNullable) return moreTop(nonNullable(a), nonNullable(b));
+  if (bNullable) return true;
+  if (aNullable) return false;
+  const aValue = futureOrValue(a);
+  const bValue = futureOrValue(b);
+  return aValue && bValue ? moreTop(aValue, bValue) : true;
+}
+
+/** Whether a type is written with `?`, which only an interface or type parameter type carries. */
+function isWrittenNullable(type: DartType): boolean {
+  return (type.kind === 'interface' || type.kind === 'typeParam') && type.nullable;
+}
+
 /** The bound when either type is a top, bottom, null, nullable, Object, or type parameter type. */
 // code-gauge-allow functionCognitiveComplexity -- One case per kind of type, in the order of Dart's rules.
 function specialUpperBound(a: DartType, b: DartType): DartType | undefined {
   if (sameType(a, b)) return a;
-  if (isTop(a) || isTop(b)) {
-    if (a.kind === 'dynamic' || b.kind === 'dynamic') return DYNAMIC;
-    if (a.kind === 'void' || b.kind === 'void') return VOID;
-    return objectType(true);
-  }
+  // A top type bounds as it is written, as FutureOr<void> stays, and of two, the one the specification's MORETOP picks.
+  if (isTop(a) && isTop(b)) return moreTop(a, b) ? a : b;
+  if (isTop(a)) return a;
+  if (isTop(b)) return b;
   if (a.kind === 'never' && !a.nullable) return b;
   if (b.kind === 'never' && !b.nullable) return a;
   if (a.kind === 'null' || (a.kind === 'never' && a.nullable)) return makeNullable(b);
