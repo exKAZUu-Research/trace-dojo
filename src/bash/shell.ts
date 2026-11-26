@@ -857,7 +857,11 @@ export class Shell implements ArithmeticHost {
       output = capture.read();
     };
     job.finish = run;
+    // Bash reaps a coprocess once, on whichever path gets there first, and unsets its names only then.
+    let reaped = false;
     job.dispose = () => {
+      if (reaped) return;
+      reaped = true;
       this.store.unsetNamed(name, false);
       this.store.unsetNamed(`${name}_PID`, false);
     };
@@ -887,8 +891,7 @@ export class Shell implements ArithmeticHost {
           else {
             // Reading past what a waiting coprocess wrote waits for it, which ends once nothing can write its input.
             job.settleWait?.();
-            this.store.unsetNamed(name, false);
-            this.store.unsetNamed(`${name}_PID`, false);
+            job.dispose?.();
             return false;
           }
           if (output === '') job.settleWait?.();

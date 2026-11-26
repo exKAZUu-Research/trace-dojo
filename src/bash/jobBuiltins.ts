@@ -21,15 +21,24 @@ export const waitBuiltin: Builtin = (shell, args) => {
   if (pids === undefined) return 1;
   // A coprocess waited for that nothing has read from yet runs now; one that waits for input the shell can still write
   // would be waited for forever.
-  const targets = pids.length > 0 ? pids.map((pid) => jobs.get(pid)) : [...jobs.values()];
+  const targetPids = pids.length > 0 ? pids : [...jobs.keys()];
+  const targets = targetPids.map((pid) => jobs.get(pid));
   for (const job of targets) job?.finish?.();
   // `wait -n` returns as soon as one of them has ended, so a waiting coprocess matters only when none has.
   const oneEnded = options.has('n') && targets.some((job) => job?.reported === false && job.waiting !== true);
   if (!oneEnded) for (const job of targets) job?.settleWait?.();
-  // A coprocess that has ended is reaped once waited for, which unsets its variables.
+  // A coprocess that has ended is reaped once waited for, which unsets its variables, and is no child afterwards.
+  const reaped: number[] = [];
   if (!options.has('n')) {
-    for (const job of targets) if (job?.finish === undefined && job?.waiting !== true) job?.dispose?.();
+    for (const [index, job] of targets.entries()) {
+      if (job?.dispose === undefined || job.finish !== undefined || job.waiting === true) continue;
+      job.dispose();
+      reaped.push(targetPids[index] as number);
+    }
   }
+  const forgetReaped = (): void => {
+    for (const pid of reaped) jobs.delete(pid);
+  };
   // A `>(...)` is waited for when named, or with no operand when `$!` is still its process ID, as Bash 5.3 does.
   const awaited = pids.length > 0 ? pids : [shell.store.lastBackgroundPid].filter((pid) => pid !== undefined);
   for (const pid of awaited) jobs.get(pid)?.awaitEnd?.();
@@ -52,6 +61,7 @@ export const waitBuiltin: Builtin = (shell, args) => {
       job.reported = true;
       if (job.finish === undefined && job.descriptors === undefined) jobs.delete(pid);
     }
+    forgetReaped();
     return 0;
   }
   let status = 0;
@@ -63,6 +73,7 @@ export const waitBuiltin: Builtin = (shell, args) => {
       status = 127;
     }
   }
+  forgetReaped();
   return status;
 };
 
