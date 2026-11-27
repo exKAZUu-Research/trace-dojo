@@ -80,39 +80,60 @@ export function decorateClassDefinition(runtime: Runtime, definition: ClassDefin
   const held = temporaries.length;
   temporaries.push(metadata, definition.cls, ...definition.classDecorators);
   try {
-    const { members } = definition;
-    const order = [
-      ...members.filter((member) => !isField(member) && member.member.isStatic),
-      ...members.filter((member) => !isField(member) && !member.member.isStatic),
-      ...members.filter((member) => isField(member) && member.member.isStatic),
-      ...members.filter((member) => isField(member) && !member.member.isStatic),
-    ];
-    for (const member of order) {
-      const added = member.member.isStatic ? staticInitializers : instanceInitializers;
-      const decorators = member.decorators ?? [];
-      for (const decorator of decorators) temporaries.push(decorator);
-      for (let index = decorators.length - 1; index >= 0; index--) {
-        decorateMember(runtime, member, index, added, metadata);
-        for (const value of added) temporaries.push(value);
-      }
-    }
-    let cls = definition.cls;
-    for (let index = definition.classDecorators.length - 1; index >= 0; index--) {
-      const context = decoratorContext(runtime, 'class', definition.name, classInitializers, metadata);
-      const decorator = requireCallable(runtime, definition.classDecorators[index]);
-      const result = runtime.call(decorator, undefined, [cls, context], definition.classDecoratorRows[index]);
-      for (const value of classInitializers) temporaries.push(value);
-      if (result === undefined) continue;
-      if (!(result instanceof JsFunction)) runtime.throwError('TypeError', 'class decorators must return a function');
-      cls = result as JsFunction;
-      temporaries.push(cls);
-    }
+    applyMemberDecorators(runtime, definition.members, staticInitializers, instanceInitializers, metadata);
+    const cls = applyClassDecorators(runtime, definition, classInitializers, metadata);
     defineMetadataProperty(runtime, definition.cls, symbol, metadata);
     if (cls !== definition.cls) defineMetadataProperty(runtime, cls, symbol, metadata);
     return { cls, staticInitializers, instanceInitializers, classInitializers };
   } finally {
     temporaries.length = held;
   }
+}
+
+function applyMemberDecorators(
+  runtime: Runtime,
+  members: MemberDefinition[],
+  staticInitializers: Value[],
+  instanceInitializers: Value[],
+  metadata: JsObject
+): void {
+  const { temporaries } = runtime.frame;
+  const order = [
+    ...members.filter((member) => !isField(member) && member.member.isStatic),
+    ...members.filter((member) => !isField(member) && !member.member.isStatic),
+    ...members.filter((member) => isField(member) && member.member.isStatic),
+    ...members.filter((member) => isField(member) && !member.member.isStatic),
+  ];
+  for (const member of order) {
+    const added = member.member.isStatic ? staticInitializers : instanceInitializers;
+    const decorators = member.decorators ?? [];
+    for (const decorator of decorators) temporaries.push(decorator);
+    for (let index = decorators.length - 1; index >= 0; index--) {
+      decorateMember(runtime, member, index, added, metadata);
+      for (const value of added) temporaries.push(value);
+    }
+  }
+}
+
+function applyClassDecorators(
+  runtime: Runtime,
+  definition: ClassDefinition,
+  classInitializers: Value[],
+  metadata: JsObject
+): JsFunction {
+  const { temporaries } = runtime.frame;
+  let cls = definition.cls;
+  for (let index = definition.classDecorators.length - 1; index >= 0; index--) {
+    const context = decoratorContext(runtime, 'class', definition.name, classInitializers, metadata);
+    const decorator = requireCallable(runtime, definition.classDecorators[index]);
+    const result = runtime.call(decorator, undefined, [cls, context], definition.classDecoratorRows[index]);
+    for (const value of classInitializers) temporaries.push(value);
+    if (result === undefined) continue;
+    if (!(result instanceof JsFunction)) runtime.throwError('TypeError', 'class decorators must return a function');
+    cls = result as JsFunction;
+    temporaries.push(cls);
+  }
+  return cls;
 }
 
 /** Whether a member is a field without `accessor`, whose decorators apply after those of methods and accessors. */
@@ -144,8 +165,8 @@ function classMetadata(runtime: Runtime, cls: JsFunction, symbol: symbol): JsObj
 function defineMetadataProperty(runtime: Runtime, target: JsFunction, symbol: symbol, metadata: JsObject): void {
   runtime.defineProperty(target, symbol, {
     value: metadata,
-    writable: false,
-    enumerable: false,
+    writable: true,
+    enumerable: true,
     configurable: true,
   });
 }
