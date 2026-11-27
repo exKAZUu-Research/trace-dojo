@@ -84,12 +84,18 @@ export class AttributeReader {
     private readonly reparseAttributes: (text: string) => Node[]
   ) {}
 
-  /** The effects of outer attributes, or undefined when `#[cfg]` removes what they are on. */
-  read(nodes: Node[]): Attributes | undefined {
+  /**
+   * The effects of outer attributes, or undefined when `#[cfg]` removes what they are on. Only an item (`onItem`) may
+   * carry `#[derive]`, which the item then checks is a struct or an enum.
+   */
+  read(nodes: Node[], onItem = false): Attributes | undefined {
     const attrs: Attributes = { derives: [] };
     for (const node of nodes) {
       if (isComment(node)) continue;
       if (!this.apply(node, attrs, false)) return undefined;
+      if (!onItem && attrs.derives.length > 0) {
+        syntaxError(this.span(node), '#[derive] は、構造体と列挙型にだけ付けられます。');
+      }
     }
     return attrs;
   }

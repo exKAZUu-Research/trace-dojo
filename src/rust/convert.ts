@@ -194,7 +194,7 @@ export class Converter extends ExpressionConverter {
 
   private attributed(node: Node): Item | undefined {
     const { attributes, target } = splitAttributes(node);
-    const attrs = this.attributes.read(attributes);
+    const attrs = this.attributes.read(attributes, true);
     if (!attrs || !target) return undefined;
     const declaration = target;
     const derivable = ['struct_item', 'enum_item', 'union_item'];
