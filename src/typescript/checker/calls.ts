@@ -110,30 +110,38 @@ export class Calls {
     const members = resolved.kind === 'union' ? resolved.types : [resolved];
     let hasCallableMember = false;
     const instantiated = members.map((member) => {
-      if (isAnyLike(member)) {
-        hasCallableMember = true;
-        return member;
-      }
-      const structure = this.c.structureOf(member);
-      if (structure.callSignatures.length === 0 && structure.constructSignatures.length === 0) return member;
-      hasCallableMember = true;
-      const callSignatures = this.applicableInstantiationSignatures(node, structure.callSignatures, typeArguments);
-      const constructSignatures = this.applicableInstantiationSignatures(
-        node,
-        structure.constructSignatures,
-        typeArguments
-      );
-      if (callSignatures.length === 0 && constructSignatures.length === 0) {
-        this.reportNoApplicableSignature(node, members.length === 1 ? type : member);
-        return errorType;
-      }
-      return anonymousObject(() => ({ ...structure, callSignatures, constructSignatures }));
+      const result = this.instantiateTargetMember(node, member, members.length === 1 ? type : member, typeArguments);
+      if (result.callable) hasCallableMember = true;
+      return result.type;
     });
     if (!hasCallableMember) {
       this.reportNoApplicableSignature(node, type);
       return errorType;
     }
     return instantiated.includes(errorType) ? errorType : unionOf(instantiated);
+  }
+
+  private instantiateTargetMember(
+    node: TreeNode,
+    member: Type,
+    diagnosticTarget: Type,
+    typeArguments: Type[]
+  ): { type: Type; callable: boolean } {
+    if (isAnyLike(member)) return { type: member, callable: true };
+    const structure = this.c.structureOf(member);
+    if (structure.callSignatures.length === 0 && structure.constructSignatures.length === 0)
+      return { type: member, callable: false };
+    const callSignatures = this.applicableInstantiationSignatures(node, structure.callSignatures, typeArguments);
+    const constructSignatures = this.applicableInstantiationSignatures(
+      node,
+      structure.constructSignatures,
+      typeArguments
+    );
+    if (callSignatures.length === 0 && constructSignatures.length === 0) {
+      this.reportNoApplicableSignature(node, diagnosticTarget);
+      return { type: errorType, callable: true };
+    }
+    return { type: anonymousObject(() => ({ ...structure, callSignatures, constructSignatures })), callable: true };
   }
 
   private instantiationTarget(type: Type, seen = new Set<number>()): Type {

@@ -200,11 +200,31 @@ function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode 
 function namespaceOfReference(node: TreeNode, symbol: Sym | undefined): string | undefined {
   if (!symbol?.exportedFrom) return undefined;
   const currentBodyId = namespaceBodyOf(node)?.id;
-  const hasLocalBinding = symbol.valueDeclarations.some(
-    (declaration) => currentBodyId === namespaceBodyOf(declaration)?.id
+  const hasLocalBinding = symbol.valueDeclarations.some((declaration) =>
+    declaresLocalBindingInBody(declaration, symbol, currentBodyId)
   );
   const isProperty = exportedVariableKinds.has(symbol.valueKind ?? '') || !hasLocalBinding;
   return isProperty ? symbol.exportedFrom.name : undefined;
+}
+
+function declaresLocalBindingInBody(declaration: TreeNode, symbol: Sym, currentBodyId: number | undefined): boolean {
+  if (currentBodyId === undefined || namespaceBodyOf(declaration)?.id !== currentBodyId || isAmbient(declaration))
+    return false;
+  if (declaration.type === 'internal_module' || declaration.type === 'module') {
+    const name = declaration.childForFieldName('name');
+    const body = declaration.childForFieldName('body');
+    return (
+      !!name &&
+      !!body &&
+      blockHasRuntimeCode(body) &&
+      namespacePathOf(name)[0]?.text === symbol.name &&
+      declaresNamespaceVar(symbol)
+    );
+  }
+  if (declaration.type === 'enum_declaration') {
+    return !declaration.children.some((child) => !child?.isNamed && child?.type === 'const');
+  }
+  return !erasedStatementTypes.has(declaration.type);
 }
 
 /** The body of the namespace declaration a node is in, whose function binds the names it declares. */

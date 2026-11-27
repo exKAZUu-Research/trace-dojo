@@ -709,16 +709,16 @@ export class FunctionChecker {
     const parameter = signature.parameters[0];
     if (!parameter) return unknownType;
     if (!parameter.rest) return parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
-    const elements = typeMembers(parameter.type).flatMap((member): Type[] => {
-      if (member.kind === 'object' && member.objectKind === 'tuple') {
-        const first = member.tuple?.elements[0];
-        if (!first) return [undefinedType];
-        if (first.rest) return [this.c.restElementType(first.type)];
-        return [first.optional ? unionOf([first.type, undefinedType]) : first.type];
-      }
-      return [this.c.restElementType(member)];
-    });
+    const elements = typeMembers(parameter.type).map((member) => this.restFirstArgumentType(member));
     return elements.length > 0 ? unionOf(elements) : unknownType;
+  }
+
+  private restFirstArgumentType(member: Type): Type {
+    if (member.kind !== 'object' || member.objectKind !== 'tuple') return this.c.restElementType(member);
+    const first = member.tuple?.elements[0];
+    if (!first) return undefinedType;
+    if (first.rest) return this.c.restElementType(first.type);
+    return first.optional ? unionOf([first.type, undefinedType]) : first.type;
   }
 
   isKnownLibraryIterator(type: Type, method: 'iterator' | 'asyncIterator'): boolean {
