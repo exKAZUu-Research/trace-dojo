@@ -2,7 +2,7 @@ import type { Condition, Expr, Pattern } from './ast';
 import type { Compiler, Eval } from './compiler';
 import { compileGuardedMatcher, compilePatternInput, takesWhole } from './compilerPatterns';
 import { normalize } from './infer';
-import { ControlSignal, type Frame } from './runtime';
+import { ControlSignal, type Frame, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { resolve, shallow, type Type } from './types';
 import { DONE, type IterValue, UNIT_VALUE, type Value } from './values';
@@ -51,9 +51,15 @@ export function compileMatch(c: Compiler, expr: ExprOf<'match'>, asStatement: bo
       for (const { matcher, guard, body, slots, takeAll } of arms) {
         const moveOut = matcher(frame, value, () => place);
         if (!moveOut) continue;
-        if (guard && guard(frame) !== true) {
-          frame.endScope(slots, false);
-          continue;
+        if (guard) {
+          const mark = frame.runtime.liveGuards.length;
+          const passed = guard(frame) === true;
+          // A guard's temporaries go before its arm runs.
+          frame.runtime.releaseGuards(frame, mark);
+          if (!passed) {
+            frame.endScope(slots, false);
+            continue;
+          }
         }
         moveOut();
         takeAll?.(frame);
@@ -144,8 +150,8 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
             }
           }
         } catch (error) {
-          // A `return` or a `break` of an outer loop leaves the loop, which drops its iterator.
-          if (error instanceof ControlSignal) frame.runtime.dropper?.dropRest(iterator);
+          // A `return`, a `break` of an outer loop or a panic leaves the loop, which drops its iterator.
+          if (error instanceof ControlSignal || error instanceof RustPanic) frame.runtime.dropper?.dropRest(iterator);
           throw error;
         }
       })
