@@ -185,10 +185,10 @@ function deadlock(ctx: NativeContext, message: string): never {
   throw new Deadlock(message, ctx.span);
 }
 
-/** `thread::scope`: waits for the threads it spawned, and panics if one that no thread joined panicked. */
 /** The threads a scope's `spawn` started, which the scope waits for, unlike those `std::thread::spawn` detaches. */
 const scopedThreads = new WeakSet<ThreadHandle>();
 
+/** `thread::scope`: waits for the threads it spawned, and panics if one that no thread joined panicked. */
 function threadScope(ctx: NativeContext, f: Value): Value {
   const threads = scheduler(ctx);
   const count = threads.spawnedCount;

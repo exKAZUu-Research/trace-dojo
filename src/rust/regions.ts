@@ -14,7 +14,15 @@ export type Layout =
   | { kind: 'tuple'; elems: Layout[] }
   | { kind: 'seq'; elem: Layout }
   /** A closure, a trait object, or a type parameter: borrows whose structure the type does not show. */
-  | { kind: 'opaque'; region: RVar; closure?: ClosureType; object?: true; referenceObject?: boolean }
+  | {
+      kind: 'opaque';
+      region: RVar;
+      closure?: ClosureType;
+      object?: true;
+      referenceObject?: boolean;
+      /** A trait object whose lifetime is neither written nor a reference's (`Arc<dyn Job>` in a closure's type). */
+      unwrittenObject?: boolean;
+    }
   | { kind: 'none' };
 
 type AdtLayout = Extract<Layout, { kind: 'adt' }>;
@@ -54,6 +62,7 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
         region: t.objectLifetime === 'static' ? staticRegion() : fresh(),
         object: true,
         referenceObject: t.objectLifetime === 'reference',
+        unwrittenObject: t.objectLifetime === undefined && t.lifetime === undefined,
       };
     }
     case 'param': {
@@ -112,8 +121,9 @@ export function dropSlots(type: Type, proj: string[] = []): string[][] {
 }
 
 /**
- * The regions of a layout; with `borrowedOnly`, not a trait object's own lifetime that no reference ties
- * (`Arc<dyn Job>` inside `&Arc<dyn Job>`), which may be `'static` itself, so a parameter does not borrow it.
+ * The regions of a layout; with `borrowedOnly`, not a trait object's lifetime that is neither written nor a
+ * reference's (`Arc<dyn Job>` inside a closure's `&Arc<dyn Job>`), which may be `'static` itself, so a parameter does
+ * not borrow it; a written one (`dyn Fn() + 'a`) is borrowed.
  */
 export function regionsOf(layout: Layout, borrowedOnly = false): RVar[] {
   const inner = (part: Layout): RVar[] => regionsOf(part, borrowedOnly);
@@ -131,7 +141,7 @@ export function regionsOf(layout: Layout, borrowedOnly = false): RVar[] {
       return inner(layout.elem);
     }
     case 'opaque': {
-      return borrowedOnly && layout.object && !layout.referenceObject ? [] : [layout.region];
+      return borrowedOnly && layout.unwrittenObject ? [] : [layout.region];
     }
     case 'none': {
       return [];
