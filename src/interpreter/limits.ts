@@ -76,6 +76,17 @@ export class ExecutionBudget {
     if (performance.now() > this.deadline) throw new ExecutionLimitError('time');
   }
 
+  /** Runs `work` within at most `milliseconds` more, a part of the run with a time limit of its own. */
+  withinMilliseconds<T>(milliseconds: number, work: () => T): T {
+    const saved = this.deadline;
+    this.deadline = Math.min(saved, performance.now() + milliseconds);
+    try {
+      return work();
+    } finally {
+      this.deadline = saved;
+    }
+  }
+
   /**
    * Runs `work`, which the grader does for itself rather than for the program (such as parsing a library's source once
    * per process), so that its time does not count against the program's.

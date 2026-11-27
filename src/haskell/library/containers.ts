@@ -8,6 +8,11 @@ import qualified Base as B
 
 infixl 9 \\
 
+type IntSet = Set Int
+
+type Key = Int
+
+type role Set nominal
 data Set a = SBin !Int !a !(Set a) !(Set a) | STip
 
 empty :: Set a
@@ -413,6 +418,7 @@ instance Show a => Show (Set a) where
 
 instance Ord a => Semigroup (Set a) where
   (<>) = union
+  stimes = stimesIdempotentMonoid
 
 instance Ord a => Monoid (Set a) where
   mempty = empty
@@ -430,7 +436,9 @@ instance Foldable Set where
   toList = toAscList
   null = null
   length = size
-  elem x s = B.elem x (toAscList s)
+  elem = go
+    where go x STip = x ${BT}seq${BT} False
+          go x (SBin _ y l r) = x == y || go x l || go x r
   minimum = findMin
   maximum = findMax
   sum = foldl' (+) 0
@@ -493,6 +501,11 @@ import qualified Data.Set.Internal as S
 
 infixl 9 !, !?, \\
 
+type IntMap = Map Int
+
+type Key = Int
+
+type role Map nominal representational
 data Map k a = Bin !Int !k a !(Map k a) !(Map k a) | Tip
 
 empty :: Map k a
@@ -1129,6 +1142,7 @@ instance Traversable (Map k) where
 
 instance Ord k => Semigroup (Map k v) where
   (<>) = union
+  stimes = stimesIdempotentMonoid
 
 instance Ord k => Monoid (Map k v) where
   mempty = Tip
