@@ -8,6 +8,7 @@ import { printedOperation, stringLiteralValue } from './operatorPrinter';
 export interface Node {
   readonly type: string;
   readonly text: string;
+  readonly displayText?: string;
   readonly isNamed: boolean;
   readonly startIndex: number;
   readonly endIndex: number;
@@ -94,7 +95,7 @@ export function isOptionalChain(node: Node): boolean {
 function printedCallee(node: Node): string | undefined {
   switch (node.type) {
     case 'identifier': {
-      return nameOf(node);
+      return node.displayText ?? nameOf(node);
     }
     case 'this':
     case 'super': {

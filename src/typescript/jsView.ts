@@ -43,6 +43,8 @@ class ViewNode implements Node {
   hiddenNames?: ReadonlySet<string>;
   /** A collision-free alias bound to an enum's object when a member initializer shadows the enum's source name. */
   enumAlias?: string;
+  /** The source-spelled receiver name shown in runtime error messages when `text` is a generated `$ns_` helper. */
+  displayText?: string;
   readonly startIndex: number;
   readonly endIndex: number;
   readonly startPosition: { row: number; column: number };
@@ -112,6 +114,7 @@ interface NamespaceReceiver {
 class ViewContext {
   readonly usedNames: Set<string>;
   readonly hiddenNames = new Set<string>();
+  readonly displayNames = new Map<string, string>();
   readonly bodyReceivers = new Map<number, NamespaceReceiver[]>();
   readonly enumAliases = new Map<number, string>();
   readonly importReceivers = new Map<number, string>();
@@ -121,24 +124,28 @@ class ViewContext {
     this.usedNames = collectIdentifierNames(root, budget);
   }
 
-  freshHelperName(base: string): string {
+  freshHelperName(base: string, displayName = base): string {
     const clean = base.replaceAll(/[^\w$]/g, '_') || 'ns';
     let candidate = `$ns_${clean}`;
     while (this.usedNames.has(candidate)) candidate = `$ns_${clean}_${++this.nextId}`;
     this.usedNames.add(candidate);
     this.hiddenNames.add(candidate);
+    this.displayNames.set(candidate, displayName);
     return candidate;
   }
 
   importReceiverFor(statement: TreeNode, moduleName: string): string {
     let helper = this.importReceivers.get(statement.id);
     if (!helper) {
-      helper = this.freshHelperName(`import_${moduleName}`);
+      const cleanModule = moduleName.replaceAll(/[^\w$]/g, '_') || 'mod';
+      helper = this.freshHelperName(`import_${moduleName}`, `import_${cleanModule}`);
       this.importReceivers.set(statement.id, helper);
     }
     return helper;
   }
 }
+
+let activeDisplayNames: ReadonlyMap<string, string> | undefined;
 
 const viewContexts = new WeakMap<Binder, ViewContext>();
 
@@ -188,9 +195,15 @@ export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node 
       const name = symbol.valueEntries[0]?.name;
       if (name) scope.values.set(nameOf(name), symbol);
     }
-  const viewed = view(root, binder);
-  if (context.hiddenNames.size > 0) viewed.hiddenNames = context.hiddenNames;
-  return viewed;
+  const previousDisplayNames = activeDisplayNames;
+  activeDisplayNames = context.displayNames;
+  try {
+    const viewed = view(root, binder);
+    if (context.hiddenNames.size > 0) viewed.hiddenNames = context.hiddenNames;
+    return viewed;
+  } finally {
+    activeDisplayNames = previousDisplayNames;
+  }
 }
 
 /** The TypeScript declarations that compile to code of their own, and the names a namespace's exports change. */
@@ -486,7 +499,9 @@ function assemble(node: TreeNode, type: string, parts: Part[], text = node.text)
 }
 
 function leaf(node: TreeNode, type: string, text = node.text, isNamed = true): ViewNode {
-  return new ViewNode(type, text, isNamed, node, [], new Map());
+  const viewed = new ViewNode(type, text, isNamed, node, [], new Map());
+  if (type === 'identifier') viewed.displayText = activeDisplayNames?.get(text);
+  return viewed;
 }
 
 /** `E.A` for a member `A` of the enum `E`, which the identifier `A` in an initializer of `E` stands for. */
