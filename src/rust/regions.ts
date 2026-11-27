@@ -208,6 +208,8 @@ export interface InvariantParams {
 
 const invariantParamsOf = new WeakMap<AdtDef, InvariantParams>();
 
+const INTERIOR_MUTABLE = new Set(['Cell', 'RefCell', 'RefMut', 'Mutex', 'MutexGuard', 'RwLock', 'RwLockWriteGuard']);
+
 /**
  * The parameters a type is invariant in: those its fields name behind a `&mut`, or as an argument that another type
  * is invariant in. A value of the type lets its holder write through that `&mut`, so the regions of such a parameter
@@ -216,6 +218,12 @@ const invariantParamsOf = new WeakMap<AdtDef, InvariantParams>();
 export function invariantParams(def: AdtDef): InvariantParams {
   const known = invariantParamsOf.get(def);
   if (known) return known;
+  // std declares these without fields: what they hold can be written through a shared reference or a guard.
+  if (INTERIOR_MUTABLE.has(def.builtin ?? '')) {
+    const result = { lifetimes: new Set<number>(), params: new Set([0]) };
+    invariantParamsOf.set(def, result);
+    return result;
+  }
   // Types that refer to each other are invariant in what any of them is, so they are settled together.
   const group: InvarianceGroup = new Map([[def, { lifetimes: new Set(), params: new Set() }]]);
   for (let before = -1, after = groupSize(group); before !== after; before = after, after = groupSize(group)) {
@@ -413,6 +421,15 @@ export function elementLayout(layout: Layout): Layout {
 }
 
 /** The layout after a deref that an owner does: a `Box`'s content, or a collection's slice. */
+/** What `*` reaches: a reference's target, or what a smart pointer or a guard points to (`*rc`, `*guard`). */
+export function derefLayout(layout: Layout): Layout {
+  if (layout.kind === 'ref') return layout.target;
+  if (layout.kind === 'opaque') return layout;
+  return layout.kind === 'adt' && POINTERS.has(layout.def.builtin ?? '') ? (layout.args[0] ?? NONE) : NONE;
+}
+
+const POINTERS = new Set(['Rc', 'Arc', 'Ref', 'RefMut', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard']);
+
 export function ownedDerefLayout(layout: Layout): Layout {
   if (layout.kind !== 'adt') return layout;
   if (layout.def.builtin === 'Box') return layout.args[0] ?? NONE;

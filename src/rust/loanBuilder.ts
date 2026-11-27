@@ -30,6 +30,7 @@ import {
 } from './loanPlaces';
 import { isMutableReference, reborrowedIteratorLayout, reborrowsIterator } from './receiverReborrow';
 import {
+  derefLayout,
   derefSteps,
   dropSlots,
   elementLayout,
@@ -405,7 +406,7 @@ export class LoanBuilder {
   private project(layout: Layout, elem: string): Layout {
     switch (elem) {
       case '*': {
-        return layout.kind === 'ref' ? layout.target : layout.kind === 'opaque' ? layout : NONE;
+        return derefLayout(layout);
       }
       case '#': {
         return ownedDerefLayout(layout);
