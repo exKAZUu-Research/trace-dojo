@@ -11,7 +11,12 @@ export function hygienic(tokens: Token[]): Token[] {
   collectBinders(tokens, binders);
   if (binders.size === 0) return tokens;
   expansions++;
-  return renamed(tokens, binders, `__${expansions}`);
+  return renamed(tokens, binders, `__${expansions}`, { bound: new Set(), hidden: new Set() });
+}
+
+/** A variable's name as the rule wrote it, before `hygienic` renamed it, as `stringify!` and `assert!` show it. */
+export function writtenName(name: string): string {
+  return name.replace(/__\d+$/, '');
 }
 
 /** Collects the variables a rule's own code binds: in `let`, `for`, closure parameters, and `match` arms. */
@@ -27,7 +32,7 @@ function collectBinders(tokens: Token[], binders: Set<string>): void {
     else if (token.text === 'for')
       addPatternBinders(tokens.slice(index + 1, patternEnd(tokens, index + 1, ['in'])), binders);
     else if (token.text === '|' && opensClosure(tokens, 0, index)) {
-      addPatternBinders(tokens.slice(index + 1, patternEnd(tokens, index + 1, ['|'])), binders);
+      addParamBinders(tokens.slice(index + 1, patternEnd(tokens, index + 1, ['|'])), binders);
     } else if (token.text === 'match')
       addArmBinders(
         tokens.slice(index + 1).find((next) => next.kind === 'group' && next.open === '{'),
@@ -40,6 +45,22 @@ function collectBinders(tokens: Token[], binders: Set<string>): void {
 function patternEnd(tokens: Token[], start: number, stops: string[]): number {
   const end = tokens.findIndex((token, index) => index >= start && stops.includes(leafText(token) ?? ''));
   return end === -1 ? tokens.length : end;
+}
+
+/** The variables a closure's parameters bind: each one's pattern, up to its type (`x: i32`, `m: HashMap<K, V>`). */
+function addParamBinders(params: Token[], binders: Set<string>): void {
+  let pattern: Token[] = [];
+  let inType = false;
+  let depth = 0;
+  for (const token of [...params, undefined]) {
+    const text = leafText(token);
+    if (token === undefined || (text === ',' && depth === 0)) {
+      addPatternBinders(pattern, binders);
+      [pattern, inType] = [[], false];
+    } else if (inType) depth += text === '<' ? 1 : text === '>' ? -1 : 0;
+    else if (text === ':') inType = true;
+    else pattern.push(token);
+  }
 }
 
 /** The variables the patterns of a `match`'s arms bind: what comes before each `=>`. */
@@ -94,28 +115,75 @@ const FORMAT_MACROS = new Set([
 /**
  * Renames the variables a rule's code binds (`x` to `x__2`) where the rule's code uses them: not as fields, paths,
  * or macros, not as a struct expression's field name (whose shorthand `S { x }` becomes `S { x: x__2 }`), and in a
- * string literal only where it is a format string, whose inline arguments (`{x}`) name variables.
+ * string literal only where it is a format string, whose inline arguments (`{x}`) name variables. A `let`'s own
+ * initializer does not see the names it binds (`let double = double(x);` calls the function).
  */
+// code-gauge-allow functionCognitiveComplexity -- One walk renames groups, leaves, and format strings in source order.
 function renamed(
   tokens: Token[],
   binders: Set<string>,
   suffix: string,
-  context: 'struct' | 'format' | undefined = undefined
+  scope: Scope,
+  context?: 'struct' | 'format'
 ): Token[] {
   // Only a format macro's first string literal is its format string.
   let formatString = context === 'format';
-  return tokens.flatMap((token, index): Token[] => {
+  const out: Token[] = [];
+  let initializer: Initializer | undefined;
+  for (const [index, token] of tokens.entries()) {
+    if (initializer) hideInInitializer(initializer, index, scope);
     if (token.kind === 'group') {
-      return [{ ...token, tokens: renamed(token.tokens, binders, suffix, groupContext(tokens, index)) }];
+      out.push({ ...token, tokens: renamed(token.tokens, binders, suffix, scope, groupContext(tokens, index)) });
+      continue;
     }
-    if (!token.fromRule) return [token];
+    if (!token.fromRule) {
+      out.push(token);
+      continue;
+    }
+    if (token.text === 'let') initializer = letInitializer(tokens, index, scope);
     if (token.type === 'string_literal') {
-      const renaming = formatString;
+      out.push(formatString ? { ...token, text: renamedFormat(token.text, binders, suffix) } : token);
       formatString = false;
-      return [renaming ? { ...token, text: renamedFormat(token.text, binders, suffix) } : token];
-    }
-    return renamedLeaf(tokens, index, binders, suffix, context === 'struct');
-  });
+    } else out.push(...renamedLeaf(tokens, index, binders, scope.hidden, suffix, context === 'struct'));
+  }
+  if (initializer) hideInInitializer(initializer, initializer.end, scope);
+  return out;
+}
+
+/** A `let`'s initializer, from its `=` to its `;`, and the names its pattern newly binds. */
+interface Initializer {
+  start: number;
+  end: number;
+  names: string[];
+  hidden: string[];
+}
+
+function letInitializer(tokens: Token[], index: number, scope: Scope): Initializer {
+  const pattern = new Set<string>();
+  addPatternBinders(tokens.slice(index + 1, patternEnd(tokens, index + 1, ['=', ':', 'else'])), pattern);
+  const names = [...pattern].filter((name) => !scope.bound.has(name));
+  for (const name of pattern) scope.bound.add(name);
+  const end = patternEnd(tokens, index + 1, [';']);
+  return { start: Math.min(patternEnd(tokens, index + 1, ['=']), end), end, names, hidden: [] };
+}
+
+/** Hides a `let`'s new names where its initializer begins, and shows them again where it ends. */
+function hideInInitializer(initializer: Initializer, index: number, scope: Scope): void {
+  if (index === initializer.start) {
+    initializer.hidden = initializer.names.filter((name) => !scope.hidden.has(name));
+    for (const name of initializer.hidden) scope.hidden.add(name);
+  }
+  if (index === initializer.end) {
+    for (const name of initializer.hidden) scope.hidden.delete(name);
+    initializer.hidden = [];
+  }
+}
+
+interface Scope {
+  /** The rule's variables that a `let` has bound so far. */
+  bound: Set<string>;
+  /** The variables of the `let` whose initializer this is, which mean what they meant before it. */
+  hidden: Set<string>;
 }
 
 /** A format string with its inline arguments (`{t}`, `{t:>3}`) renamed where they name the rule's variables. */
@@ -126,11 +194,19 @@ function renamedFormat(text: string, binders: Set<string>, suffix: string): stri
 }
 
 /** A leaf, renamed where it is one of the rule's variables; in a struct's fields, a field name stays as it is. */
-function renamedLeaf(tokens: Token[], index: number, binders: Set<string>, suffix: string, inStruct: boolean): Token[] {
+function renamedLeaf(
+  tokens: Token[],
+  index: number,
+  binders: Set<string>,
+  hidden: Set<string>,
+  suffix: string,
+  inStruct: boolean
+): Token[] {
   const token = tokens[index] as Token & { kind: 'leaf' };
   const before = leafText(tokens[index - 1]);
   const after = leafText(tokens[index + 1]);
-  const isVariable = binders.has(token.text) && before !== '.' && before !== '::' && after !== '!' && after !== '::';
+  const named = binders.has(token.text) && !hidden.has(token.text);
+  const isVariable = named && before !== '.' && before !== '::' && after !== '!' && after !== '::';
   if (!isVariable) return [token];
   const fieldPlace = inStruct && (index === 0 || before === ',');
   if (fieldPlace && after === ':') return [token];

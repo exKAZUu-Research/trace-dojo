@@ -6,6 +6,7 @@ import { PatternConverter } from './convertPatterns';
 import { isComment, syntaxError, unavailable } from './convertSyntax';
 import { parseFormatString } from './formatString';
 import { parseRawStringLiteral, parseStringLiteral } from './literals';
+import { writtenName } from './macroHygiene';
 import { expand, MacroError, type MacroRule, parseParts, tokensOf, tokenText as macroTokenText } from './macroRules';
 
 const MAX_MACRO_DEPTH = 128;
@@ -505,7 +506,8 @@ export abstract class MacroConverter extends PatternConverter {
 
   /** The format string and arguments of a formatting macro, with implicit named arguments (`{x}`) captured. */
   private formatArgs(args: Node[], span: Span, macroName: string): FormatArgs {
-    const [formatNode, ...rest] = args;
+    const [written, ...rest] = args;
+    const formatNode = fragmentLiteral(written);
     const text = this.formatString(formatNode, args.length, span, macroName);
     const positional: Expr[] = [];
     const named = new Map<string, number>();
@@ -543,6 +545,15 @@ export abstract class MacroConverter extends PatternConverter {
   }
 }
 
+/** A string literal that a macro's `expr` variable passed on (`println!($fmt)`), which keeps it in marked parentheses. */
+function fragmentLiteral(node: Node): Node {
+  const [open, mark, inner] = node.children;
+  const marked = node.type === 'parenthesized_expression' && open.type === '(' && mark?.text === '/*expr*/';
+  if (!marked || !inner) return node;
+  const literal = fragmentLiteral(inner);
+  return literal.type.endsWith('string_literal') ? literal : node;
+}
+
 function firstExpression(root: Node): Node | undefined {
   const statement = root.namedChildren.find((child) => !isComment(child));
   return statement?.type === 'expression_statement'
@@ -561,7 +572,7 @@ function tokenText(tokens: Node[]): string {
       return;
     }
     if (end !== undefined && token.startIndex > end) text += ' ';
-    text += token.text;
+    text += token.type === 'identifier' ? writtenName(token.text) : token.text;
     end = token.endIndex;
   };
   for (const token of tokens) visit(token);

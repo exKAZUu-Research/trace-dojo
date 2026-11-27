@@ -383,7 +383,7 @@ function matchUntilStop(fragment: string, tokens: Token[], start: number, follow
   const types = fragment === 'ty' || fragment === 'path';
   let depth = 0;
   let end = start;
-  while (end < tokens.length && !(depth === 0 && stops.has(leafText(tokens[end]) ?? ''))) {
+  while (end < tokens.length && !(depth === 0 && stops.has(stopText(tokens[end], end > start) ?? ''))) {
     if (EXPRESSIONS.has(fragment) && opensClosure(tokens, start, end)) {
       end = closureParamsEnd(tokens, end);
       continue;
@@ -396,6 +396,12 @@ function matchUntilStop(fragment: string, tokens: Token[], start: number, follow
 }
 
 const EXPRESSIONS = new Set(['expr', 'expr_2021', 'stmt']);
+
+/** The text a stop is told by: a leaf's, or a group's opening bracket after the fragment's first token (`i32 { .. }`). */
+function stopText(token: Token, afterFirst: boolean): string | undefined {
+  if (token.kind === 'group') return afterFirst ? token.open : undefined;
+  return token.text;
+}
 
 /** How a token changes the depth of generic arguments: `<` opens them where it can, `>` and `>>` close them. */
 function angleChange(text: string | undefined, opens: boolean, depth: number): number {
