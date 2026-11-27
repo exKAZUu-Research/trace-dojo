@@ -2,7 +2,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { BinaryOp, Block, Condition, Expr, Item, MatchArm, PathAst, Pattern, Span, Stmt, TypeAst } from './ast';
-import { forEachDirect } from './astWalk';
+import { forEachDirect, walkBlock } from './astWalk';
 import { MacroConverter } from './convertMacros';
 import { isComment, splitAttributes, syntaxError, unavailable } from './convertSyntax';
 import {
@@ -262,19 +262,23 @@ export abstract class ExpressionConverter extends MacroConverter {
   // code-gauge-allow functionCognitiveComplexity -- Checks break and continue targets of labeled blocks as rustc does.
   private labeledBlock(node: Node, label: string, span: Span): Expr {
     const block = this.block(node);
-    const check = (expr: Expr): void => {
-      if (expr.kind === 'closure' || expr.kind === 'loop' || expr.kind === 'while' || expr.kind === 'for') {
-        if (expr.kind === 'for') check(expr.iterable);
-        if (expr.kind === 'while' && expr.cond.kind === 'expr') check(expr.cond.expr);
-        return;
-      }
-      if ((expr.kind === 'break' || expr.kind === 'continue') && expr.label === undefined) {
+    // Inside a loop of the block, an unlabeled `break` or `continue` is the loop's, and so is allowed.
+    const check = (expr: Expr, inLoop = false): void => {
+      if (expr.kind === 'closure') return;
+      if ((expr.kind === 'break' || expr.kind === 'continue') && expr.label === undefined && !inLoop) {
         syntaxError(expr.span, `ラベル付きのブロックの中の ${expr.kind} には、ラベルを書いてください（E0695）。`);
       }
       if (expr.kind === 'continue' && expr.label === label) {
         syntaxError(expr.span, `continue '${label} は、ブロックのラベルには使えません（E0696）。`);
       }
-      forEachDirect(expr, check);
+      const isLoop = expr.kind === 'while' || expr.kind === 'for' || (expr.kind === 'loop' && expr.isBlock !== true);
+      if (!isLoop) {
+        forEachDirect(expr, (child) => check(child, inLoop));
+        return;
+      }
+      if (expr.kind === 'for') check(expr.iterable, inLoop);
+      if (expr.kind === 'while') check(expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value, inLoop);
+      walkBlock(expr.body, (child) => check(child, true));
     };
     check(block);
     const exit: Expr = { kind: 'break', label, value: block, span };
