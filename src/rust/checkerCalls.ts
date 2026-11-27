@@ -372,6 +372,13 @@ export function checkMethodCall(
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
   const adjusted = typeAfter(receiverType, found.adjust.derefs) ?? found.selfType;
   if (fn.selfMode === 'value' && !fn.selfWrapper) checkMoveOutOfRef(c, expr, found.adjust, adjusted);
+  if (fn.selfMode === 'value' && fn.selfWrapper) {
+    // `self: Box<Self>` takes the `Box`, which method lookup derefs through to `Self`; lookup stops at an `Rc`, `Arc`
+    // or `Pin` itself.
+    const derefs = fn.selfWrapper === 'Box' ? found.adjust.derefs.slice(0, -1) : found.adjust.derefs;
+    const toWrapper = { ...found.adjust, derefs };
+    checkMoveOutOfRef(c, expr, toWrapper, typeAfter(receiverType, toWrapper.derefs) ?? found.selfType);
+  }
   if (expr.method === 'map') return arrayMapResult(adjusted, found.selfType, sig.ret);
   return sig.ret;
 }
