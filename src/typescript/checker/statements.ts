@@ -1054,7 +1054,8 @@ export class StatementChecker {
 
   /** The type a `return` gives, where an async function returns what a promise it returns fulfills with. */
   private returnedType(expression: TreeNode, context: FunctionContext, declared: Type | undefined): Type {
-    const checked = this.c.expressions.check(expression, declared ?? context.contextualReturn);
+    const contextual = this.c.functions.returnExpressionContext(context, declared ?? context.contextualReturn);
+    const checked = this.c.expressions.check(expression, contextual);
     return context.isAsync ? awaitedType(this.c, checked) : checked;
   }
 

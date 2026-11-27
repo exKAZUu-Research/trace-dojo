@@ -586,19 +586,19 @@ export class ClassDeclarationChecker {
     if (!typeNode || !nameNode) return undefined;
     const type = this.c.typeNodes.annotationType(typeNode) ?? anyType;
     const types = type.kind === 'union' ? type.types : [type];
-    if (isAnyLike(type) || isIntrinsic(type, 'unknown') || types.some((member) => isIntrinsic(member, 'undefined')))
-      return undefined;
-    return nameNode;
+    return isAnyLike(type) || isIntrinsic(type, 'unknown') || types.some((item) => isIntrinsic(item, 'undefined'))
+      ? undefined
+      : nameNode;
   }
 }
 
 /** Whether a member is a method, an accessor, or a field, which a member overriding it must agree with. */
 function memberKind(property: Property): 'method' | 'accessor' | 'field' {
   if (property.isMethod) return 'method';
-  const declaration = property.declaration;
-  const declarationType = declaration?.type ?? '';
+  const declarationType = property.declaration?.type ?? '';
   // `accessor x = 1` declares a getter and a setter, as tsc compares it.
-  const isAutoAccessor = declarationType === 'field_definition' && declaration && hasToken(declaration, 'accessor');
+  const isAutoAccessor =
+    declarationType === 'field_definition' && hasToken(property.declaration as TreeNode, 'accessor');
   return isAutoAccessor ||
     ['method_definition', 'method_signature', 'abstract_method_signature'].includes(declarationType)
     ? 'accessor'
@@ -623,8 +623,9 @@ function isInterfaceMember(property: Property): boolean {
 
 /** The name a member is declared with, or the parameter that declares a parameter property. */
 function memberNameNode(property: Property): TreeNode | undefined {
-  const { declaration } = property;
-  return declaration?.childForFieldName('name') ?? declaration?.childForFieldName('pattern') ?? undefined;
+  return (
+    property.declaration?.childForFieldName('name') ?? property.declaration?.childForFieldName('pattern') ?? undefined
+  );
 }
 
 /** How narrowly each visibility exposes a member, which a derived class may not narrow further. */

@@ -498,6 +498,11 @@ export class FunctionChecker {
     return true;
   }
 
+  returnExpressionContext(context: FunctionContext, expected: Type | undefined): Type | undefined {
+    if (!expected || !context.isAsync || isAnyLike(expected)) return expected;
+    return unionOf([expected, this.c.globalType('PromiseLike', [expected])]);
+  }
+
   private checkBody(body: TreeNode, context: FunctionContext): void {
     if (body.type === 'statement_block') {
       this.c.statements.checkBlockStatements(named(body));
@@ -506,7 +511,8 @@ export class FunctionChecker {
     }
     const { declaredReturn } = context;
     context.inReturn = true;
-    const checked = this.c.expressions.check(body, declaredReturn ?? context.contextualReturn);
+    const contextual = this.returnExpressionContext(context, declaredReturn ?? context.contextualReturn);
+    const checked = this.c.expressions.check(body, contextual);
     const expressionType = context.isAsync ? awaitedType(this.c, checked) : checked;
     context.inReturn = false;
     if (declaredReturn) this.c.expressions.checkReturnValue(body, expressionType, declaredReturn);
@@ -720,12 +726,12 @@ export class FunctionChecker {
    */
   private yieldOperandType(operand: TreeNode, delegated: boolean, context: FunctionContext | undefined): Type {
     const generator = context?.generator;
-    if (!context || generator?.annotation)
-      return this.c.expressions.check(operand, delegated ? undefined : generator?.yieldType);
+    const contextual = !delegated && context ? this.returnExpressionContext(context, generator?.yieldType) : undefined;
+    if (!context || generator?.annotation) return this.c.expressions.check(operand, contextual);
     const wasInReturn = context.inReturn;
     context.inReturn = true;
     try {
-      return this.c.expressions.check(operand, delegated ? undefined : generator?.yieldType);
+      return this.c.expressions.check(operand, contextual);
     } finally {
       context.inReturn = wasInReturn;
     }
