@@ -24,6 +24,41 @@ export function unavailableNodeMember(
   return undefined;
 }
 
+const FS_VALUE_EXPORTS = new Set([
+  'readFileSync',
+  'writeFileSync',
+  'appendFileSync',
+  'existsSync',
+  'mkdirSync',
+  'readdirSync',
+  'unlinkSync',
+  'rmdirSync',
+  'renameSync',
+  ...UNAVAILABLE_FS_MEMBERS,
+]);
+
+const FS_TYPE_EXPORTS = new Set([
+  'PathLike',
+  'PathOrFileDescriptor',
+  'Mode',
+  'WriteFileOptions',
+  'ObjectEncodingOptions',
+  'MakeDirectoryOptions',
+  ...[...UNAVAILABLE_FS_MEMBERS].filter((member) => /^[A-Z]/.test(member)),
+]);
+
+/** Which symbol spaces (`value`, `type`) an export of `"fs"` or `"node:fs"` inhabits, or undefined for an unknown name. */
+export function fsImportMeanings(
+  moduleName: string,
+  exportName: string
+): { value: boolean; type: boolean } | undefined {
+  if (moduleName !== 'fs' && moduleName !== 'node:fs') return undefined;
+  if (exportName === '*' || exportName === 'default') return { value: true, type: false };
+  const value = FS_VALUE_EXPORTS.has(exportName);
+  const type = FS_TYPE_EXPORTS.has(exportName);
+  return value || type ? { value, type } : undefined;
+}
+
 // oxfmt-ignore
 export const NODE_LIBRARY = `
 type BufferEncoding = "ascii" | "utf8" | "utf-8" | "utf16le" | "utf-16le" | "ucs2" | "ucs-2" | "base64" | "base64url" | "latin1" | "binary" | "hex";

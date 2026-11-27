@@ -507,6 +507,10 @@ export class AssignmentChecker {
       return errorType;
     }
     // A library constant is declared with the kind `declared`, its entry recording `const`.
+    if (symbol.valueKind === 'import' || symbol.valueKind === 'importAlias') {
+      this.c.error(expression, `インポートであるため、'${expression.text}' に代入することはできません。`);
+      return errorType;
+    }
     if (symbol.valueEntries[0]?.kind === 'const') {
       this.c.error(expression, `${expression.text} は定数なので、代入できません。`);
       return errorType;

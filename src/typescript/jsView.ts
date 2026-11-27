@@ -1,11 +1,13 @@
+// code-gauge-allow-file fileNcss -- Lowers TypeScript declarations, imports, exports, namespaces, and class members in one syntax pass.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import { nameOf, type Node } from '../javascript/convertNodes';
 import { isConstructorDefinition } from '../javascript/programConverter';
 import { Binder } from './checker/binder';
+import { fsImportMeanings } from './checker/nodeLibrary';
 import { Scope, type Sym } from './checker/scopes';
-import { isParameterProperty } from './checker/syntax';
+import { isParameterProperty, stringValue } from './checker/syntax';
 import {
   assertedExpression,
   assertionTypes,
@@ -111,7 +113,7 @@ const compiledDeclarations: Record<string, (node: TreeNode, binder: Binder) => V
   module: (node, binder) => namespaceView(node, binder),
   internal_module: (node, binder) => namespaceView(node, binder),
   import_alias: (node, binder) => importAliasView(node, binder),
-  import_statement: (node) => importView(node),
+  import_statement: (node, binder) => importView(node, binder),
   export_statement: (node, binder) => exportView(node, binder),
 };
 
@@ -338,11 +340,12 @@ function declaresNamespaceVar(symbol: Sym | undefined): boolean {
  * `var fs = require("fs");` (for a default or namespace import) and `var readFileSync = require("fs").readFileSync;`. A
  * type-only one compiles to nothing.
  */
-function importView(node: TreeNode): ViewNode {
+function importView(node: TreeNode, binder: Binder): ViewNode {
   const clause = node.childForFieldName('import_clause');
   const source = node.childForFieldName('source');
-  if (!clause || !source || node.children.some((child) => child?.type === 'type')) return leaf(node, 'empty_statement');
-  const bindings = importBindings(node, clause, source);
+  if (!clause || !source || node.children.some((child) => !child.isNamed && child.type === 'type'))
+    return leaf(node, 'empty_statement');
+  const bindings = importBindings(node, clause, source, binder);
   if (bindings.length === 0) return leaf(node, 'empty_statement');
   const declarators = bindings.flatMap(([name, value], index) => [
     ...(index === 0 ? [] : [{ node: token(node, ','), fieldName: undefined }]),
@@ -365,7 +368,9 @@ function importView(node: TreeNode): ViewNode {
 }
 
 /** The names an import declares, with the expressions that read them from the module `require` returns. */
-function importBindings(node: TreeNode, clause: TreeNode, source: TreeNode): [string, ViewNode][] {
+function importBindings(node: TreeNode, clause: TreeNode, source: TreeNode, binder: Binder): [string, ViewNode][] {
+  const moduleName = stringValue(source);
+  const ambientExports = binder.ambientModules.get(moduleName)?.namespaceExports;
   const required = (): ViewNode => leaf(source, IMPORTED_MODULE, source.text);
   return clause.namedChildren.flatMap((part): [string, ViewNode][] => {
     // A default import is the whole module, as tsx's interop gives a CommonJS module without a default export.
@@ -373,18 +378,38 @@ function importBindings(node: TreeNode, clause: TreeNode, source: TreeNode): [st
     const name = part?.namedChildren[0];
     if (part?.type === 'namespace_import' && name) return [[name.text, required()]];
     if (part?.type !== 'named_imports') return [];
-    return part.namedChildren.flatMap((specifier): [string, ViewNode][] => {
-      const imported = specifier?.childForFieldName('name');
-      const local = specifier?.childForFieldName('alias') ?? imported;
-      if (!imported || !local || specifier?.children.some((child) => child?.type === 'type')) return [];
-      const member = assemble(node, 'member_expression', [
-        { node: required(), fieldName: 'object' },
-        { node: token(node, '.'), fieldName: undefined },
-        { node: leaf(imported, 'property_identifier', imported.text), fieldName: 'property' },
-      ]);
-      return [[local.text, member]];
-    });
+    return namedImportBindings(node, part, { moduleName, ambientExports, required });
   });
+}
+
+function namedImportBindings(
+  node: TreeNode,
+  namedImports: TreeNode,
+  context: { moduleName: string; ambientExports: Scope | undefined; required: () => ViewNode }
+): [string, ViewNode][] {
+  return namedImports.namedChildren.flatMap((specifier): [string, ViewNode][] => {
+    const imported = specifier?.childForFieldName('name');
+    const local = specifier?.childForFieldName('alias') ?? imported;
+    if (!imported || !local || isTypeOnlySpecifier(specifier, imported.text, context)) return [];
+    const member = assemble(node, 'member_expression', [
+      { node: context.required(), fieldName: 'object' },
+      { node: token(node, '.'), fieldName: undefined },
+      { node: leaf(imported, 'property_identifier', imported.text), fieldName: 'property' },
+    ]);
+    return [[local.text, member]];
+  });
+}
+
+function isTypeOnlySpecifier(
+  specifier: TreeNode,
+  importedName: string,
+  { moduleName, ambientExports }: { moduleName: string; ambientExports: Scope | undefined }
+): boolean {
+  if (specifier.children.some((child) => !child.isNamed && child.type === 'type')) return true;
+  if (fsImportMeanings(moduleName, importedName)?.value === false) return true;
+  return (
+    ambientExports !== undefined && !ambientExports.values.has(importedName) && ambientExports.types.has(importedName)
+  );
 }
 
 /**
@@ -408,10 +433,7 @@ function importAliasView(node: TreeNode, binder: Binder): ViewNode {
   const path = namespacePathOf(target);
   const rootName = nameOf(path[0]);
   const root = binder.lookupValue(target, rootName);
-  const hasValue =
-    root !== undefined &&
-    (root.valueEntries.some((entry) => entry.kind !== 'namespace') || isInstantiatedNamespace(root));
-  if (!hasValue) return leaf(node, 'empty_statement');
+  if (!root || !resolveImportAliasValue(path, binder)) return leaf(node, 'empty_statement');
   const namespace = namespaceOfReference(path[0], root);
   let value = namespace
     ? memberReference(path[0], namespace, rootName)
@@ -434,6 +456,32 @@ function importAliasView(node: TreeNode, binder: Binder): ViewNode {
     );
   }
   return varDeclaration(node, nameOf(name), value);
+}
+
+function resolveImportAliasValue(path: TreeNode[], binder: Binder, seen = new Set<number>()): Sym | undefined {
+  const unalias = (symbol: Sym | undefined): Sym | undefined => {
+    if (symbol?.valueKind !== 'importAlias') return symbol;
+    const declaration = symbol.valueDeclarations.find((candidate) => candidate.type === 'import_alias');
+    const target = declaration?.namedChildren[1];
+    if (!declaration || !target || seen.has(declaration.id)) return undefined;
+    seen.add(declaration.id);
+    return resolveImportAliasValue(namespacePathOf(target), binder, seen);
+  };
+  let current = unalias(binder.lookupValue(path[0], nameOf(path[0])));
+  for (const [index, part] of path.slice(1).entries()) {
+    if (!current) return undefined;
+    const partName = nameOf(part);
+    const isLast = index === path.length - 2;
+    const member =
+      current.valueKind === 'enum' && isLast
+        ? current.enumMembers?.values.get(partName)
+        : current.namespaceExports?.values.get(partName);
+    current = unalias(member);
+  }
+  return current &&
+    (current.valueEntries.some((entry) => entry.kind !== 'namespace') || isInstantiatedNamespace(current))
+    ? current
+    : undefined;
 }
 
 /** The statements of the first namespace of a path `A.B.C`, which declare the next ones down to the body's. */

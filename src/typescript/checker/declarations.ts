@@ -29,12 +29,17 @@ function checkBuiltinUndefinedDeclaration(c: Checker): void {
 }
 
 const blockScopedKinds = new Set(['let', 'const', 'class']);
+const importKinds = new Set(['import', 'importAlias']);
 
 // code-gauge-allow functionCognitiveComplexity -- Distinguishes block-scoped conflicts, mixed function/var declarations, repeated implementations, and compatible var redeclarations.
 function checkValueDuplicates(c: Checker, symbol: Sym): void {
   const entries = symbol.valueEntries;
   if (entries.length < 2) return;
   const name = symbol.name;
+  if (entries.some((entry) => importKinds.has(entry.kind))) {
+    reportImportConflict(c, name, entries);
+    return;
+  }
   if (
     entries.some((entry) => entry.kind === 'enum' || entry.kind === 'namespace') &&
     !checkNamespaceAndEnumMerges(c, symbol)
@@ -211,26 +216,48 @@ function checkReservedTypeName(c: Checker, symbol: Sym): void {
 function checkTypeDuplicates(c: Checker, symbol: Sym): void {
   const entries = symbol.typeEntries;
   if (entries.length < 2) return;
+  if (entries.some((entry) => importKinds.has(entry.kind))) {
+    reportImportConflict(c, symbol.name, entries);
+    return;
+  }
   const kinds = entries.map((entry) => entry.kind);
   // Enums merge with each other, conflict with a class as values, and conflict with a type-only declaration here.
   if (kinds.includes('enum')) {
-    if (kinds.some((kind) => kind === 'alias' || kind === 'interface'))
-      for (const entry of entries)
-        c.error(entry.name, '列挙型の宣言は、名前空間または他の列挙型の宣言とのみマージできます。');
+    reportEnumTypeMergeConflicts(c, entries, kinds);
     return;
   }
   // Interfaces merge with each other and with a class; any other pair declares the name twice.
-  const merges =
-    kinds.every((kind) => kind === 'interface' || kind === 'class') &&
-    kinds.filter((kind) => kind === 'class').length <= 1;
-  if (!merges) {
-    // Two classes report as values.
-    if (kinds.every((kind) => kind === 'class')) return;
-    for (const entry of entries) c.error(entry.name, `${symbol.name} はすでに宣言されています。`);
+  if (!mergesTypeDeclarations(kinds)) {
+    if (!kinds.every((kind) => kind === 'class'))
+      for (const entry of entries) c.error(entry.name, `${symbol.name} はすでに宣言されています。`);
     return;
   }
   checkMergedTypeParameters(c, symbol);
   checkMergedProperties(c, symbol);
+}
+
+function reportEnumTypeMergeConflicts(c: Checker, entries: Sym['typeEntries'], kinds: string[]): void {
+  if (!kinds.some((kind) => kind === 'alias' || kind === 'interface')) return;
+  for (const entry of entries)
+    c.error(entry.name, '列挙型の宣言は、名前空間または他の列挙型の宣言とのみマージできます。');
+}
+
+function mergesTypeDeclarations(kinds: string[]): boolean {
+  return (
+    kinds.every((kind) => kind === 'interface' || kind === 'class') &&
+    kinds.filter((kind) => kind === 'class').length <= 1
+  );
+}
+
+function reportImportConflict(c: Checker, name: string, entries: { kind: string; name: TreeNode }[]): void {
+  const hasLocal = entries.some((entry) => !importKinds.has(entry.kind));
+  for (const entry of entries) {
+    if (hasLocal && !importKinds.has(entry.kind)) continue;
+    c.error(
+      entry.name,
+      hasLocal ? `インポート宣言が、'${name}' のローカル宣言と競合しています。` : `${name} はすでに宣言されています。`
+    );
+  }
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Validates parameter order, defaulted additions, and agreement of constraints and defaults across merged declarations.

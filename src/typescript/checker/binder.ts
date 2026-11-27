@@ -1,7 +1,9 @@
+// code-gauge-allow-file fileNcss -- Binds every declaration, import, namespace, and scope form in one tree walk.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
 import { memberNameOf } from './enums';
+import { fsImportMeanings } from './nodeLibrary';
 import { Scope, Sym, type ValueKind } from './scopes';
 import { assignmentKind, isWithin, named, patternIdentifiers, stringValue } from './syntax';
 
@@ -258,11 +260,30 @@ export class Binder {
     const source = node.childForFieldName('source') ?? clause?.childForFieldName('source');
     if (!source || !clause) return;
     const module = stringValue(source);
-    for (const [nameNode, name] of importedNames(clause)) {
-      const value = scope.declareValue(nameNode.text, 'import', node, nameNode);
-      value.importTarget = { module, name };
-      scope.declareType(nameNode.text, 'import', node, nameNode).importTarget = { module, name };
+    const clauseTypeOnly = node.children.some((child) => !child.isNamed && child.type === 'type');
+    for (const { local, name, typeOnly: specTypeOnly } of importedNames(clause)) {
+      const typeOnly = clauseTypeOnly || specTypeOnly;
+      const meanings = this.importMeaningsOf(module, name);
+      if (meanings.value) {
+        scope.declareValue(local.text, 'import', node, local).importTarget = { module, name, typeOnly };
+      }
+      if (meanings.type) {
+        scope.declareType(local.text, 'import', node, local).importTarget = { module, name, typeOnly };
+      }
     }
+  }
+
+  private importMeaningsOf(module: string, name: string): { value: boolean; type: boolean } {
+    const fsMeanings = fsImportMeanings(module, name);
+    if (fsMeanings) return fsMeanings;
+    const ambient = this.ambientModules.get(module)?.namespaceExports;
+    if (ambient) {
+      if (name === '*') return { value: true, type: false };
+      const value = ambient.values.has(name);
+      const type = ambient.types.has(name);
+      if (value || type) return { value, type };
+    }
+    return { value: true, type: name !== '*' };
   }
 
   private newNamespaceBody(node: TreeNode, namespace: Sym, isAmbient: boolean): Scope {
@@ -528,22 +549,23 @@ export function symbolDeclaredBy(scope: Scope, name: string): Sym | undefined {
 }
 
 /** The names an import clause declares, with the export each names: `*` for the module, `default` for its default. */
-function importedNames(clause: TreeNode): [TreeNode, string][] {
+function importedNames(clause: TreeNode): { local: TreeNode; name: string; typeOnly: boolean }[] {
   if (clause.type === 'import_require_clause')
     return named(clause)
       .slice(0, 1)
-      .map((name) => [name, '*']);
-  return named(clause).flatMap((part): [TreeNode, string][] => {
-    if (part.type === 'identifier') return [[part, 'default']];
+      .map((local) => ({ local, name: '*', typeOnly: false }));
+  return named(clause).flatMap((part): { local: TreeNode; name: string; typeOnly: boolean }[] => {
+    if (part.type === 'identifier') return [{ local: part, name: 'default', typeOnly: false }];
     if (part.type === 'namespace_import')
       return named(part)
         .slice(0, 1)
-        .map((name) => [name, '*']);
+        .map((local) => ({ local, name: '*', typeOnly: false }));
     if (part.type !== 'named_imports') return [];
-    return named(part).flatMap((specifier): [TreeNode, string][] => {
+    return named(part).flatMap((specifier): { local: TreeNode; name: string; typeOnly: boolean }[] => {
       const imported = specifier.childForFieldName('name');
       const local = specifier.childForFieldName('alias') ?? imported;
-      return imported && local ? [[local, imported.text]] : [];
+      const typeOnly = specifier.children.some((child) => !child.isNamed && child.type === 'type');
+      return imported && local ? [{ local, name: imported.text, typeOnly }] : [];
     });
   });
 }

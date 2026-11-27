@@ -67,7 +67,7 @@ export class Sym {
   /** The namespace that exports this name, which its declarations refer to it through. */
   exportedFrom?: Sym;
   /** For a name an `import` declares, the module and the export it names: `*` for the module, `default` for its default. */
-  importTarget?: { module: string; name: string };
+  importTarget?: { module: string; name: string; typeOnly?: boolean };
 
   constructor(
     readonly name: string,

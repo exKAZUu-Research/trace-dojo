@@ -164,6 +164,7 @@ export class Checker {
       this.error(name, 'bigint リテラルはプロパティ名として使えません。');
     this.classes.checkThisTypePlacements(this.root);
     checkDecoratorPlacements(this, this.root);
+    this.namespaces.pruneImportAliasMeanings(this.binder.allScopes);
     checkDuplicateDeclarations(this, this.binder.allScopes);
     this.signatures.checkTypeParameterDeclarations(this.binder.allScopes);
     this.signatures.checkImplicitReturnTypes(this.root);

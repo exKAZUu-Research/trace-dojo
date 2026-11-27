@@ -73,15 +73,79 @@ export class Namespaces {
 
   /** What `import X = N.Y` names, as a value or as a type, or undefined when its path names nothing. */
   aliasTarget(alias: Sym, meaning: 'value' | 'type'): Sym | undefined {
-    const declaration = alias.valueDeclaration ?? alias.typeDeclarations[0];
-    const target = declaration && named(declaration)[1];
-    if (!target || this.resolvingAliases.has(alias.id)) return undefined;
-    this.resolvingAliases.add(alias.id);
+    const declaration =
+      alias.valueDeclarations.find((node) => node.type === 'import_alias') ??
+      alias.typeDeclarations.find((node) => node.type === 'import_alias') ??
+      alias.valueDeclaration ??
+      alias.typeDeclarations[0];
+    return declaration ? this.aliasDeclarationTarget(declaration, meaning) : undefined;
+  }
+
+  aliasDeclarationTarget(declaration: TreeNode, meaning: 'value' | 'type'): Sym | undefined {
+    const target = named(declaration)[1];
+    if (!target || this.resolvingAliases.has(declaration.id)) return undefined;
+    this.resolvingAliases.add(declaration.id);
     try {
       return this.resolvePath(qualifiedPath(target), meaning).symbol;
     } finally {
-      this.resolvingAliases.delete(alias.id);
+      this.resolvingAliases.delete(declaration.id);
     }
+  }
+
+  /** Drops the unused value or type binding of an `import X = N.Y` that resolves only in the other symbol space. */
+  pruneImportAliasMeanings(scopes: Scope[]): void {
+    for (const scope of scopes) {
+      this.pruneScopeImportAliases(scope, 'value');
+      this.pruneScopeImportAliases(scope, 'type');
+    }
+  }
+
+  private pruneScopeImportAliases(scope: Scope, meaning: 'value' | 'type'): void {
+    const { table, exportTable, entriesOf, declarationsOf, other } = scopeAliasTables(scope, meaning);
+    for (const [name, symbol] of table) {
+      const entries = entriesOf(symbol);
+      const declarations = declarationsOf(symbol);
+      if (!entries.some((entry) => entry.kind === 'importAlias')) continue;
+      const keptIndices = entries
+        .map((_, index) => index)
+        .filter((index) => !this.isOtherSpaceImportAlias(entries[index].kind, declarations[index], meaning, other));
+      if (keptIndices.length === entries.length) continue;
+      if (keptIndices.length === 0) {
+        table.delete(name);
+        if (exportTable?.get(name) === symbol) exportTable.delete(name);
+      } else {
+        retainIndices(declarations, keptIndices);
+        this.restoreKeptSymbolKind(symbol, keptIndices, meaning);
+      }
+    }
+  }
+
+  private restoreKeptSymbolKind(symbol: Sym, keptIndices: number[], meaning: 'value' | 'type'): void {
+    if (meaning === 'value') {
+      retainIndices(symbol.valueEntries, keptIndices);
+      const merged = symbol.valueEntries.find(
+        (entry) => entry.kind === 'enum' || entry.kind === 'function' || entry.kind === 'class'
+      );
+      symbol.valueKind =
+        symbol.valueEntries[0].kind === 'namespace' && merged ? merged.kind : symbol.valueEntries[0].kind;
+      return;
+    }
+    retainIndices(symbol.typeEntries, keptIndices);
+    symbol.typeKind = symbol.typeEntries.some((entry) => entry.kind === 'class') ? 'class' : symbol.typeEntries[0].kind;
+  }
+
+  private isOtherSpaceImportAlias(
+    kind: string,
+    declaration: TreeNode | undefined,
+    meaning: 'value' | 'type',
+    other: 'value' | 'type'
+  ): boolean {
+    return (
+      kind === 'importAlias' &&
+      declaration?.type === 'import_alias' &&
+      this.aliasDeclarationTarget(declaration, meaning) === undefined &&
+      this.aliasDeclarationTarget(declaration, other) !== undefined
+    );
   }
 
   /** Reports the path of `import X = N.Y` that names nothing. */
@@ -308,4 +372,36 @@ function missingMemberError(container: Sym, name: string): string {
 /** The name a namespace is printed with, `A.B` for `B` in `A`. */
 function qualifiedName(symbol: Sym): string {
   return symbol.exportedFrom ? `${qualifiedName(symbol.exportedFrom)}.${symbol.name}` : symbol.name;
+}
+
+function retainIndices<T>(items: T[], indices: number[]): void {
+  const kept = indices.map((index) => items[index]);
+  items.splice(0, items.length, ...kept);
+}
+
+interface AliasSpaceTables {
+  table: Map<string, Sym>;
+  exportTable: Map<string, Sym> | undefined;
+  entriesOf: (symbol: Sym) => { kind: string; name: TreeNode }[];
+  declarationsOf: (symbol: Sym) => TreeNode[];
+  other: 'value' | 'type';
+}
+
+function scopeAliasTables(scope: Scope, meaning: 'value' | 'type'): AliasSpaceTables {
+  if (meaning === 'value') {
+    return {
+      table: scope.values,
+      exportTable: scope.namespace?.namespaceExports?.values,
+      entriesOf: (symbol: Sym) => symbol.valueEntries,
+      declarationsOf: (symbol: Sym) => symbol.valueDeclarations,
+      other: 'type',
+    };
+  }
+  return {
+    table: scope.types,
+    exportTable: scope.namespace?.namespaceExports?.types,
+    entriesOf: (symbol: Sym) => symbol.typeEntries,
+    declarationsOf: (symbol: Sym) => symbol.typeDeclarations,
+    other: 'value',
+  };
 }

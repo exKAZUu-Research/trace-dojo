@@ -615,21 +615,51 @@ export class TypeNodes {
     }
     if (stringMappings.has(name) && argumentCount === 1 && !symbol?.typeDeclarations.length) return 'stringMapping';
     if (!symbol) {
-      this.c.error(
-        nameNode,
-        scope.lookupValue(name)
-          ? `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。`
-          : `型 ${name} が見つかりません。${nameSuggestionHint(scope, name, 'type', this.c.budget)}`
-      );
+      this.reportMissingOrValueTypeName(nameNode, scope, name);
       return undefined;
     }
-    if (this.reportUnusableSymbol(node, nameNode, symbol)) return undefined;
-    const parameters = this.c.signatures.typeParametersOfSymbol(symbol);
+    const target = this.resolveImportedTypeSymbol(node, nameNode, symbol);
+    if (!target) return undefined;
+    const parameters = this.c.signatures.typeParametersOfSymbol(target);
     if (parameters.length === 0) {
       if (argumentCount > 0) this.c.error(node, `型 ${name} は型引数をとりません。`);
-      return { symbol, parameters };
+      return { symbol: target, parameters };
     }
-    return this.checkTypeArgumentCount(node, name, parameters, argumentCount) ? { symbol, parameters } : undefined;
+    return this.checkTypeArgumentCount(node, name, parameters, argumentCount)
+      ? { symbol: target, parameters }
+      : undefined;
+  }
+
+  private reportMissingOrValueTypeName(nameNode: TreeNode, scope: Sym['scope'], name: string): void {
+    const value = scope.lookupValue(name);
+    const unaliased =
+      value && (value.valueKind === 'import' || value.valueKind === 'importAlias')
+        ? this.c.namespaces.imported(value, 'value')
+        : value;
+    this.c.error(
+      nameNode,
+      unaliased?.valueKind === 'namespace'
+        ? `名前空間 '${name}' を型として使用することはできません。`
+        : value
+          ? `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。`
+          : `型 ${name} が見つかりません。${nameSuggestionHint(scope, name, 'type', this.c.budget)}`
+    );
+  }
+
+  private resolveImportedTypeSymbol(node: TreeNode, nameNode: TreeNode, symbol: Sym): Sym | undefined {
+    if (this.reportUnusableSymbol(node, nameNode, symbol)) return undefined;
+    if (symbol.typeKind !== 'import' && symbol.typeKind !== 'importAlias') return symbol;
+    const target = this.c.namespaces.imported(symbol, 'type');
+    if (target) return this.reportUnusableSymbol(node, nameNode, target) ? undefined : target;
+    const valueTarget = this.c.namespaces.imported(symbol, 'value');
+    if (valueTarget?.valueKind === 'namespace')
+      this.c.error(nameNode, `名前空間 '${nameNode.text}' を型として使用することはできません。`);
+    else if (valueTarget)
+      this.c.error(
+        nameNode,
+        `${nameNode.text} は値であり、型としては使えません。型を表すには typeof ${nameNode.text} と書いてください。`
+      );
+    return undefined;
   }
 
   /** Whether a generic gets as many type arguments as it requires and allows, reporting it when not. */
@@ -1029,10 +1059,17 @@ export class TypeNodes {
         break;
       }
       default: {
-        symbol.declaredType = anyType;
+        symbol.declaredType = symbol.valueKind === 'enumMember' ? this.enumMemberSymbolType(symbol) : anyType;
       }
     }
     return symbol.declaredType;
+  }
+
+  private enumMemberSymbolType(symbol: Sym): Type {
+    const declaration = symbol.valueDeclaration?.parent?.parent;
+    const name = declaration?.childForFieldName('name');
+    const enumSymbol = name ? this.c.scopeOf(declaration as TreeNode).lookupValue(name.text) : undefined;
+    return (enumSymbol && this.c.enums.memberTypeNamed(enumSymbol, symbol.name)) ?? errorType;
   }
 
   /** What a reference to an alias inside its own declaration stands for. */
