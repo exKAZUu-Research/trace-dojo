@@ -223,11 +223,16 @@ function openFile(ctx: NativeContext, path: string, options: OpenOptionsValue): 
   return attempt(ctx, () => {
     const { files } = ctx.runtime.io;
     const writes = options.write || options.append;
-    if (!writes) return new IoStream(ctx.runtime.io.openReader(path), undefined);
+    if (!writes) return new IoStream(ctx.runtime.io.openReader(path), undefined, fileInfo(ctx, path));
     const create = options.createNew ? 'exclusive' : options.create ? 'always' : 'never';
     const handle = files.open(path, { create, truncate: options.truncate, append: options.append });
-    return new IoStream(options.read ? ctx.runtime.io.openReader(path) : undefined, handle);
+    return new IoStream(options.read ? ctx.runtime.io.openReader(path) : undefined, handle, fileInfo(ctx, path));
   });
+}
+
+/** What a `File`'s `Debug` shows: its descriptor, numbered from 3 in the order files open, and its path. */
+function fileInfo(ctx: NativeContext, path: string): { fd: number; path: string } {
+  return { fd: ctx.runtime.nextFileDescriptor++, path };
 }
 
 function joinPath(base: string, part: string): string {

@@ -66,6 +66,7 @@ const DEBUG_TYPES = new Set([
   'JoinHandle',
   'Path',
   'PathBuf',
+  'File',
   'IoErrorKind',
   'ConstPtr',
   'MutPtr',

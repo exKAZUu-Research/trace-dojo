@@ -157,6 +157,8 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly frames: Frame[] = [];
   readonly steps = new StepTracker();
   readonly io: ProgramIO;
+  /** The descriptor the next `File` opened gets, after standard input, output and error. */
+  nextFileDescriptor = 3;
   private slots = 0;
   private readonly outputDecoders = {
     stdout: new TextDecoder('utf-8', { ignoreBOM: true }),

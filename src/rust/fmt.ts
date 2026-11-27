@@ -18,6 +18,7 @@ import {
   type DynValue,
   type EntryValue,
   EnumValue,
+  type IoStream,
   isPlace,
   type IterValue,
   type MapValue,
@@ -420,6 +421,22 @@ export class Formatter {
       case 'CStr': {
         return padString(`"${(v as bigint[]).map((byte) => escapeAscii(Number(byte))).join('')}"`, spec, write);
       }
+      case 'File': {
+        const stream = v as IoStream;
+        const { fd, path } = stream.file ?? { fd: 0, path: '' };
+        return structText(
+          'File',
+          [
+            ['fd', textPart(String(fd))],
+            ['path', textPart(JSON.stringify(path))],
+            ['read', textPart(String(stream.reader !== undefined))],
+            ['write', textPart(String(stream.writer !== undefined))],
+          ],
+          indent,
+          false,
+          write
+        );
+      }
       case 'Thread': {
         const id: DebugPart = (_inner, sink) => emit(`ThreadId(${String(v)})`, sink);
         const name: DebugPart = (_inner, sink) => emit(v === 1 ? 'Some("main")' : 'None', sink);
@@ -718,6 +735,11 @@ function escapeChar(char: string, isChar: boolean): string {
 }
 
 /** The `Display` of the standard library's error types, or undefined for another type. */
+/** A part of a `Debug` text that is fixed text. */
+function textPart(text: string): DebugPart {
+  return (_inner, sink) => emit(text, sink);
+}
+
 function stdErrorDisplay(builtin: string, value: Value): string | undefined {
   switch (builtin) {
     case 'IoError': {

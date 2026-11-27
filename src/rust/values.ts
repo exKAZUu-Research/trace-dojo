@@ -398,7 +398,9 @@ export class RawPtr {
 export class IoStream {
   constructor(
     readonly reader: TextReader | undefined,
-    readonly writer: FileHandle | undefined
+    readonly writer: FileHandle | undefined,
+    /** For a `File`, what its `Debug` shows. */
+    readonly file?: { fd: number; path: string }
   ) {}
 }
 
