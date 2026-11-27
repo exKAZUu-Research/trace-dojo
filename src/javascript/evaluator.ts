@@ -659,8 +659,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
       });
     if (decorated) {
       runtime.frame.temporaries.push(decorated.cls, ...decorated.staticInitializers, ...decorated.classInitializers);
-      for (const { field } of definitions)
-        if (field) runtime.frame.temporaries.push(...(field.transforms ?? []), ...(field.initializers ?? []));
       if (decorated.instanceInitializers.length > 0) behavior.initializers = decorated.instanceInitializers;
       if (decorated.staticInitializers.length > 0)
         staticInitializers.unshift(() => runInitializers(runtime, decorated.staticInitializers, fn));
@@ -756,8 +754,16 @@ export class Evaluator extends SuspendableStatementEvaluator {
         const { field, property } = member.isAutoAccessor
           ? this.autoAccessor(member, key, target, classScope, behavior.privateMembers)
           : { field: this.classField(member, key, name, target, classScope), property: undefined };
-        if (member.isStatic) staticInitializers.push(() => this.initializeField(fn, field, member.isTraceConstant));
-        else behavior.fields.push(field);
+        if (member.isStatic) {
+          (behavior.pendingStaticFields ??= new Set()).add(field);
+          staticInitializers.push(() => {
+            try {
+              this.initializeField(fn, field, member.isTraceConstant);
+            } finally {
+              behavior.pendingStaticFields?.delete(field);
+            }
+          });
+        } else behavior.fields.push(field);
         definitions.push({ member, key, name, isPrivate, field, property, decorators });
         continue;
       }

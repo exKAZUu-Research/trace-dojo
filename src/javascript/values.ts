@@ -166,6 +166,8 @@ export type FunctionBehavior =
       privateMembers: { key: string; property: Property }[];
       /** Instance fields, initialized when the constructor starts (or `super()` returns). */
       fields: ClassField[];
+      /** Static fields not yet initialized, whose decorator callbacks stay reachable until their initializer finishes. */
+      pendingStaticFields?: Set<ClassField>;
       traceBinding?: Binding;
       /** The functions decorators of the instance members added, run on each instance before its fields. */
       initializers?: Value[];
