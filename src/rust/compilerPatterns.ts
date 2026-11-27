@@ -210,7 +210,7 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
       if (elem && !elem(frame, base[position], elemPlace, bindings)) return false;
     }
     const from = start + (rest ?? 0);
-    restBinder?.(frame, target, base, from, from + after, place !== undefined || isPlace(value), bindings);
+    restBinder?.(frame, target, from, from + after, place !== undefined || isPlace(value), bindings);
     return true;
   };
 }
@@ -218,7 +218,6 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
 type RestBinder = (
   frame: Frame,
   target: Value,
-  base: Value[],
   from: number,
   to: number,
   hasPlace: boolean,
@@ -232,7 +231,8 @@ function compileRestBinder(c: Compiler, restBinding: Pattern): RestBinder | unde
   const restType = normalize(shallow(restLocal.type));
   const restMode = restType.kind !== 'ref' ? 'value' : restType.mutable ? 'mut' : 'ref';
   const movesOut = restMode === 'value' && !c.isCopy(restLocal.type);
-  return (frame, target, base, from, to, hasPlace, bindings) => {
+  return (frame, target, from, to, hasPlace, bindings) => {
+    const { base } = sliceBase(target);
     bindings.push(() => (frame.locals[restLocal.slot] = sliceRest(target, base, from, to, restMode)));
     if (movesOut && hasPlace) bindings.push(movingOut(base, from, to));
   };
