@@ -1519,12 +1519,12 @@ pub mod io {
     impl BufRead for StdinLock {}
     pub fn read_to_string<R: Read>(reader: R) -> Result<String>;
     pub struct BufReader<R> { inner: R }
-    impl<R> BufReader<R> { pub fn new(inner: R) -> BufReader<R>; }
-    impl<R> Read for BufReader<R> {}
-    impl<R> BufRead for BufReader<R> {}
-    pub struct BufWriter<W> { inner: W }
-    impl<W> BufWriter<W> { pub fn new(inner: W) -> BufWriter<W>; }
-    impl<W> Write for BufWriter<W> {}
+    impl<R: Read> BufReader<R> { pub fn new(inner: R) -> BufReader<R>; }
+    impl<R: Read> Read for BufReader<R> {}
+    impl<R: Read> BufRead for BufReader<R> {}
+    pub struct BufWriter<W: Write> { inner: W }
+    impl<W: Write> BufWriter<W> { pub fn new(inner: W) -> BufWriter<W>; }
+    impl<W: Write> Write for BufWriter<W> {}
     pub trait Write {
         fn write(&mut self, buf: &[u8]) -> Result<usize>;
         fn write_all(&mut self, buf: &[u8]) -> Result<()>;
