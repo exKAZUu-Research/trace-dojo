@@ -4,6 +4,7 @@ import { assert } from 'es-toolkit';
 
 import { isAmbient, isCheckedAmbientDeclaration } from '../namespaceInstantiation';
 import { checkAmbientInitializer } from './ambientDeclarations';
+import { checkAmbientExportTarget } from './ambientModuleExports';
 import { checkAwaitPlace } from './awaited';
 import { declaredNames } from './binder';
 import type { Checker } from './checker';
@@ -193,17 +194,38 @@ export class StatementChecker {
     const declaration = node.childForFieldName('declaration');
     if (declaration) this.check(declaration);
     const value = node.childForFieldName('value');
-    if (value) this.c.expressions.check(value);
     const clause = named(node).find((child) => child.type === 'export_clause');
     const source = node.childForFieldName('source');
     const assigned = named(node).find((child) => child.type !== 'export_clause' && child.type !== 'comment');
+    this.checkExportTargets(node, { declaration, value, assigned, source });
     this.checkExportPlacement(node, { declaration, value, clause, source, assigned });
     this.checkDuplicateExports(node);
     if (source) {
       if (!isNamespaceBody(node.parent)) this.c.namespaces.checkReExport(clause, source);
       return;
     }
-    if (!clause) return;
+    if (clause) this.checkLocalExportClause(clause);
+  }
+
+  private checkExportTargets(
+    node: TreeNode,
+    {
+      declaration,
+      value,
+      assigned,
+      source,
+    }: { declaration: TreeNode | null; value: TreeNode | null; assigned: TreeNode | undefined; source: TreeNode | null }
+  ): void {
+    if (value) {
+      if (isInAmbientContext(node)) checkAmbientExportTarget(this.c, value);
+      else this.c.expressions.check(value);
+    }
+    if (!declaration && !value && assigned && !source && !this.c.isModule && isAmbientModuleBody(node.parent)) {
+      checkAmbientExportTarget(this.c, assigned);
+    }
+  }
+
+  private checkLocalExportClause(clause: TreeNode): void {
     for (const specifier of named(clause)) {
       const name = specifier.childForFieldName('name');
       const scope = name && this.c.scopeOf(name);
@@ -237,7 +259,7 @@ export class StatementChecker {
       this.c.error(node, 'エクスポート宣言は、名前空間またはモジュールの最上位レベルでのみ使用できます。');
       return;
     }
-    if (!declaration && !value && assigned && !source) {
+    if (!declaration && !value && assigned && !source && !isAmbientModuleBody(node.parent)) {
       this.c.error(
         node,
         inNamespace

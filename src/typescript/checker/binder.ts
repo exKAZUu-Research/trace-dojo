@@ -3,6 +3,11 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
 import { blockHasRuntimeCode, isAmbient } from '../namespaceInstantiation';
+import {
+  bindAmbientDefaultValueExport,
+  bindAnonymousDefaultDeclaration,
+  exportEqualsTargetOf,
+} from './ambientModuleExports';
 import { memberNameOf } from './enums';
 import { fsImportMeanings } from './nodeLibrary';
 import { canonicalIdentifier, Scope, Sym, type ValueKind } from './scopes';
@@ -294,7 +299,7 @@ export class Binder {
         continue;
       }
       this.bindAmbientChild(child, scope);
-      if (!hasExplicitExportList) this.exportDeclared(child, scope);
+      if (!hasExplicitExportList && child.type !== 'export_statement') this.exportDeclared(child, scope);
     }
     if (scope.namespace) this.bindNamespaceExportClauses(body, scope);
   }
@@ -303,6 +308,7 @@ export class Binder {
     const exports = (scope.namespace as Sym).namespaceExports as Scope;
     for (const child of named(body)) {
       if (child.type !== 'export_statement' || child.childForFieldName('source')) continue;
+      if (scope.isAmbient) bindAmbientDefaultValueExport(child, scope, exports);
       const stmtTypeOnly = child.children.some((part) => !part.isNamed && part.type === 'type');
       for (const part of named(child)) {
         if (part.type !== 'export_clause') continue;
@@ -392,7 +398,9 @@ export class Binder {
 
   private importMeaningsOf(module: string, name: string): { value: boolean; type: boolean; namespace: boolean } {
     const fsMeanings = fsImportMeanings(module, name);
-    const ambient = (this.ambientModules.get(module) ?? this.options?.existingModules?.get(module))?.namespaceExports;
+    const ambientSymbol = this.ambientModules.get(module) ?? this.options?.existingModules?.get(module);
+    if (ambientSymbol?.exportEquals) return { value: true, type: name !== '*', namespace: true };
+    const ambient = ambientSymbol?.namespaceExports;
     if (ambient && name !== '*') {
       const value = Boolean(fsMeanings?.value) || ambient.values.has(name);
       const type = Boolean(fsMeanings?.type) || ambient.types.has(name);
@@ -423,34 +431,74 @@ export class Binder {
 
   /** `export` in a namespace adds the names its declaration declares to the namespace's exports. */
   private bindExport(node: TreeNode, scope: Scope): void {
-    this.bindChildren(node, scope);
+    const isDefault = node.children.some((child) => !child.isNamed && child.type === 'default');
     const declaration = node.childForFieldName('declaration');
-    if (declaration && scope.namespace) this.exportDeclared(declaration, scope);
+    if (scope.isAmbient && declaration) this.bindAmbientChild(declaration, scope);
+    else this.bindChildren(node, scope);
+    if (!scope.namespace) return;
+    if (isDefault) {
+      if (!declaration) return;
+      if (declaredNames(declaration).length > 0) this.exportDeclared(declaration, scope, 'default');
+      else
+        bindAnonymousDefaultDeclaration(declaration, scope, (exportName, symbol, meaning) =>
+          this.exportFrom(scope, symbol, meaning, exportName)
+        );
+      return;
+    }
+    const exportEquals = exportEqualsTargetOf(node);
+    if (exportEquals) {
+      if (this.isValidAmbientModuleExportEquals(scope)) scope.namespace.exportEquals ??= exportEquals;
+      return;
+    }
+    if (declaration) this.exportDeclared(declaration, scope);
   }
 
-  private exportDeclared(declaration: TreeNode, scope: Scope): void {
+  private isValidAmbientModuleExportEquals(scope: Scope): boolean {
+    const namespace = scope.namespace;
+    if (!scope.isAmbient || !namespace || this.isExternalModule) return false;
+    return namespace.valueDeclarations.some((decl) => decl.childForFieldName('name')?.type === 'string');
+  }
+
+  private exportDeclared(declaration: TreeNode, scope: Scope, targetExportName?: string): void {
     for (const nameNode of declaredNames(declaration)) {
       const name = canonicalIdentifier(nameNode.text, nameNode);
+      const exportName = targetExportName ?? name;
       const value = scope.values.get(name);
       if (value && value.valueDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id))
-        this.exportFrom(scope, value, 'value');
+        this.exportFrom(scope, value, 'value', exportName);
       const type = scope.types.get(name);
       if (type && type.typeDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id))
-        this.exportFrom(scope, type, 'type');
+        this.exportTypeFrom(scope, type, exportName);
       const namespace = scope.namespaces.get(name);
       if (
         namespace &&
         namespace.namespaceDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id)
       )
-        this.exportFrom(scope, namespace, 'namespace');
+        this.exportFrom(scope, namespace, 'namespace', exportName);
     }
   }
 
-  private exportFrom(scope: Scope, symbol: Sym, meaning: 'value' | 'type' | 'namespace'): void {
+  private exportTypeFrom(scope: Scope, symbol: Sym, exportName: string): void {
+    const exports = (scope.namespace as Sym).namespaceExports as Scope;
+    const existing = exportName === 'default' ? exports.types.get('default') : undefined;
+    if (existing && existing !== symbol && existing.typeKind === 'interface' && symbol.typeKind === 'interface') {
+      existing.typeDeclarations.push(...symbol.typeDeclarations);
+      existing.typeEntries.push(...symbol.typeEntries);
+      return;
+    }
+    this.exportFrom(scope, symbol, 'type', exportName);
+  }
+
+  private exportFrom(
+    scope: Scope,
+    symbol: Sym,
+    meaning: 'value' | 'type' | 'namespace',
+    exportName = symbol.name
+  ): void {
     const namespace = scope.namespace as Sym;
     const exports = namespace.namespaceExports as Scope;
-    exports.exportViaDeclaration(symbol.name, symbol, meaning);
-    if (meaning === 'value' || meaning === 'namespace') symbol.exportedFrom = namespace;
+    exports.exportViaDeclaration(exportName, symbol, meaning);
+    if (exportName === symbol.name && (meaning === 'value' || meaning === 'namespace')) symbol.exportedFrom = namespace;
   }
 
   /** An enum is a value and a type; its initializers see its members by name. */

@@ -71,6 +71,8 @@ export class Sym {
   enumMembers?: Scope;
   /** For a namespace, the names its declarations export, which every declaration of it sees. */
   namespaceExports?: Scope;
+  /** For an ambient module with `export = X`, the target entity `X` that stands for the module. */
+  exportEquals?: TreeNode;
   /** The namespace that exports this name, which its declarations refer to it through. */
   exportedFrom?: Sym;
   /** For a name an `import` declares, the module and the export it names: `*` for the module, `default` for its default. */

@@ -250,14 +250,28 @@ export class TypeNodes {
     return this.typeReference(node, name, argumentNodes);
   }
 
-  private bareImportType(node: TreeNode): Type {
-    const module = this.c.namespaces.resolveImportTypeModule(node);
+  private bareImportType(callNode: TreeNode): Type {
+    const module = this.c.namespaces.resolveImportTypeModule(callNode);
     if (!module) return errorType;
-    this.c.error(
-      node,
-      `モジュール '${module.name}' は型を参照していませんが、ここでは型として使用されています。'typeof import('${module.name}')' を意図していましたか?`
-    );
-    return errorType;
+    const symbol = this.c.namespaces.exportEqualsSymbol(module, 'type');
+    if (!symbol) {
+      this.c.error(
+        callNode,
+        `モジュール '${module.name}' は型を参照していませんが、ここでは型として使用されています。'typeof import('${module.name}')' を意図していましたか?`
+      );
+      return errorType;
+    }
+    if (this.reportUnusableSymbol(callNode, callNode, symbol)) return errorType;
+    const argumentsNode = callNode.childForFieldName('type_arguments');
+    const argumentNodes = argumentsNode ? named(argumentsNode) : [];
+    const parameters = this.c.signatures.typeParametersOfSymbol(symbol);
+    if (parameters.length === 0) {
+      if (argumentNodes.length > 0) this.c.error(callNode, `型 import("${module.name}") は型引数をとりません。`);
+      return this.declaredTypeOf(symbol);
+    }
+    if (!this.checkTypeArgumentCount(callNode, `import("${module.name}")`, parameters, argumentNodes.length))
+      return errorType;
+    return this.referenceWithArguments(callNode, symbol, parameters, argumentNodes);
   }
 
   private importMemberType(node: TreeNode): Type {

@@ -2,6 +2,14 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { isAmbient, isInstantiatedNamespace } from '../namespaceInstantiation';
 import { unsupportedMessage } from '../unsupported';
+import {
+  importTypeMemberChain,
+  importTypeQueryOf,
+  isImportTypeCall,
+  matchWildcardAmbientModule,
+  resolveImportTypeMemberOf,
+  resolveImportTypeModuleOf,
+} from './ambientModuleExports';
 import type { Checker } from './checker';
 import { FlowState } from './flow';
 import { unavailableNodeMember } from './nodeLibrary';
@@ -21,7 +29,6 @@ import {
   anonymousObject,
   anyType,
   emptyStructure,
-  errorType,
   intersectionOf,
   type ObjectType,
   simpleProperty,
@@ -298,8 +305,37 @@ export class Namespaces {
     const target = symbol.importTarget;
     const module = target && this.moduleNamed(target.module);
     if (!target || !module) return undefined;
+    if (module.exportEquals) {
+      if (target.name === '*' || target.name === 'default') return this.exportEqualsSymbol(module, meaning);
+      const container = this.exportEqualsContainer(module);
+      return container?.namespaceExports ? this.exportedMember(container, target.name, meaning) : undefined;
+    }
     if (target.name === '*' || this.isSyntheticDefault(module, target.name)) return module;
-    return (module.namespaceExports as Scope).tableOf(meaning).get(target.name);
+    return this.exportedMember(module, target.name, meaning);
+  }
+
+  exportEqualsSymbol(module: Sym, meaning: MeaningSpace): Sym | undefined {
+    const target = module.exportEquals;
+    if (!target || this.resolvingAliases.has(target.id)) return undefined;
+    this.resolvingAliases.add(target.id);
+    try {
+      return this.resolvePath(qualifiedPath(target), meaning).symbol;
+    } finally {
+      this.resolvingAliases.delete(target.id);
+    }
+  }
+
+  private exportEqualsContainer(module: Sym): Sym | undefined {
+    return this.exportEqualsSymbol(module, 'namespace') ?? this.exportEqualsSymbol(module, 'value');
+  }
+
+  resolveEntityPath(path: TreeNode[]): { symbol?: Sym; error?: string } {
+    const value = this.resolvePath(path, 'value');
+    if (value.symbol) return value;
+    const namespace = this.resolvePath(path, 'namespace');
+    if (namespace.symbol) return namespace;
+    const type = this.resolvePath(path, 'type');
+    return type.symbol ? type : value;
   }
 
   /**
@@ -330,65 +366,22 @@ export class Namespaces {
 
   /** Resolves the target module of a type-position `import("...")`, reporting invalid specifiers or unknown modules. */
   resolveImportTypeModule(callNode: TreeNode): Sym | undefined {
-    const argumentsNode = callNode.childForFieldName('arguments');
-    const first = argumentsNode ? named(argumentsNode)[0] : undefined;
-    const literal =
-      first?.type === 'string'
-        ? first
-        : first?.type === 'literal_type' && named(first)[0]?.type === 'string'
-          ? named(first)[0]
-          : undefined;
-    if (!literal) {
-      this.c.error(first ?? callNode, '文字列リテラルが必要です。');
-      return undefined;
-    }
-    const specifier = stringValue(literal);
-    const module = this.moduleNamed(specifier);
-    if (!module) {
-      this.c.error(first ?? literal, `モジュール '${specifier}' またはそれに対応する型宣言が見つかりません。`);
-      return undefined;
-    }
-    return module;
+    return resolveImportTypeModuleOf(this.c, callNode);
   }
 
-  /** Resolves `typeof import("...")` to the module's namespace object type. */
+  /** Resolves `typeof import("...")` to the module's namespace object type or `export =` value type. */
   importTypeQuery(callNode: TreeNode): Type {
-    const module = this.resolveImportTypeModule(callNode);
-    if (!module) return errorType;
-    return isShorthandAmbientModule(module) ? anyType : this.objectType(module);
+    return importTypeQueryOf(this.c, callNode);
   }
 
   /** Resolves `import("...").A.B` in type space, enforcing unavailable Node member checks and TS2694 diagnostics. */
   resolveImportTypeMember(node: TreeNode): { symbol?: Sym; error?: string; site?: TreeNode } {
-    const parts = importTypeMemberChain(node);
-    if (!parts) return {};
-    const { call, members } = parts;
-    const module = this.resolveImportTypeModule(call);
-    if (!module) return {};
-    const firstUnavailable = this.isLibraryModule(module) && unavailableNodeMember(`"${module.name}"`, members[0].text);
-    if (firstUnavailable) {
-      this.c.error(members[0], unsupportedMessage(firstUnavailable));
-      return {};
-    }
-    let current = module;
-    let label = `"${module.name}"`;
-    for (const [index, part] of members.entries()) {
-      const isLast = index === members.length - 1;
-      const member = isLast
-        ? current.namespaceExports
-          ? this.exportedMember(current, part.text, 'type')
-          : current.enumMembers?.values.get(part.text)
-        : this.containerMemberOf(current, part.text);
-      if (
-        !member ||
-        (!isLast && !member.namespaceExports && !(member.valueKind === 'enum' && index === members.length - 2))
-      ) {
-        return { error: `名前空間 '${label}' にエクスポートされたメンバー '${part.text}' がありません。`, site: part };
-      }
-      current = member;
-      label = `${label}.${part.text}`;
-    }
-    return { symbol: current };
+    return resolveImportTypeMemberOf(this.c, node, (current, name, isLast) => {
+      if (!isLast) return this.containerMemberOf(current, name);
+      return current.namespaceExports
+        ? (this.exportedMember(current, name, 'type') ?? current.enumMembers?.values.get(name))
+        : current.enumMembers?.values.get(name);
+    });
   }
 
   /** Reports a default import of a module without a default export, and a name a module does not export. */
@@ -401,10 +394,21 @@ export class Namespaces {
     if (!module) return;
     const moduleName = `'"${stringValue(source)}"'`;
     for (const part of named(clause)) {
-      if (part.type === 'identifier' && !this.isSyntheticDefault(module, 'default'))
+      if (part.type === 'identifier' && !this.hasDefaultExport(module))
         this.c.error(part, `モジュール ${moduleName} には既定のエクスポートがありません。`);
       if (part.type === 'named_imports') this.checkNamedImports(part, module, moduleName);
     }
+  }
+
+  private hasDefaultExport(module: Sym): boolean {
+    const exports = module.namespaceExports;
+    return Boolean(
+      exports?.values.has('default') ||
+      exports?.types.has('default') ||
+      exports?.namespaces.has('default') ||
+      module.exportEquals ||
+      this.isSyntheticDefault(module, 'default')
+    );
   }
 
   private checkImportPlacementAndSyntax(node: TreeNode, source: TreeNode | null, clause: TreeNode | null): boolean {
@@ -446,7 +450,8 @@ export class Namespaces {
   }
 
   private checkNamedImports(imports: TreeNode, module: Sym, moduleName: string): void {
-    const exports = module.namespaceExports as Scope;
+    const target = module.exportEquals ? this.exportEqualsContainer(module) : module;
+    const exports = target?.namespaceExports;
     for (const specifier of named(imports)) {
       const name = specifier.childForFieldName('name');
       const exported = name && canonicalImportSpecifier(name);
@@ -456,18 +461,21 @@ export class Namespaces {
       else if (
         name &&
         exported &&
-        !exports.values.has(exported) &&
-        !exports.types.has(exported) &&
-        !exports.namespaces.has(exported) &&
-        !this.isSyntheticDefault(module, exported)
+        (!exports ||
+          (!exports.values.has(exported) &&
+            !exports.types.has(exported) &&
+            !exports.namespaces.has(exported) &&
+            !this.isSyntheticDefault(module, exported)))
       )
         this.reportMissingImport(name, exports, moduleName);
     }
   }
 
   /** A name a module does not export, with the export tsc suggests for a misspelling of one. */
-  private reportMissingImport(name: TreeNode, exports: Scope, moduleName: string): void {
-    const candidates = new Set([...exports.values.keys(), ...exports.types.keys(), ...exports.namespaces.keys()]);
+  private reportMissingImport(name: TreeNode, exports: Scope | undefined, moduleName: string): void {
+    const candidates = exports
+      ? new Set([...exports.values.keys(), ...exports.types.keys(), ...exports.namespaces.keys()])
+      : new Set<string>();
     const suggestion = spellingSuggestion(name.text, candidates, this.c.budget);
     this.c.error(
       name,
@@ -569,22 +577,7 @@ export class Namespaces {
   }
 }
 
-export function isImportTypeCall(node: TreeNode): boolean {
-  return node.type === 'call_expression' && node.childForFieldName('function')?.type === 'import';
-}
-
-export function importTypeMemberChain(node: TreeNode): { call: TreeNode; members: TreeNode[] } | undefined {
-  const members: TreeNode[] = [];
-  let current = node;
-  while (current.type === 'member_expression') {
-    const object = current.childForFieldName('object');
-    const property = current.childForFieldName('property');
-    if (!object || !property) return undefined;
-    members.unshift(property);
-    current = object;
-  }
-  return isImportTypeCall(current) && members.length > 0 ? { call: current, members } : undefined;
-}
+export { importTypeMemberChain, isImportTypeCall };
 
 function canonicalImportSpecifier(node: TreeNode): string {
   return node.type === 'string' ? stringValue(node) : canonicalIdentifier(node.text, node);
@@ -593,33 +586,6 @@ function canonicalImportSpecifier(node: TreeNode): string {
 function exportedModuleSite(node: TreeNode): TreeNode | undefined {
   const outer = node.parent?.type === 'ambient_declaration' ? node.parent : node;
   return outer.parent?.type === 'export_statement' ? outer.parent : undefined;
-}
-
-function isShorthandAmbientModule(module: Sym): boolean {
-  return (
-    module.valueDeclarations.length > 0 && module.valueDeclarations.every((decl) => !decl.childForFieldName('body'))
-  );
-}
-
-function matchWildcardAmbientModule(modules: ReadonlyMap<string, Sym>, specifier: string): Sym | undefined {
-  let best: Sym | undefined;
-  let bestPrefixLength = -1;
-  for (const [pattern, symbol] of modules) {
-    const star = pattern.indexOf('*');
-    if (star === -1 || pattern.includes('*', star + 1)) continue;
-    const prefix = pattern.slice(0, star);
-    const suffix = pattern.slice(star + 1);
-    if (
-      specifier.length >= prefix.length + suffix.length &&
-      specifier.startsWith(prefix) &&
-      specifier.endsWith(suffix) &&
-      prefix.length > bestPrefixLength
-    ) {
-      bestPrefixLength = prefix.length;
-      best = symbol;
-    }
-  }
-  return best;
 }
 
 /** Whether a namespace is declared in the program or in another namespace's body, the places tsc allows one. */

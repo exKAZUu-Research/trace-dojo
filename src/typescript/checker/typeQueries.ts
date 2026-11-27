@@ -40,8 +40,9 @@ function readQueryTarget(c: Checker, node: TreeNode, identifier: QueryTarget, ex
   if (isImportTypeCall(object)) {
     const module = c.namespaces.resolveImportTypeModule(object);
     if (!module) return errorType;
-    const receiver = c.namespaces.objectType(module);
-    if (!c.propertyOf(receiver, property.text)) {
+    const receiver = c.namespaces.importTypeQuery(object);
+    if (receiver === errorType) return errorType;
+    if (!module.exportEquals && receiver.kind === 'object' && !c.propertyOf(receiver, property.text)) {
       c.error(property, `名前空間 '"${module.name}"' にエクスポートされたメンバー '${property.text}' がありません。`);
       return errorType;
     }
