@@ -550,7 +550,10 @@ export class ItemCollector {
     }
     for (const [index, param] of item.generics.params.entries()) {
       const defaultType = param.defaultType;
-      if (defaultType) this.traitDefaults.push(() => (def.params[index].defaultType = lowerType(defaultType, scope)));
+      if (!defaultType) continue;
+      // A const parameter's default has the parameter's type, as an argument written for it does.
+      const value = argumentFor(defaultType, def.params[index]);
+      this.traitDefaults.push(() => (def.params[index].defaultType = lowerType(value, scope)));
     }
     this.lowering.unshift(() => {
       lowerTypeParamBounds(def.params, item.generics, scope);
