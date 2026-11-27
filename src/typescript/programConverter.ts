@@ -76,17 +76,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     this.statementConverters.enum_declaration = (node) => this.enumDeclaration(node);
     for (const type of ['member_expression', 'subscript_expression'] as const) {
       const convertMember = this.expressionConverters[type];
-      this.expressionConverters[type] = (node) => {
-        const inlined = this.inlinedConstEnumMember(node);
-        if (inlined) return inlined;
-        const member = convertMember(node);
-        const inferredName = inferredTargetNameOf(node);
-        if (member.kind === 'member') {
-          if (inferredName !== undefined) member.inferredName = inferredName;
-          if (isUnboundCallMember(node)) member.isUnboundCall = true;
-        }
-        return member;
-      };
+      this.expressionConverters[type] = (node) => this.convertMemberNode(node, convertMember);
     }
     this.expressionConverters[IMPORTED_MODULE] = (node) => ({
       kind: 'importedModule',
@@ -95,27 +85,41 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       row: rowOf(node),
     });
     // `this.name = name` for a parameter property, which steps on the parameter's row as the assignment it stands for.
-    this.statementConverters[PARAMETER_PROPERTY_ASSIGNMENT] = (node: Node) => {
-      const row = node.startPosition.row;
-      const name = nameOf(node);
-      return {
-        kind: 'expression',
-        expression: {
-          kind: 'assign',
-          operator: '=',
-          target: {
-            kind: 'member',
-            object: { kind: 'this', row },
-            property: { kind: 'key', key: name },
-            optional: false,
-            row,
-          },
-          value: { kind: 'identifier', name, row },
+    this.statementConverters[PARAMETER_PROPERTY_ASSIGNMENT] = (node: Node) => this.parameterPropertyAssignment(node);
+  }
+
+  private convertMemberNode(node: Node, convertMember: (node: Node) => Expression): Expression {
+    const inlined = this.inlinedConstEnumMember(node);
+    if (inlined) return inlined;
+    const member = convertMember(node);
+    const inferredName = inferredTargetNameOf(node);
+    if (member.kind === 'member') {
+      if (inferredName !== undefined) member.inferredName = inferredName;
+      if (isUnboundCallMember(node)) member.isUnboundCall = true;
+    }
+    return member;
+  }
+
+  private parameterPropertyAssignment(node: Node): Statement {
+    const row = node.startPosition.row;
+    const name = nameOf(node);
+    return {
+      kind: 'expression',
+      expression: {
+        kind: 'assign',
+        operator: '=',
+        target: {
+          kind: 'member',
+          object: { kind: 'this', row },
+          property: { kind: 'key', key: name },
+          optional: false,
           row,
         },
-        stepRow: this.stepRowOf(node),
+        value: { kind: 'identifier', name, row },
         row,
-      };
+      },
+      stepRow: this.stepRowOf(node),
+      row,
     };
   }
 

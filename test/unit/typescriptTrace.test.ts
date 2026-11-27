@@ -513,3 +513,20 @@ Returned.count++;`;
     'Returned.count': 6,
   });
 });
+
+test('retains turtles captured only by newly registered decorator initializers while decorators run', () => {
+  const source = `function makeCallback() {
+  const t = new Turtle();
+  return () => t.forward();
+}
+function dec(_v: any, c: ClassMethodDecoratorContext) {
+  c.addInitializer(makeCallback());
+  console.log('registered');
+}
+class C {
+  @dec m() {}
+}
+new C();`;
+  const recording = traceProgram('typescript', source, source);
+  expect(recording.finalTurtles).toMatchObject([{ x: 0, y: 1, color: '#', dir: 'N' }]);
+});

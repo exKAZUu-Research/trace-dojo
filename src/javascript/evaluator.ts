@@ -764,11 +764,11 @@ export class Evaluator extends SuspendableStatementEvaluator {
           (behavior.pendingStaticFields ??= new Set()).add(field);
           staticInitializers.push(() => this.initializeStaticField(fn, behavior, field, member.isTraceConstant));
         } else behavior.fields.push(field);
-        definitions.push({ member, key, name, isPrivate, field, property, decorators });
+        definitions.push({ member, target, key, name, isPrivate, field, property, decorators });
         continue;
       }
       const property = this.defineMethod(member, key, target, classScope, behavior.privateMembers);
-      definitions.push({ member, key, name, isPrivate, property, decorators });
+      definitions.push({ member, target, key, name, isPrivate, property, decorators });
     }
     return staticInitializers;
   }

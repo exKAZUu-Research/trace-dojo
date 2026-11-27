@@ -19,23 +19,34 @@ export function isInstantiatedNamespace(symbol: Sym): boolean {
 
 /** Whether a namespace block's body declares values or statements, rather than only types and type-only namespaces. */
 export function blockHasRuntimeCode(body: TreeNode): boolean {
-  return body.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child));
+  return body.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child, true));
 }
 
-function statementHasRuntimeCode(statement: TreeNode): boolean {
+/** Whether a non-ambient namespace block emits a runtime wrapper under esbuild (erasing unexported `declare` statements). */
+export function blockEmitsRuntimeNamespace(body: TreeNode): boolean {
+  return body.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child, false));
+}
+
+function statementHasRuntimeCode(statement: TreeNode, includeUnexportedAmbient: boolean): boolean {
   if (typeOnlyStatementTypes.has(statement.type)) return false;
   if (statement.type === 'ambient_declaration')
-    return statement.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child));
+    return (
+      includeUnexportedAmbient &&
+      statement.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child, true))
+    );
   const declaration = statement.type === 'export_statement' ? statement.childForFieldName('declaration') : statement;
   if (!declaration || typeOnlyStatementTypes.has(declaration.type)) return false;
   if (declaration.type === 'ambient_declaration')
-    return declaration.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child));
+    return declaration.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child, true));
   // tsc counts an import alias only when it is exported.
   if (declaration.type === 'import_alias') return statement.type === 'export_statement';
   const inner = declaration.type === 'expression_statement' ? declaration.namedChildren[0] : declaration;
   if (inner?.type !== 'internal_module' && inner?.type !== 'module') return true;
   const innerBody = inner.childForFieldName('body');
-  return innerBody !== null && blockHasRuntimeCode(innerBody);
+  return (
+    innerBody !== null &&
+    (includeUnexportedAmbient ? blockHasRuntimeCode(innerBody) : blockEmitsRuntimeNamespace(innerBody))
+  );
 }
 
 /** Whether a declaration is in an ambient context, as in `declare namespace`, which declares without code to run. */

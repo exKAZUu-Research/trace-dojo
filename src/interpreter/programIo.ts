@@ -54,7 +54,8 @@ export class ProgramIO {
    * `/dev/stdin` or `/dev/fd/0` reads what remains of standard input.
    */
   openReader(path: string): TextReader {
-    if (STDIN_PATHS.has(resolvePath(path))) return this.stdin.reader;
+    const stream = this.files.resolveStreamPath(path);
+    if (stream && STDIN_PATHS.has(stream)) return this.stdin.reader;
     return new TextReader(this.files.openForReading(path), this.budget);
   }
 
@@ -278,12 +279,73 @@ interface Step {
  * An in-memory file system holding text files, whose total length is bounded by {@link LIMITS}. Each call charges
  * the run for the names of its paths, which a program can make as long as its strings.
  */
+const DEV_STREAMS = new Set(['stdin', 'stdout', 'stderr']);
+const DEV_FDS = new Set(['0', '1', '2']);
+
+type StreamStep =
+  | { kind: 'real'; dir: DirectoryNode }
+  | { kind: 'dev'; dir: DirectoryNode | undefined }
+  | { kind: 'devFd'; dir: DirectoryNode | undefined };
+
 export class VirtualFileSystem {
   private readonly root = new DirectoryNode();
   /** The total length of the files' contents and of all the program writes to files it deleted while open. */
   private storedLength = 0;
 
   constructor(private readonly budget: ExecutionBudget) {}
+
+  /**
+   * Resolves `path` component-by-component to a standard stream (`/dev/stdin`, `/dev/stdout`, `/dev/stderr`, or
+   * `/dev/fd/0..2`), failing with `ENOENT` or `ENOTDIR` when an intermediate component is missing or is a file.
+   */
+  resolveStreamPath(path: string): string | undefined {
+    const { components, namesDirectory } = this.componentsOf(path);
+    const last = components.pop();
+    const steps: StreamStep[] = [{ kind: 'real', dir: this.root }];
+    for (const name of components) {
+      if (!this.enterStreamStep(steps, name, path)) return undefined;
+    }
+    if (last === undefined || last === '.' || last === '..') return undefined;
+    const top = steps.at(-1) as StreamStep;
+    if (top.kind === 'dev' && DEV_STREAMS.has(last)) {
+      if (namesDirectory) throw new FileSystemError('ENOTDIR', path);
+      return `/dev/${last}`;
+    }
+    if (top.kind === 'devFd' && DEV_FDS.has(last)) {
+      if (namesDirectory) throw new FileSystemError('ENOTDIR', path);
+      return `/dev/fd/${last}`;
+    }
+    return undefined;
+  }
+
+  private enterStreamStep(steps: StreamStep[], name: string, path: string): boolean {
+    if (name === '.') return true;
+    if (name === '..') {
+      if (steps.length > 1) steps.pop();
+      return true;
+    }
+    const top = steps.at(-1) as StreamStep;
+    if (steps.length === 1 && top.kind === 'real' && name === 'dev') {
+      const realDev = this.root.children.get('dev');
+      if (realDev?.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+      steps.push({ kind: 'dev', dir: realDev });
+      return true;
+    }
+    if (top.kind === 'dev' && name === 'fd') {
+      const realFd = top.dir?.children.get('fd');
+      if (realFd?.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+      steps.push({ kind: 'devFd', dir: realFd });
+      return true;
+    }
+    if ((top.kind === 'dev' && DEV_STREAMS.has(name)) || (top.kind === 'devFd' && DEV_FDS.has(name))) {
+      throw new FileSystemError('ENOTDIR', path);
+    }
+    const child = top.dir?.children.get(name);
+    if (!child) throw new FileSystemError('ENOENT', path);
+    if (child.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+    steps.push({ kind: 'real', dir: child });
+    return true;
+  }
 
   kindOf(path: string): 'file' | 'directory' | undefined {
     try {

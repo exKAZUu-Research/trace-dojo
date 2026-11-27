@@ -1,6 +1,5 @@
 import type {
   Block,
-  CatchClause,
   ClassMember,
   ClassNode,
   DeclarationKind,
@@ -375,18 +374,17 @@ export class ProgramConverter extends ExpressionConverter {
     const handlerNode = node.childForFieldName('handler');
     const finalizerNode = node.childForFieldName('finalizer');
     const block = this.block(field(node, 'body'));
-    let handler: CatchClause | undefined;
-    if (handlerNode) {
-      handler = this.withScope((scope) => {
-        const parameterNode = handlerNode.childForFieldName('parameter');
-        const param = parameterNode
-          ? this.bindingPattern(parameterNode, (identifier, name) => this.declareLexical(identifier, name))
-          : undefined;
-        // V8 takes apart an object from its hidden variable `.catch`, and an iterable by its value.
-        if (param?.kind === 'objectPattern') nameDestructuring(param, { source: { text: '.catch' } });
-        return { param, body: this.block(field(handlerNode, 'body')), scope };
-      });
-    }
+    const handler = handlerNode
+      ? this.withScope((scope) => {
+          const parameterNode = handlerNode.childForFieldName('parameter');
+          const param = parameterNode
+            ? this.bindingPattern(parameterNode, (identifier, name) => this.declareLexical(identifier, name))
+            : undefined;
+          // V8 takes apart an object from its hidden variable `.catch`, and an iterable by its value.
+          if (param?.kind === 'objectPattern') nameDestructuring(param, { source: { text: '.catch' } });
+          return { param, body: this.block(field(handlerNode, 'body')), scope };
+        })
+      : undefined;
     const finalizer = finalizerNode ? this.block(field(finalizerNode, 'body')) : undefined;
     return { kind: 'try', block, handler, finalizer, row: rowOf(node) };
   }

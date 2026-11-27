@@ -1,4 +1,4 @@
-import { FileSystemError, type FileSystemErrorCode, type OpenMode, resolvePath } from '../interpreter/programIo';
+import { FileSystemError, type FileSystemErrorCode, type OpenMode } from '../interpreter/programIo';
 import { inspect } from './inspect';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
@@ -157,12 +157,13 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
   }
   builder.method(fs, 'existsSync', 1, ({ runtime, args }) => {
     if (typeof args[0] !== 'string' || args[0] === '') return false;
-    const resolved = resolvePath(args[0]);
-    return (
-      STDIN_PATHS.has(resolved) ||
-      Object.hasOwn(STANDARD_STREAMS, resolved) ||
-      runtime.io.files.kindOf(args[0]) !== undefined
-    );
+    try {
+      if (runtime.io.files.resolveStreamPath(args[0]) !== undefined) return true;
+    } catch (error) {
+      if (error instanceof FileSystemError) return false;
+      throw error;
+    }
+    return runtime.io.files.kindOf(args[0]) !== undefined;
   });
   defineDirectoryMethods(builder, fs);
 }
@@ -207,7 +208,11 @@ function readFileSync(runtime: Runtime, args: Value[]): Value {
   // File descriptor 0 is standard input.
   if (args[0] === 0) return readStandardInput(runtime, parsed);
   const path = requirePath(runtime, args[0]);
-  if (STDIN_PATHS.has(resolvePath(path))) return readStandardInput(runtime, parsed);
+  const stream = withErrors(runtime, 'open', path, () => runtime.io.files.resolveStreamPath(path));
+  if (stream && STDIN_PATHS.has(stream)) {
+    if (parsed.mode.create === 'exclusive') throwNodeError(runtime, 'EEXIST', 'open', path);
+    return readStandardInput(runtime, parsed);
+  }
   // Node.js names no path when reading a directory opened read-only fails, since it fails on `read(fd)` rather than `open`.
   if (!parsed.writable && path !== '' && runtime.io.files.kindOf(path) === 'directory')
     throwNodeError(runtime, 'EISDIR', 'read');
@@ -287,17 +292,23 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
   const encoding = encodingOption(runtime, options);
   if (runtime.unavailableMember && encoding !== undefined && encoding !== null && !isUtf8(encoding))
     rejectUnavailableMember(`${method} の encoding: ${encodingLabel(runtime, encoding)}`, runtime.currentRow);
-  // The descriptors 1 and 2 and the paths `/dev/stdout` and `/dev/stderr` are the run's standard streams, as 0 and
-  // `/dev/stdin` are its standard input.
-  const path = file === 1 || file === 2 ? `/dev/fd/${file}` : requirePath(runtime, file);
+  const isStreamDescriptor = file === 1 || file === 2;
+  const path = isStreamDescriptor ? '' : requirePath(runtime, file);
   const bytes = UTF8_ENCODER.encode(requireText(runtime, content, 'data'));
-  const stream = STANDARD_STREAMS[resolvePath(path) as keyof typeof STANDARD_STREAMS];
+  const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
+  const parsed = parseOpenFlag(runtime, flag === undefined ? defaultFlag : runtime.toString(flag));
+  if (isStreamDescriptor) {
+    runtime.io[file === 1 ? 'stdout' : 'stderr'].write(UTF8_DECODER.decode(bytes));
+    return;
+  }
+  const streamPath = withErrors(runtime, 'open', path, () => runtime.io.files.resolveStreamPath(path));
+  const stream = streamPath ? STANDARD_STREAMS[streamPath as keyof typeof STANDARD_STREAMS] : undefined;
   if (stream) {
+    if (parsed.mode.create === 'exclusive') throwNodeError(runtime, 'EEXIST', 'open', path);
+    if (!parsed.writable) throwNodeError(runtime, 'EBADF', 'write');
     runtime.io[stream].write(UTF8_DECODER.decode(bytes));
     return;
   }
-  const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
-  const parsed = parseOpenFlag(runtime, flag === undefined ? defaultFlag : runtime.toString(flag));
   const handle = withErrors(runtime, 'open', path, () => runtime.io.files.open(path, parsed.mode));
   if (!parsed.writable) throwNodeError(runtime, 'EBADF', 'write');
   handle.writeBytes(bytes);

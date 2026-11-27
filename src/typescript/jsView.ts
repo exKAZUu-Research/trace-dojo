@@ -15,7 +15,7 @@ import {
   erasedStatementTypes,
   erasedTypeNodes,
 } from './erasedSyntax';
-import { blockHasRuntimeCode, isAmbient, isInstantiatedNamespace } from './namespaceInstantiation';
+import { blockEmitsRuntimeNamespace, isAmbient, isInstantiatedNamespace } from './namespaceInstantiation';
 
 /**
  * The type of a synthesized statement that copies a constructor's parameter properties to `this`, which the
@@ -195,6 +195,13 @@ const compiledDeclarations: Record<string, (node: TreeNode, binder: Binder) => V
   import_alias: (node, binder) => importAliasView(node, binder),
   import_statement: (node, binder) => importView(node, binder),
   export_statement: (node, binder) => exportView(node, binder),
+  required_parameter: (node, binder) => parameter(node, binder),
+  optional_parameter: (node, binder) => parameter(node, binder),
+  class_heritage: (node, binder) => heritage(node, binder),
+  class_body: (node, binder) => classBody(node, binder),
+  abstract_class_declaration: (node, binder) => generic(node, 'class_declaration', binder),
+  field_definition: (node, binder) => generic(node, 'field_definition', binder),
+  identifier: (node, binder) => identifierView(node, binder),
 };
 
 function view(node: TreeNode, binder: Binder): ViewNode {
@@ -202,22 +209,6 @@ function view(node: TreeNode, binder: Binder): ViewNode {
   if (compiled) return compiled(node, binder);
   if (assertionTypes.has(node.type)) return view(assertedExpression(node) as TreeNode, binder);
   switch (node.type) {
-    case 'required_parameter':
-    case 'optional_parameter': {
-      return parameter(node, binder);
-    }
-    case 'class_heritage': {
-      return heritage(node, binder);
-    }
-    case 'class_body': {
-      return classBody(node, binder);
-    }
-    case 'abstract_class_declaration': {
-      return generic(node, 'class_declaration', binder);
-    }
-    case 'field_definition': {
-      return generic(node, 'field_definition', binder);
-    }
     case 'instantiation_expression': {
       return view((node.childForFieldName('function') ?? node.namedChildren[0]) as TreeNode, binder);
     }
@@ -229,9 +220,6 @@ function view(node: TreeNode, binder: Binder): ViewNode {
     case 'expression_statement': {
       const inner = node.namedChildren[0];
       return inner?.type === 'internal_module' ? namespaceView(inner, binder) : generic(node, node.type, binder);
-    }
-    case 'identifier': {
-      return identifierView(node, binder);
     }
     case 'enum_declaration': {
       const viewed = generic(node, node.type, binder);
@@ -396,7 +384,7 @@ function declaresLocalBindingInBody(declaration: TreeNode, symbol: Sym, currentB
     return (
       !!rootPart &&
       !!body &&
-      blockHasRuntimeCode(body) &&
+      blockEmitsRuntimeNamespace(body) &&
       nameOf(rootPart) === symbol.name &&
       declaresNamespaceVar(symbol)
     );
@@ -544,7 +532,8 @@ function token(position: TreeNode, text: string): ViewNode {
 function namespaceView(node: TreeNode, binder: Binder): ViewNode {
   const name = node.childForFieldName('name');
   const body = node.childForFieldName('body');
-  if (!name || !body || name.type === 'string' || !blockHasRuntimeCode(body)) return leaf(node, 'empty_statement');
+  if (!name || !body || name.type === 'string' || !blockEmitsRuntimeNamespace(body))
+    return leaf(node, 'empty_statement');
   const path = namespacePathOf(name);
   const { statements, outermostReceiver, outermostSymbol } = buildNamespacePath(node, body, path, binder);
   const outermost = nameOf(path[0]);
@@ -654,7 +643,10 @@ function isTypeOnlySpecifier(
 function exportView(node: TreeNode, binder: Binder): ViewNode {
   const declaration = node.childForFieldName('declaration');
   // `export default class { }` declares no name, so its class is only evaluated, as a class expression.
-  if (declaration?.type === 'class_declaration' && !declaration.childForFieldName('name'))
+  if (
+    (declaration?.type === 'class_declaration' || declaration?.type === 'abstract_class_declaration') &&
+    !declaration.childForFieldName('name')
+  )
     return expressionStatement(node, generic(declaration, 'class', binder));
   if (declaration) return view(declaration, binder);
   const value = node.childForFieldName('value');
@@ -695,30 +687,62 @@ function importAliasView(node: TreeNode, binder: Binder): ViewNode {
   return varDeclaration(node, nameOf(name), value);
 }
 
-function resolveImportAliasValue(path: TreeNode[], binder: Binder, seen = new Set<number>()): Sym | undefined {
-  const unalias = (symbol: Sym | undefined): Sym | undefined => {
-    if (symbol?.valueKind !== 'importAlias') return symbol;
+type AliasValueTarget = { kind: 'symbol'; symbol: Sym } | { kind: 'builtinModule'; module: string } | { kind: 'value' };
+
+function resolveImportAliasValue(
+  path: TreeNode[],
+  binder: Binder,
+  seen = new Set<number>()
+): AliasValueTarget | undefined {
+  let current = unwrapAliasSymbol(binder.lookupValue(path[0], nameOf(path[0])), binder, seen);
+  for (const [index, part] of path.slice(1).entries()) {
+    if (!current) return undefined;
+    const partName = nameOf(part);
+    const isLast = index === path.length - 2;
+    if (current.kind === 'builtinModule') {
+      if (!isLast) return undefined;
+      current = fsImportMeanings(current.module, partName)?.value ? { kind: 'value' } : undefined;
+    } else if (current.kind === 'symbol') {
+      const member =
+        current.symbol.valueKind === 'enum' && isLast
+          ? current.symbol.enumMembers?.values.get(partName)
+          : current.symbol.namespaceExports?.values.get(partName);
+      current = unwrapAliasSymbol(member, binder, seen);
+    } else {
+      return undefined;
+    }
+  }
+  if (!current) return undefined;
+  if (current.kind !== 'symbol') return current;
+  return current.symbol.valueEntries.some((entry) => entry.kind !== 'namespace') ||
+    isInstantiatedNamespace(current.symbol)
+    ? current
+    : undefined;
+}
+
+function unwrapAliasSymbol(symbol: Sym | undefined, binder: Binder, seen: Set<number>): AliasValueTarget | undefined {
+  if (!symbol) return undefined;
+  if (symbol.valueKind === 'importAlias') {
     const declaration = symbol.valueDeclarations.find((candidate) => candidate.type === 'import_alias');
     const target = declaration?.namedChildren[1];
     if (!declaration || !target || seen.has(declaration.id)) return undefined;
     seen.add(declaration.id);
     return resolveImportAliasValue(namespacePathOf(target), binder, seen);
-  };
-  let current = unalias(binder.lookupValue(path[0], nameOf(path[0])));
-  for (const [index, part] of path.slice(1).entries()) {
-    if (!current) return undefined;
-    const partName = nameOf(part);
-    const isLast = index === path.length - 2;
-    const member =
-      current.valueKind === 'enum' && isLast
-        ? current.enumMembers?.values.get(partName)
-        : current.namespaceExports?.values.get(partName);
-    current = unalias(member);
   }
-  return current &&
-    (current.valueEntries.some((entry) => entry.kind !== 'namespace') || isInstantiatedNamespace(current))
-    ? current
-    : undefined;
+  if (symbol.valueKind !== 'import') return { kind: 'symbol', symbol };
+  const target = symbol.importTarget;
+  if (!target || target.typeOnly) return undefined;
+  const ambient = binder.ambientModules.get(target.module);
+  if (ambient) {
+    if (target.name === '*' || (target.name === 'default' && !ambient.namespaceExports?.values.has('default')))
+      return { kind: 'symbol', symbol: ambient };
+    return unwrapAliasSymbol(ambient.namespaceExports?.values.get(target.name), binder, seen);
+  }
+  if (target.module === 'fs' || target.module === 'node:fs') {
+    if (target.name === '*' || target.name === 'default') return { kind: 'builtinModule', module: target.module };
+    return fsImportMeanings(target.module, target.name)?.value ? { kind: 'value' } : undefined;
+  }
+  return { kind: 'value' };
 }
 
 /** The statements of the first namespace of a path `A.B.C`, which declare the next ones down to the body's. */
@@ -807,7 +831,7 @@ function exportStatements(declaration: TreeNode, namespaceName: string, binder: 
 function exportedNamespace(node: TreeNode, outerReceiver: string, binder: Binder): ViewNode[] {
   const name = node.childForFieldName('name');
   const body = node.childForFieldName('body');
-  if (!name || !body || !blockHasRuntimeCode(body)) return [];
+  if (!name || !body || !blockEmitsRuntimeNamespace(body)) return [];
   const path = namespacePathOf(name);
   const { statements, outermostReceiver, outermostSymbol } = buildNamespacePath(node, body, path, binder);
   const isNamespaceFirst = declaresNamespaceVar(outermostSymbol);

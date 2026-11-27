@@ -944,3 +944,74 @@ test('validates namespace and module-top-level placement of this, return, export
     stdout: 'undefined\n',
   });
 });
+
+test('lowers qualified fs import aliases, anonymous abstract default exports, declare-only namespaces, colliding decorated keys, and stream flags/paths', () => {
+  expect(
+    executeProgram(
+      'typescript',
+      "import * as fs from 'fs';\nimport fsDefault from 'fs';\nimport { default as nodeFs } from 'node:fs';\nimport exists = fs.existsSync;\nimport exists2 = fsDefault.existsSync;\nimport write = nodeFs.writeFileSync;\nimport P = fs.PathLike;\nconst p: P = 'f.txt';\nwrite(p, 'ok');\nconsole.log(exists('missing'), exists2('f.txt'));"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'false true\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      "export default abstract class { abstract m(): void; static { console.log('init'); } }\nconsole.log('done');"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'init\ndone\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      'namespace N { declare function g(): void; }\nconsole.log(typeof N);\nnamespace N { export const x = 1; }\nconsole.log(N.x);'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'undefined\n1\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      'const key1: string = "m", key2: string = "m";\nfunction dec(value: any, _ctx: any) { console.log(value()); return () => 3; }\nclass X { @dec [key1]() { return 1; } [key2]() { return 2; } }\nconsole.log((new X() as any).m());'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '2\n3\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      `import fs from 'fs';
+fs.writeFileSync('part', 'x');
+const results: string[] = [];
+for (const fn of [
+  () => fs.writeFileSync('/dev/stdout', 'bad', { flag: 'wx' }),
+  () => fs.appendFileSync('/dev/stderr', 'bad', { flag: 'ax' }),
+  () => fs.writeFileSync('/dev/stdout', 'bad', { flag: 'nonsense' }),
+  () => fs.readFileSync('/missing/../dev/stdin', 'utf8'),
+  () => fs.writeFileSync('part/../dev/stdout', 'bad'),
+]) {
+  try { fn(); results.push('ok'); } catch (e: any) { results.push(e.code ?? e.name); }
+}
+console.log(fs.existsSync('/missing/../dev/stdin'), fs.existsSync('part/../dev/stdout'), results.join(','));`,
+      { stdin: 'hi' }
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'false false EEXIST,EEXIST,TypeError,ENOENT,ENOTDIR\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
