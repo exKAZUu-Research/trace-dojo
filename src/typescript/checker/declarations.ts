@@ -311,7 +311,7 @@ function reportMixedExports(
 ): void {
   const userIndices = entries.map((_, index) => index).filter((index) => !c.isLibrary(entries[index].name));
   if (userIndices.length < 2) return;
-  const flags = userIndices.map((index) => isExportedDeclaration(declarations[index]));
+  const flags = userIndices.map((index) => isExportedDeclaration(declarations[index], entries[index].name));
   if (flags.every(Boolean) || flags.every((flag) => !flag)) return;
   for (const index of userIndices) {
     const site = entries[index].name;
@@ -324,7 +324,13 @@ function reportMixedExports(
   }
 }
 
-function isExportedDeclaration(declaration: TreeNode | undefined): boolean {
+function isExportedDeclaration(declaration: TreeNode | undefined, entryName: TreeNode): boolean {
+  if (
+    (declaration?.type === 'internal_module' || declaration?.type === 'module') &&
+    namespaceRootName(declaration)?.id !== entryName.id
+  ) {
+    return true;
+  }
   let current: TreeNode | null | undefined = declaration?.parent;
   while (
     current &&
@@ -334,7 +340,18 @@ function isExportedDeclaration(declaration: TreeNode | undefined): boolean {
   ) {
     current = current.parent;
   }
-  return current?.type === 'export_statement';
+  if (current?.type === 'export_statement') return true;
+  return (
+    current?.type === 'statement_block' &&
+    isAmbient(current) &&
+    !named(current).some((child) => child.type === 'export_statement' && !child.childForFieldName('declaration'))
+  );
+}
+
+function namespaceRootName(declaration: TreeNode): TreeNode | null {
+  let root = declaration.childForFieldName('name');
+  while (root?.childForFieldName('object')) root = root.childForFieldName('object');
+  return root;
 }
 
 function reportImportConflict(c: Checker, name: string, entries: { kind: string; name: TreeNode }[]): void {
