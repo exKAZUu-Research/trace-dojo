@@ -398,12 +398,34 @@ export class Checker {
         );
       }
     }
+    this.checkAssocTypeBounds(impl, trait, self);
     if (trait.trait.builtin !== 'Copy' || self.kind !== 'adt') return;
     const subst = new Map(self.def.params.map((param, index) => [param, self.args[index]]));
     for (const field of self.def.variants.flatMap((variant) => variant.fields)) {
       const type = substitute(field.type, subst);
       if (this.solver.implements(type, trait) === 'no') {
         compileError(impl.span, `フィールド ${field.name} の型 ${typeToString(type)} は Copy ではありません。`);
+      }
+    }
+  }
+
+  /** The types an impl gives the trait's associated types meet the bounds the trait declares for them (E0277). */
+  private checkAssocTypeBounds(impl: ImplDef, trait: TraitRef, self: Type): void {
+    const subst: Subst = new Map([
+      ...trait.trait.params.map((param, index): [TypeParam, Type] => [param, trait.args[index]]),
+      [trait.trait.self, self],
+    ]);
+    for (const [name, assoc] of trait.trait.assocTypes) {
+      const type = impl.assocTypes.get(name);
+      if (!type || assoc.params.length > 0) continue;
+      for (const bound of assoc.bounds) {
+        const required = substituteTraitRef(bound, subst);
+        if (this.solver.implements(type, required) === 'no') {
+          compileError(
+            impl.span,
+            `関連型 ${name} の ${typeToString(type)} に ${traitRefToString(required)} が実装されていません（E0277）。`
+          );
+        }
       }
     }
   }
