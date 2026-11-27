@@ -29,7 +29,7 @@ export abstract class ExpressionConverter extends ConverterBase {
   /** The `#name`s each enclosing class body declares, innermost last, which every `#name` use must find. */
   protected readonly privateNames: Set<string>[] = [];
 
-  private readonly expressionConverters: Record<string, ExpressionConverterFunction> = {
+  protected readonly expressionConverters: Record<string, ExpressionConverterFunction> = {
     number: (node) => ({ kind: 'literal', value: this.number(node), row: rowOf(node) }),
     string: (node) => ({
       kind: 'literal',

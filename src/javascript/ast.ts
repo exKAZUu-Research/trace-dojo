@@ -217,6 +217,7 @@ export type Expression = Span & {
     | { kind: 'templateObject'; cooked: (string | undefined)[]; raw: string[] }
     | { kind: 'regex'; pattern: string; flags: string }
     | { kind: 'identifier'; name: string }
+    | { kind: 'importedModule'; specifier: string }
     | { kind: 'this' }
     | { kind: 'newTarget' }
     | { kind: 'array'; elements: (Argument | undefined)[] }

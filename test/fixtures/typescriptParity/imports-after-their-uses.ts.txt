@@ -1,6 +1,11 @@
+"use strict";
 function exists(path: string): boolean {
   return fs.existsSync(path);
 }
-console.log(typeof readFileSync, exists('missing.txt'));
+function checkStrict(this: any): boolean {
+  return this === undefined;
+}
+const require = (x: string) => x;
+console.log(typeof readFileSync, exists('missing.txt'), checkStrict.call(undefined), require('ok'));
 import { readFileSync } from 'fs';
 import * as fs from 'fs';

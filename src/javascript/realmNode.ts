@@ -31,14 +31,9 @@ export function defineNodeBuiltins(builder: RealmBuilder): void {
   const fs = new JsObject(builder.realm.objectPrototype);
   defineFileSystem(builder, fs);
   builder.realm.fsModule = fs;
-  const modules = { fs };
   builder.global(
     'require',
-    builder.function('require', 1, ({ runtime, args }) => {
-      const name = runtime.toString(args[0]);
-      if (!Object.hasOwn(MODULE_NAMES, name)) return runtime.throwError('Error', `Cannot find module '${name}'`);
-      return modules[MODULE_NAMES[name as keyof typeof MODULE_NAMES]];
-    })
+    builder.function('require', 1, ({ runtime, args }) => loadNodeModule(runtime, runtime.toString(args[0])))
   );
   const process = builder.namespace('process');
   for (const name of ['stdout', 'stderr'] as const) {
@@ -51,6 +46,14 @@ export function defineNodeBuiltins(builder: RealmBuilder): void {
     });
     builder.constant(process, name, stream);
   }
+}
+
+/** Loads a built-in Node.js module by specifier, for `require` and lowered ECMAScript `import` declarations. */
+export function loadNodeModule(runtime: Runtime, name: string): Value {
+  if (!Object.hasOwn(MODULE_NAMES, name) || !runtime.realm.fsModule) {
+    return runtime.throwError('Error', `Cannot find module '${name}'`);
+  }
+  return runtime.realm.fsModule;
 }
 
 /**

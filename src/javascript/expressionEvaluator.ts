@@ -3,6 +3,7 @@ import { LIMITS } from '../interpreter/limits';
 import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
 import { defineFunctionName } from './memberProperties';
+import { loadNodeModule } from './realmNode';
 import { newRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
 import {
@@ -68,6 +69,9 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       case 'identifier': {
         return this.readVariable(expression.name);
       }
+      case 'importedModule': {
+        return loadNodeModule(runtime, expression.specifier);
+      }
       case 'this': {
         return this.thisValue();
       }
@@ -126,9 +130,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
           : this.evaluate(expression.alternate);
       }
       case 'sequence': {
-        let value: Value;
-        for (const item of expression.expressions) value = this.evaluate(item);
-        return value;
+        return this.sequence(expression.expressions);
       }
       case 'parenthesized': {
         return this.evaluate(expression.expression, classBinding);
@@ -139,6 +141,12 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         throw new Error(`A ${expression.kind} reached the synchronous evaluator`);
       }
     }
+  }
+
+  private sequence(expressions: Expression[]): Value {
+    let value: Value;
+    for (const item of expressions) value = this.evaluate(item);
+    return value;
   }
   private update(expression: Extract<Expression, { kind: 'update' }>): Value {
     return this.updateReference(this.reference(expression.target), expression);

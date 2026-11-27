@@ -5,7 +5,7 @@ import { nameOf, type Node, rowOf, unsupported, unwrapParentheses } from '../jav
 import { decodeStringLiteral } from '../javascript/literals';
 import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
 import { countedEnumValue, type EnumsInScope, type FoldedValue, foldEnumValue } from './enumFolding';
-import { isUnsteppedStatement, PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
+import { IMPORTED_MODULE, isUnsteppedStatement, PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 
 /** Converts a TypeScript program, viewed as JavaScript, to the JavaScript interpreter's AST. */
 export class TypeScriptProgramConverter extends ProgramConverter {
@@ -31,6 +31,11 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       return statement;
     };
     this.statementConverters.enum_declaration = (node) => this.enumDeclaration(node);
+    this.expressionConverters[IMPORTED_MODULE] = (node) => ({
+      kind: 'importedModule',
+      specifier: decodeStringLiteral(node.text),
+      row: rowOf(node),
+    });
     // `this.name = name` for a parameter property, which steps on the parameter's row as the assignment it stands for.
     this.statementConverters[PARAMETER_PROPERTY_ASSIGNMENT] = (node: Node) => {
       const row = node.startPosition.row;

@@ -20,6 +20,7 @@ import { blockHasRuntimeCode, isInstantiatedNamespace } from './namespaceInstant
  * TypeScript converter handles, since JavaScript has no syntax for it.
  */
 export const PARAMETER_PROPERTY_ASSIGNMENT = 'parameter_property_assignment';
+export const IMPORTED_MODULE = 'imported_module';
 
 /** A node of the view, which may stand for a tree-sitter node or be synthesized from one. */
 class ViewNode implements Node {
@@ -217,17 +218,26 @@ function unwrappedName(node: TreeNode): TreeNode | undefined {
 }
 
 function generic(node: TreeNode, type: string, binder: Binder): ViewNode {
-  const parts: Part[] = [];
-  // An ECMAScript module's imports bind before any of its statements runs, as tsx's output reads them first.
+  const directives: Part[] = [];
+  // An ECMAScript module's imports bind before its statements run, after any leading directive prologue.
   const imports: Part[] = [];
+  const parts: Part[] = [];
+  let inPrologue = type === 'program';
   for (const [index, child] of node.children.entries()) {
     if (!child) continue;
+    if (inPrologue && !isPrologueChild(child)) inPrologue = false;
     const fieldName = node.fieldNameForChild(index);
     if (isErased(node, type, child, fieldName ?? undefined)) continue;
-    const isImport = type === 'program' && child.type === 'import_statement';
-    (isImport ? imports : parts).push({ node: view(child, binder), fieldName });
+    const target = inPrologue ? directives : type === 'program' && child.type === 'import_statement' ? imports : parts;
+    target.push({ node: view(child, binder), fieldName });
   }
-  return assemble(node, type, [...imports, ...parts]);
+  return assemble(node, type, [...directives, ...imports, ...parts]);
+}
+
+function isPrologueChild(child: TreeNode): boolean {
+  if (child.type === 'hash_bang_line' || child.type === 'comment') return true;
+  if (child.type !== 'expression_statement') return false;
+  return child.namedChildren.find((inner) => inner?.type !== 'comment')?.type === 'string';
 }
 
 /** Whether a child is TypeScript-only syntax, which the JavaScript view leaves out. */
@@ -337,18 +347,7 @@ function importView(node: TreeNode): ViewNode {
 
 /** The names an import declares, with the expressions that read them from the module `require` returns. */
 function importBindings(node: TreeNode, clause: TreeNode, source: TreeNode): [string, ViewNode][] {
-  const required = (): ViewNode =>
-    assemble(node, 'call_expression', [
-      { node: leaf(node, 'identifier', 'require'), fieldName: 'function' },
-      {
-        node: assemble(node, 'arguments', [
-          { node: token(node, '('), fieldName: undefined },
-          { node: leaf(source, 'string', source.text), fieldName: undefined },
-          { node: token(node, ')'), fieldName: undefined },
-        ]),
-        fieldName: 'arguments',
-      },
-    ]);
+  const required = (): ViewNode => leaf(source, IMPORTED_MODULE, source.text);
   return clause.namedChildren.flatMap((part): [string, ViewNode][] => {
     // A default import is the whole module, as tsx's interop gives a CommonJS module without a default export.
     if (part?.type === 'identifier') return [[part.text, required()]];
