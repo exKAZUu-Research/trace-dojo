@@ -268,8 +268,9 @@ export class Namespaces {
     if (name?.type !== 'string' && !isNamespaceOrModuleTopLevel(node))
       this.c.error(node, '名前空間宣言は、名前空間またはモジュールの最上位レベルでのみ許可されます。');
     const body = node.childForFieldName('body');
-    if (!body || name?.type === 'string') return;
-    const statements = isAmbient(node) ? named(body).filter(isCheckedAmbientDeclaration) : named(body);
+    if (!body || this.c.isLibrary(node)) return;
+    const statements =
+      isAmbient(node) || name?.type === 'string' ? named(body).filter(isCheckedAmbientDeclaration) : named(body);
     const outer = this.c.flow.current;
     this.c.flow.current = new FlowState();
     try {

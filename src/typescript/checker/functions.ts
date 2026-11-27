@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- Keeps function signatures, body checking, and parameter flow together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { isAmbient } from '../namespaceInstantiation';
 import { awaitedType, unwrapAwaitedType } from './awaited';
 import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
@@ -768,6 +769,8 @@ export class FunctionChecker {
   }
 
   functionDeclaration(node: TreeNode): void {
+    const body = node.childForFieldName('body');
+    if (body && isAmbient(node)) this.c.error(body, '実装は環境コンテキストでは宣言できません。');
     const name = node.childForFieldName('name');
     const symbol = name ? this.c.scopeOf(node).lookupValue(name.text) : undefined;
     const signature = this.c.signatures.signatureOf(node);
@@ -777,7 +780,10 @@ export class FunctionChecker {
 
   checkOverloadImplementation(node: TreeNode): void {
     if (this.c.isLibrary(node)) return;
+    this.c.signatures.signatureOf(node);
+    checkVarianceAnnotations(this.c, node);
     this.checkSignatureAnnotations(node);
+    if (isAmbient(node)) return;
     const { later, next } = followingDeclarations(node);
     // An optional method needs no implementation, unless a later declaration of the method follows.
     if (hasToken(node, '?') && !later.some((sibling) => this.declaresSameMethod(node, sibling))) return;
@@ -869,7 +875,7 @@ export class FunctionChecker {
       : undefined;
   }
 
-  private checkSignatureAnnotations(node: TreeNode): void {
+  checkSignatureAnnotations(node: TreeNode): void {
     for (const parameter of parameterNodes(node)) checkWrittenType(this.c, parameter.childForFieldName('type'));
     checkWrittenType(this.c, node.childForFieldName('return_type'));
   }

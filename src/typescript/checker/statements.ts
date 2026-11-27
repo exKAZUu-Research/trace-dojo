@@ -2,7 +2,8 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { assert } from 'es-toolkit';
 
-import { isCheckedAmbientDeclaration } from '../namespaceInstantiation';
+import { isAmbient, isCheckedAmbientDeclaration } from '../namespaceInstantiation';
+import { checkAmbientInitializer } from './ambientDeclarations';
 import { awaitedType, checkAwaitPlace } from './awaited';
 import { declaredNames } from './binder';
 import type { Checker } from './checker';
@@ -234,12 +235,16 @@ export class StatementChecker {
   /** `declare global` augments the globals only from a module. */
   private ambientDeclaration(node: TreeNode): void {
     for (const child of named(node)) {
-      if (child.type === 'statement_block' && !this.c.isModule)
-        this.c.error(
-          node,
-          'グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。'
-        );
-      else if (isCheckedAmbientDeclaration(child)) this.check(child);
+      if (child.type === 'statement_block') {
+        if (!this.c.isModule)
+          this.c.error(
+            node,
+            'グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。'
+          );
+        else this.checkBlockStatements(named(child).filter(isCheckedAmbientDeclaration));
+      } else if (isCheckedAmbientDeclaration(child)) {
+        this.check(child);
+      }
     }
   }
 
@@ -414,6 +419,8 @@ export class StatementChecker {
       if (declarator.type !== 'variable_declarator') continue;
       checkWrittenType(this.c, declarator.childForFieldName('type'));
       const nameNode = declarator.childForFieldName('name') as TreeNode;
+      if (isAmbient(declarator))
+        checkAmbientInitializer(this.c, declarator, kind === 'const' && nameNode.type === 'identifier');
       if (nameNode.type === 'identifier') this.variableDeclarator(declarator, nameNode, kind);
       else this.patternDeclarator(declarator, nameNode, kind === 'const');
     }

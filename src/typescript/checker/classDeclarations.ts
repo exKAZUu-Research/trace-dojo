@@ -1,5 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { isAmbient } from '../namespaceInstantiation';
+import { checkAmbientInitializer } from './ambientDeclarations';
 import type { Checker } from './checker';
 import { checkDuplicateMembers, checkOverloadOptionality, memberName } from './declarations';
 import { checkDecorators } from './decoratorChecks';
@@ -161,7 +163,8 @@ export class ClassDeclarationChecker {
   /** Reports a derived class's constructor that lacks a `super` call, or that has one although the class extends `null`. */
   private checkSuperCallPresence(node: TreeNode, ctor: TreeNode): void {
     const body = ctor.childForFieldName('body');
-    const superCall = body ? this.firstSuperCall(body) : undefined;
+    if (!body) return;
+    const superCall = this.firstSuperCall(body);
     if (this.c.classes.extendsNull(node)) {
       if (superCall)
         this.c.error(
@@ -214,12 +217,13 @@ export class ClassDeclarationChecker {
         this.c.functions.checkOverloadImplementation(member);
         break;
       }
+      case 'abstract_method_signature': {
+        this.c.signatures.signatureOf(member);
+        this.c.functions.checkSignatureAnnotations(member);
+        break;
+      }
       case 'method_definition': {
-        const signature = this.c.signatures.signatureOf(member);
-        this.c.functions.checkFunctionLike(member, signature, undefined);
-        const returnType = member.childForFieldName('return_type');
-        if (member.id === ctor?.id && returnType)
-          this.c.error(returnType, 'コンストラクタには戻り値の型を書けません。');
+        this.checkMethodDefinition(member, ctor);
         break;
       }
       case 'class_static_block': {
@@ -233,6 +237,15 @@ export class ClassDeclarationChecker {
         break;
       }
     }
+  }
+
+  private checkMethodDefinition(member: TreeNode, ctor: TreeNode | undefined): void {
+    const body = member.childForFieldName('body');
+    if (body && isAmbient(member)) this.c.error(body, '実装は環境コンテキストでは宣言できません。');
+    const signature = this.c.signatures.signatureOf(member);
+    this.c.functions.checkFunctionLike(member, signature, undefined);
+    const returnType = member.childForFieldName('return_type');
+    if (member.id === ctor?.id && returnType) this.c.error(returnType, 'コンストラクタには戻り値の型を書けません。');
   }
 
   private checkMethodOverloads(node: TreeNode, members: TreeNode[], info: ClassInfo): void {
@@ -264,6 +277,8 @@ export class ClassDeclarationChecker {
   private checkFieldInitializer(member: TreeNode): void {
     const value = member.childForFieldName('value');
     if (!value) return;
+    if (isAmbient(member) || hasToken(member, 'declare'))
+      checkAmbientInitializer(this.c, member, hasToken(member, 'readonly'));
     const declared = this.c.typeNodes.annotationType(member.childForFieldName('type'));
     const annotation = declared && hasToken(member, '?') ? unionOf([declared, undefinedType]) : declared;
     if (hasToken(member, 'abstract'))
@@ -475,7 +490,8 @@ export class ClassDeclarationChecker {
       declaration?.type !== 'field_definition' ||
       declaration.childForFieldName('value') ||
       property.isAbstract ||
-      hasToken(declaration, 'declare')
+      hasToken(declaration, 'declare') ||
+      isAmbient(declaration)
     )
       return false;
     return hasToken(declaration, '!') || !this.constructorAssignedFields.has(declaration.id);
@@ -528,7 +544,7 @@ export class ClassDeclarationChecker {
     returnStates: State[]
   ): void {
     const body = classNode.childForFieldName('body');
-    if (!body) return;
+    if (!body || isAmbient(classNode)) return;
     const ownerId = ctor?.id ?? 0;
     const states = [endState, ...returnStates].filter(
       (state): state is FlowState => state !== undefined && !state.dead
