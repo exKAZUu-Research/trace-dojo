@@ -71,6 +71,9 @@ interface Dispatch {
 }
 
 /** Runs a checked program: calls, trait dispatch, natives, and formatting. */
+/** Where a library call that a loop or an adapter makes, not the program, reports a panic it has no place for. */
+const NO_SPAN: Span = { row: 0, col: 1 };
+
 export class Interpreter implements CallSupport {
   runtime!: Runtime;
   readonly formatter: Formatter;
@@ -164,7 +167,8 @@ export class Interpreter implements CallSupport {
     let self = this.revealType(typeArgs[0]);
     let receiverArgs = args;
     if (self.kind === 'dyn' && def.selfMode) {
-      const unwrapped = unwrapDyn(args[0], def.selfMode === 'mutRef');
+      // `self: Pin<&mut Self>` lends the value mutably as `&mut self` does.
+      const unwrapped = unwrapDyn(args[0], def.selfMode === 'mutRef' || def.selfWrapper === 'Pin');
       self = unwrapped.type;
       receiverArgs = [unwrapped.receiver, ...args.slice(1)];
     }
@@ -359,13 +363,13 @@ export class Interpreter implements CallSupport {
     return place;
   }
 
-  toIter(value: Value, from: Type): Value {
+  toIter(value: Value, from: Type, span: Span = NO_SPAN): Value {
     const type = this.revealType(from);
     if (!(value instanceof IterValue) && isUserIterator(type)) return this.userIterator(value, type);
     const receiver = stripRefs(type);
     if (receiver.kind === 'adt' && receiver.def.builtin === 'Receiver') {
       const frame = this.runtime.frames.at(-1) as Frame;
-      const ctx = { interp: this, runtime: this.runtime, frame, span: { row: 0, col: 1 }, typeArgs: [] };
+      const ctx = { interp: this, runtime: this.runtime, frame, span, typeArgs: [] };
       return receiverIter(ctx, value, true);
     }
     return toIterator(value, type);

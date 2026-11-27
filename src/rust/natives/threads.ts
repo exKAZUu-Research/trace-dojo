@@ -1,4 +1,5 @@
-import { RustPanic, UnsupportedAtRun } from '../runtime';
+import { exactCapacity } from '../capacity';
+import { Deadlock, RustPanic, UnsupportedAtRun } from '../runtime';
 import {
   BorrowGuard,
   CellBox,
@@ -68,7 +69,7 @@ export class Scheduler {
 
   /** Runs a thread to its end unless it has run, reporting a panic that ends it as Rust does. */
   run(ctx: NativeContext, thread: ThreadHandle): void {
-    if (thread.state === 'running') panic(ctx, 'デッドロックしました（実行中のスレッドの終わりを待っています）。');
+    if (thread.state === 'running') deadlock(ctx, 'デッドロックしました（実行中のスレッドの終わりを待っています）。');
     if (thread.state !== 'pending') return;
     thread.state = 'running';
     this.running.push(thread.id);
@@ -76,7 +77,7 @@ export class Scheduler {
       thread.result = thread.run();
       thread.state = 'done';
     } catch (error) {
-      if (!(error instanceof RustPanic) || error instanceof UnsupportedAtRun) throw error;
+      if (!(error instanceof RustPanic) || error instanceof UnsupportedAtRun || error instanceof Deadlock) throw error;
       ctx.runtime.unwinding = false;
       thread.state = 'panicked';
       thread.result = error.message;
@@ -148,11 +149,22 @@ function join(ctx: NativeContext, handle: Value): Value {
   return thread.state === 'panicked' ? err(ctx, thread.result) : ok(ctx, thread.result);
 }
 
-/** `is_finished`: whether the thread has ended, after letting it run, as it would meanwhile in Rust. */
+/**
+ * `is_finished`: whether the thread has ended, after letting it run, as it would meanwhile in Rust. The polling thread
+ * could go on meanwhile, so a thread that then waits for what it does later is beyond this environment.
+ */
 function isFinished(ctx: NativeContext, handle: Value): boolean {
   const thread = deref(handle) as ThreadHandle;
-  scheduler(ctx).runUntilStarted(ctx, thread);
+  const threads = scheduler(ctx);
+  threads.waiting(
+    () => true,
+    () => threads.runUntilStarted(ctx, thread)
+  );
   return thread.state !== 'pending';
+}
+
+function deadlock(ctx: NativeContext, message: string): never {
+  throw new Deadlock(message, ctx.span);
 }
 
 /** `thread::scope`: waits for the threads it spawned, and panics if one that no thread joined panicked. */
@@ -184,7 +196,7 @@ function lock(ctx: NativeContext, target: CellBox, mutable: boolean): Value {
         ctx.span
       );
     }
-    panic(ctx, 'デッドロックしました（ロックを持っているスレッドが、このスレッドを待っています）。');
+    deadlock(ctx, 'デッドロックしました（ロックを持っているスレッドが、このスレッドを待っています）。');
   }
   target.borrows = mutable ? -1 : target.borrows + 1;
   target.holders.push(current);
@@ -213,7 +225,7 @@ function waitOnCondvar(ctx: NativeContext, held: Value, waiting: (place: Value) 
   guard.release();
   for (;;) {
     if (!scheduler(ctx).runAll(ctx))
-      panic(ctx, 'デッドロックしました（通知するスレッドがないまま、Condvar を待っています）。');
+      deadlock(ctx, 'デッドロックしました（通知するスレッドがないまま、Condvar を待っています）。');
     const result = lock(ctx, guard.cell, true) as EnumValue;
     // A poisoned lock still gives its guard, inside the `PoisonError`.
     const relocked = (
@@ -243,7 +255,7 @@ function receive(ctx: NativeContext, receiver: Value): Value | undefined {
             ctx.span
           );
         }
-        panic(ctx, 'デッドロックしました（送信側が残ったまま、送るスレッドがないチャンネルを待っています）。');
+        deadlock(ctx, 'デッドロックしました（送信側が残ったまま、送るスレッドがないチャンネルを待っています）。');
       }
       return channel.queue.shift();
     }
@@ -327,6 +339,11 @@ define({
   'Arc<str>::from': ([text], ctx) => {
     ctx.interp.dropper.activate();
     return new SharedBox(textOf(deref(text)));
+  },
+  // The slice a `Vec` holds, without its spare capacity, as `Arc<[T]>`'s.
+  'Arc<[_]>::from': ([items], ctx) => {
+    ctx.interp.dropper.activate();
+    return new SharedBox(exactCapacity([...(deref(items) as Value[])]));
   },
   'Arc<_>::new': ([value], ctx) => {
     ctx.interp.dropper.activate();

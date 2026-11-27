@@ -6,7 +6,7 @@ import { floatNumber } from './floatBits';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { iteratorDebug } from './iterDebug';
-import { ioErrorDebug, ioErrorDisplay, ioErrorKindDisplay } from './natives/io';
+import { ioErrorDebug, ioErrorDisplay, ioErrorKindDisplay, ioErrorPads } from './natives/io';
 import { durationDebug } from './natives/threads';
 import { wrap } from './ops';
 import { FmtFailure } from './runtime';
@@ -32,6 +32,19 @@ import {
 } from './values';
 
 /** The options of a placeholder, with counts resolved to numbers. */
+/** std's I/O handles, whose `Debug` shows nothing they hold (`Stdin { .. }`) or what this environment does not keep. */
+const IO_HANDLES = new Set([
+  'Stdin',
+  'StdinLock',
+  'Stdout',
+  'StdoutLock',
+  'Stderr',
+  'StderrLock',
+  'BufReader',
+  'BufWriter',
+  'OpenOptions',
+]);
+
 export interface Spec {
   fill: string;
   align: '<' | '>' | '^' | undefined;
@@ -190,8 +203,7 @@ export class Formatter {
             return text;
           }
           default: {
-            const text = stdErrorDisplay(t.def.builtin as string, v);
-            return text === undefined ? '' : padString(text, spec, write);
+            return stdErrorText(t.def.builtin as string, v, spec, write);
           }
         }
       }
@@ -476,6 +488,7 @@ export class Formatter {
         return structText(def.builtin, [['value', value]], indent, false, write);
       }
       default: {
+        if (IO_HANDLES.has(t.def.builtin as string)) return ioHandleDebug(t.def.builtin as string, spec, write);
         return undefined;
       }
     }
@@ -879,4 +892,27 @@ function escapeAscii(byte: number): string {
   if (escapes[byte]) return escapes[byte];
   if (byte >= 0x20 && byte < 0x7f) return String.fromCodePoint(byte);
   return `\\x${byte.toString(16).padStart(2, '0')}`;
+}
+
+/** The `Display` of an error type of std; `ErrorKind` and an `io::Error` std made write theirs with `write_str`, which ignores the width. */
+function stdErrorText(builtin: string, v: Value, spec: Spec, write: WriteChunk | undefined): string {
+  const text = stdErrorDisplay(builtin, v);
+  if (text === undefined) return '';
+  const unpadded = builtin === 'IoErrorKind' || (builtin === 'IoError' && !ioErrorPads(v));
+  if (!unpadded) return padString(text, spec, write);
+  write?.(text);
+  return text;
+}
+
+/** The `Debug` of std's I/O handles: `Stdin { .. }`; the buffers and platform flags others show are not kept here. */
+function ioHandleDebug(builtin: string, spec: Spec, write: WriteChunk | undefined): string {
+  if (builtin === 'BufReader' || builtin === 'BufWriter' || builtin === 'OpenOptions') {
+    throw new UnsupportedFormat(`${builtin} の {:?} での表示`);
+  }
+  return padString(`${builtin} { .. }`, spec, write);
+}
+
+/** A value whose formatting this environment does not support, which the formatting macro reports where it is. */
+export class UnsupportedFormat {
+  constructor(readonly what: string) {}
 }

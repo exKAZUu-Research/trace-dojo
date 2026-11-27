@@ -3,15 +3,16 @@ import { stringByteLength, stringCapacity, StringGrowth } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { derefAll, evaluateValues, stringish, withEvaluatedValues } from './compilerCommon';
 import { compilePatternInput, takesWhole } from './compilerPatterns';
+import { dropsBorrowedTemporary } from './compilerTemporaries';
 import type { WriteChunk } from './debugText';
-import type { Spec } from './fmt';
+import { type Spec, UnsupportedFormat } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
 import { allocVecElements } from './natives/capacityNatives';
 import { writeTarget, writeToStream } from './natives/io';
 import { sizeOf } from './natives/layout';
 import { cloneValue, valuesEqual } from './ops';
-import { FmtFailure, type Frame, RustPanic, writtenText } from './runtime';
+import { FmtFailure, type Frame, RustPanic, UnsupportedAtRun, writtenText } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { outputStream, resolve, shallow } from './types';
 import { utf8Length } from './utf8';
@@ -377,17 +378,25 @@ function plainPlaceholder(part: Exclude<FormatPiece, string>, arg: Expr): string
 }
 
 function compileFormat(c: Compiler, format: FormatArgs, pieces = foldFormatPieces(format)): FormatEval {
-  const args = format.args.map((arg) => c.read(arg));
+  // A formatting macro borrows its arguments, so one no variable holds is a temporary that goes with the statement.
+  const args = format.args.map((arg) => dropsBorrowedTemporary(c, arg, c.read(arg)));
   const types = format.args.map((arg) => runtimeType(arg.ty!));
   return (frame, write) =>
     withEvaluatedValues(frame, args, (values) => {
       frame.runtime.spend();
-      return c.support.formatter.format(
-        pieces,
-        values,
-        types.map((type) => type(frame)),
-        write
-      );
+      try {
+        return c.support.formatter.format(
+          pieces,
+          values,
+          types.map((type) => type(frame)),
+          write
+        );
+      } catch (error) {
+        if (error instanceof UnsupportedFormat) {
+          throw new UnsupportedAtRun(`${error.what}は、この採点環境では使えません。`, format.span);
+        }
+        throw error;
+      }
     });
 }
 

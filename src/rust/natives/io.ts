@@ -63,6 +63,12 @@ export function ioErrorDisplay(value: Value): string {
   return payload.message ?? ioErrorKindDisplay(payload.kind);
 }
 
+/** Whether an `io::Error`'s `Display` honours a width: only a custom error's message does, as a `String`'s does. */
+export function ioErrorPads(value: Value): boolean {
+  const payload = ioErrorPayload(value);
+  return !payload.code && payload.message !== undefined;
+}
+
 /** `io::ErrorKind`'s `Display`, by the variant's name. */
 export function ioErrorKindDisplay(kind: string): string {
   return ERROR_KIND_TEXT[kind] ?? kind;
@@ -191,7 +197,7 @@ function readLine(ctx: NativeContext, reader: TextReader): string | undefined {
 
 /** `BufRead::lines`: each line without its `\n` (or `\r\n`), as `Ok`. */
 function linesOf(ctx: NativeContext, source: Value): IterValue {
-  const reader = readerOf(ctx, source);
+  const reader = textReaderOf(ctx, source);
   return new IterValue(() => {
     const line = readLine(ctx, reader);
     if (line === undefined) return DONE;
@@ -201,7 +207,7 @@ function linesOf(ctx: NativeContext, source: Value): IterValue {
 
 /** Reads from a stream, giving `Ok` of what `read` gives. */
 function reading(ctx: NativeContext, source: Value, read: (reader: TextReader) => Value): Value {
-  return ok(ctx, read(readerOf(ctx, source)));
+  return ok(ctx, read(textReaderOf(ctx, source)));
 }
 
 /** What a stream reads from; a file opened only for writing is read only by programs that fail, which stop here. */
@@ -211,24 +217,41 @@ function readerOf(ctx: NativeContext, source: Value): TextReader {
 }
 
 /**
- * `Read::read`: as many of the next bytes as the buffer holds, whole characters only, as the file system holds text; a
- * buffer too small for the next character is not supported.
+ * The bytes of a character that `Read::read` split at the end of a buffer, which the next `read` gives first. The
+ * file system holds text, so the reader's position is past that whole character.
  */
-function readInto(ctx: NativeContext, reader: TextReader, buf: Value): number {
+const splitBytes = new WeakMap<TextReader, number[]>();
+
+/** `Read::read`: as many of the next bytes as the buffer holds, a character's bytes split across reads as std does. */
+function readInto(reader: TextReader, buf: Value): number {
   const target = deref(buf) as Value[] | SliceView;
   const capacity = sliceLength(target);
-  if (capacity === 0 || reader.isAtEnd) return 0;
+  const pending = splitBytes.get(reader) ?? [];
+  if (capacity === 0 || (pending.length === 0 && reader.isAtEnd)) return 0;
   const { base, start } = sliceBase(target);
   const encoder = new TextEncoder();
   let written = 0;
+  const put = (bytes: readonly number[]): void => {
+    const fits = bytes.slice(0, capacity - written);
+    for (const byte of fits) base[start + written++] = BigInt(byte);
+    splitBytes.set(reader, bytes.slice(fits.length));
+  };
+  put(pending);
   for (const char of reader.text.slice(reader.position)) {
-    const bytes = encoder.encode(char);
-    if (written + bytes.length > capacity) break;
-    for (const byte of bytes) base[start + written++] = BigInt(byte);
+    if (written === capacity) break;
+    put([...encoder.encode(char)]);
     reader.position += char.length;
   }
-  if (written === 0) panic(ctx, '1 文字より小さいバッファへの read は、この採点環境では使えません。');
   return written;
+}
+
+/** A reader for reading text, which a character that `Read::read` split cannot continue in this environment. */
+function textReaderOf(ctx: NativeContext, source: Value): TextReader {
+  const reader = readerOf(ctx, source);
+  if (splitBytes.get(reader)?.length) {
+    panic(ctx, '文字の途中まで read した後の、文字列としての読み込みは、この採点環境では使えません。');
+  }
+  return reader;
 }
 
 function readLineInto(ctx: NativeContext, reader: TextReader, buf: Value): Value {
@@ -277,7 +300,7 @@ define({
   'Stdin::lock': ([self]) => stream(self),
   'Stdin::read_line': ([self, buf], ctx) => reading(ctx, self, (reader) => readLineInto(ctx, reader, buf)),
   'Stdin::lines': ([self], ctx) => linesOf(ctx, self),
-  'std::io::Read::read': ([self, buf], ctx) => reading(ctx, self, (reader) => BigInt(readInto(ctx, reader, buf))),
+  'std::io::Read::read': ([self, buf], ctx) => ok(ctx, BigInt(readInto(readerOf(ctx, self), buf))),
   'std::io::Read::read_to_string': ([self, buf], ctx) =>
     reading(ctx, self, (reader) => BigInt(appendText(ctx, buf, reader.readRest()))),
   'std::io::Read::read_to_end': ([self, buf], ctx) =>
@@ -418,6 +441,10 @@ function invalidOptions(options: OpenOptionsValue): string | undefined {
   // std checks creating and truncating first.
   const writes = options.write || options.append;
   if (!writes && (options.create || options.truncate || options.createNew)) {
+    return 'creating or truncating a file requires write or append access';
+  }
+  // Appending keeps what the file holds, so it truncates only a file it creates anew.
+  if (options.append && options.truncate && !options.createNew) {
     return 'creating or truncating a file requires write or append access';
   }
   return !options.read && !writes ? 'must specify at least one of read, write, or append access' : undefined;

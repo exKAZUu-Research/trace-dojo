@@ -1,3 +1,4 @@
+import { exactCapacity } from '../capacity';
 import { normalize } from '../infer';
 import { cloneValue, copyValue } from '../ops';
 import { shallow, type Type } from '../types';
@@ -52,6 +53,11 @@ define({
   'Rc<str>::from': ([text], ctx) => {
     ctx.interp.dropper.activate();
     return new SharedBox(textOf(deref(text)));
+  },
+  // The slice a `Vec` holds, without its spare capacity, as `Rc<[T]>`'s.
+  'Rc<[_]>::from': ([items], ctx) => {
+    ctx.interp.dropper.activate();
+    return new SharedBox(exactCapacity([...(deref(items) as Value[])]));
   },
   'Rc<_>::new': ([value], ctx) => {
     ctx.interp.dropper.activate();

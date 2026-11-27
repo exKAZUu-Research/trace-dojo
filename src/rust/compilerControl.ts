@@ -172,7 +172,7 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
   const answered = bindsAnswer(expr.pattern);
   return (frame) => {
     const source = iterable(frame);
-    const iterator = c.support.toIter(source, fromType(frame)) as IterValue;
+    const iterator = c.support.toIter(source, fromType(frame), expr.iterable.span) as IterValue;
     return frame.runtime.withRoots([iterator], () =>
       frame.runtime.withActiveBorrows([iterator], () => {
         try {

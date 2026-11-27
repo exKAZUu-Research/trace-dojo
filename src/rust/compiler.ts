@@ -84,7 +84,7 @@ export interface CallSupport {
   callFn(def: FnDef, typeArgs: Type[], args: Value[], callRow: number | undefined, span: Span, frame: Frame): Value;
   callValue(callee: Value, args: Value[], callRow: number | undefined): Value;
   makeClosure(compiled: CompiledFn, frame: Frame, captures: ClosureCapture[]): Value;
-  toIter(value: Value, from: Type): Value;
+  toIter(value: Value, from: Type, span?: Span): Value;
   constValue(def: ConstDef, frame: Frame, typeArgs: Type[]): Value;
   builtinConst(name: string): Value;
   formatter: Formatter;
