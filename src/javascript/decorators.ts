@@ -82,8 +82,7 @@ export function decorateClassDefinition(runtime: Runtime, definition: ClassDefin
   try {
     applyMemberDecorators(runtime, definition.members, staticInitializers, instanceInitializers, metadata);
     const cls = applyClassDecorators(runtime, definition, classInitializers, metadata);
-    defineMetadataProperty(runtime, definition.cls, symbol, metadata);
-    if (cls !== definition.cls) defineMetadataProperty(runtime, cls, symbol, metadata);
+    defineMetadataProperty(runtime, cls, symbol, metadata);
     return { cls, staticInitializers, instanceInitializers, classInitializers };
   } finally {
     temporaries.length = held;
@@ -142,6 +141,9 @@ function isField(member: MemberDefinition): boolean {
 }
 
 function metadataSymbol(runtime: Runtime): symbol {
+  const symbolCtor = runtime.realm.globals.lookup('Symbol')?.value;
+  const supplied = isObject(symbolCtor) ? runtime.get(symbolCtor, 'metadata') : undefined;
+  if (typeof supplied === 'symbol') return supplied;
   const { symbolRegistry } = runtime.realm;
   let symbol = symbolRegistry.get('Symbol.metadata');
   if (!symbol) {
