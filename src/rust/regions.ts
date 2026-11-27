@@ -443,7 +443,7 @@ const POINTERS = new Set(['Rc', 'Arc', 'Ref', 'RefMut', 'MutexGuard', 'RwLockRea
 
 export function ownedDerefLayout(layout: Layout): Layout {
   if (layout.kind !== 'adt') return layout;
-  if (layout.def.builtin === 'Box') return layout.args[0] ?? NONE;
+  if (layout.def.builtin === 'Box' || POINTERS.has(layout.def.builtin ?? '')) return layout.args[0] ?? NONE;
   if (layout.def.builtin === 'Vec' || layout.def.builtin === 'VecDeque') {
     const elem = layout.args[0] ?? NONE;
     return isNone(elem) ? NONE : { kind: 'seq', elem };
@@ -461,8 +461,9 @@ export function typeAfter(type: Type | undefined, derefs: readonly DerefKind[]):
   let t = type && normalize(shallow(type));
   for (let index = 0; index < derefs.length && t; index++) {
     if (t.kind === 'ref') t = normalize(shallow(t.target));
-    else if (t.kind === 'adt' && t.def.builtin === 'Box') t = normalize(shallow(t.args[0]));
-    else if (t.kind === 'adt' && (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque')) {
+    else if (t.kind === 'adt' && (t.def.builtin === 'Box' || POINTERS.has(t.def.builtin ?? ''))) {
+      t = normalize(shallow(t.args[0]));
+    } else if (t.kind === 'adt' && (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque')) {
       t = { kind: 'slice', elem: t.args[0] };
     } else if (t.kind === 'adt' && t.def.builtin === 'String') t = { kind: 'str' };
     else if (t.kind === 'array') t = { kind: 'slice', elem: t.elem };
