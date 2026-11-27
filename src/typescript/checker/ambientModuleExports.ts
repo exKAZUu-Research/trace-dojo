@@ -94,15 +94,22 @@ function resolveQualifiedDefaultTarget(
   path: TreeNode[],
   lookup: DefaultExportLookup
 ): DefaultExportSymbols {
+  const rootName = canonicalIdentifier(path[0].text, path[0]);
+  const rootValue = unaliasInBinder(lookupInBodyOrExports(lookup, rootName, 'value'), 'value', lookup);
+  const hasRuntimeRoot = Boolean(
+    rootValue && (rootValue.valueKind !== 'namespace' || isInstantiatedNamespace(rootValue))
+  );
   const container = walkQualifiedDefaultContainers(path, lookup);
   if (container) {
     const entity = resolveQualifiedFinalMember(container, path.at(-1) as TreeNode, lookup);
-    if (entity.value || !hasNonNamespaceValue(container)) return entity;
-    return { ...entity, value: syntheticDefaultValueSymbol(node, valueNode, lookup.scope) };
+    if (entity.value) return entity;
+    if (hasNonNamespaceValue(container)) {
+      return { ...entity, value: syntheticDefaultValueSymbol(node, valueNode, lookup.scope) };
+    }
+    if ((entity.type || entity.namespace) && hasRuntimeRoot && rootValue !== container) return entity;
+    if (rootValue === container) return {};
   }
-  const rootName = canonicalIdentifier(path[0].text, path[0]);
-  const rootValue = unaliasInBinder(lookupInBodyOrExports(lookup, rootName, 'value'), 'value', lookup);
-  if (!rootValue || (rootValue.valueKind === 'namespace' && !isInstantiatedNamespace(rootValue))) return {};
+  if (!hasRuntimeRoot) return {};
   return { value: syntheticDefaultValueSymbol(node, valueNode, lookup.scope) };
 }
 
@@ -121,17 +128,10 @@ function walkQualifiedDefaultContainers(path: TreeNode[], lookup: DefaultExportL
 }
 
 function lookupContainerInBodyOrExports(lookup: DefaultExportLookup, name: string): Sym | undefined {
-  for (let current: Scope | undefined = lookup.scope; current; current = current.parent) {
-    lookup.budget?.spend();
-    const allowClause = current === lookup.exports;
-    const ns = !allowClause && current.isClauseOnlyExport(name, 'namespace') ? undefined : current.namespaces.get(name);
-    const val = !allowClause && current.isClauseOnlyExport(name, 'value') ? undefined : current.values.get(name);
-    if (ns || val) return unaliasInBinder(ns, 'namespace', lookup) ?? unaliasInBinder(val, 'value', lookup);
-  }
-  return (
-    unaliasInBinder(lookup.scope.lookupNamespace(name, lookup.budget), 'namespace', lookup) ??
-    unaliasInBinder(lookup.scope.lookupValue(name, lookup.budget), 'value', lookup)
-  );
+  const ns = unaliasInBinder(lookupInBodyOrExports(lookup, name, 'namespace'), 'namespace', lookup);
+  if (ns) return ns;
+  const val = unaliasInBinder(lookupInBodyOrExports(lookup, name, 'value'), 'value', lookup);
+  return val?.valueKind === 'enum' ? val : undefined;
 }
 
 function lookupContainerInExports(
@@ -148,7 +148,7 @@ function lookupContainerInExports(
 
 function isAddressableContainer(symbol: Sym, beforeLast: boolean): boolean {
   if (symbol.valueKind === 'enum' && beforeLast) return true;
-  return Boolean(symbol.namespaceExports) && (hasNonNamespaceValue(symbol) || isInstantiatedNamespace(symbol));
+  return Boolean(symbol.namespaceExports);
 }
 
 function hasNonNamespaceValue(symbol: Sym): boolean {
@@ -167,7 +167,7 @@ function resolveQualifiedFinalMember(
   const namespace = unaliasInBinder(container.namespaceExports.namespaces.get(lastName), 'namespace', lookup);
   const value = exportedRuntimeValue(container.namespaceExports, lastName, lookup) ?? enumMember;
   if (value) return { value, type: type ?? enumMember, namespace };
-  return hasNonNamespaceValue(container) ? { type, namespace } : {};
+  return { type, namespace };
 }
 
 function enumMemberNamed(container: Sym, name: string): Sym | undefined {
