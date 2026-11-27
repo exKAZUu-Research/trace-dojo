@@ -1,5 +1,5 @@
 import { exactCapacity } from '../capacity';
-import { Deadlock, RustPanic, UnsupportedAtRun } from '../runtime';
+import { Deadlock, ProcessExit, RustPanic, UnsupportedAtRun } from '../runtime';
 import {
   BorrowGuard,
   CellBox,
@@ -34,17 +34,34 @@ export class Scheduler {
    * above one that could go on would, in Rust, let it go on, which threads that run to their ends cannot.
    */
   private readonly waits = new Map<number, () => boolean>();
+  /** For each running thread that joins another, the one it joins: the edges of the wait graph a lock's wait reads. */
+  private readonly joining = new Map<number, number>();
   private panicked = false;
 
-  /** Runs `body` as the current thread waiting until `ready`, which the threads it runs meanwhile may make true. */
-  waiting<T>(ready: () => boolean, body: () => T): T {
+  /**
+   * Runs `body` as the current thread waiting until `ready`, which the threads it runs meanwhile may make true;
+   * `joined` is the thread it waits to end, if it joins one.
+   */
+  waiting<T>(ready: () => boolean, body: () => T, joined?: number): T {
     const id = this.running.at(-1) ?? 1;
     this.waits.set(id, ready);
+    if (joined !== undefined) this.joining.set(id, joined);
     try {
       return body();
     } finally {
       this.waits.delete(id);
+      this.joining.delete(id);
     }
+  }
+
+  /** Whether `holder` waits, through the threads it joins, for `thread` to end: a cycle no thread can break. */
+  waitsFor(holder: number, thread: number): boolean {
+    const seen = new Set<number>();
+    for (let next = this.joining.get(holder); next !== undefined && !seen.has(next); next = this.joining.get(next)) {
+      if (next === thread) return true;
+      seen.add(next);
+    }
+    return false;
   }
 
   /** Whether a thread below the current one waits for something that has come, and so could go on. */
@@ -144,7 +161,8 @@ function join(ctx: NativeContext, handle: Value): Value {
   const threads = scheduler(ctx);
   threads.waiting(
     () => thread.state === 'done' || thread.state === 'panicked',
-    () => threads.run(ctx, thread)
+    () => threads.run(ctx, thread),
+    thread.id
   );
   return thread.state === 'panicked' ? err(ctx, thread.result) : ok(ctx, thread.result);
 }
@@ -177,10 +195,13 @@ function threadScope(ctx: NativeContext, f: Value): Value {
   let result: Value;
   try {
     result = call(ctx, f, [UNIT_VALUE]);
-  } finally {
-    // The scope waits for its threads however its body ends, a panic included, before the panic goes on.
-    threads.runAll(ctx);
+  } catch (error) {
+    // The scope waits for its threads when its body panics too, before the panic goes on, but not when the process
+    // exits.
+    if (!(error instanceof ProcessExit)) threads.runAll(ctx);
+    throw error;
   }
+  threads.runAll(ctx);
   const scoped = threads.spawnedSince(count).filter((thread) => scopedThreads.has(thread));
   if (scoped.some((thread) => thread.state === 'panicked' && !thread.joined)) {
     panic(ctx, 'a scoped thread panicked');
@@ -194,7 +215,12 @@ function lock(ctx: NativeContext, target: CellBox, mutable: boolean): Value {
   if (mutable ? target.borrows !== 0 : target.borrows < 0) {
     // A thread taking a lock it holds waits forever; one held by a thread waiting below would be let go in Rust,
     // which threads that run to their ends cannot do.
-    if (target.holders.some((holder) => holder !== current && threads.running.includes(holder))) {
+    const others = target.holders.filter((holder) => holder !== current && threads.running.includes(holder));
+    // A holder that waits for this thread to end never lets go; one that waits for something else would in Rust.
+    if (others.some((holder) => threads.waitsFor(holder, current))) {
+      deadlock(ctx, 'デッドロックしました（ロックを持っているスレッドが、このスレッドを待っています）。');
+    }
+    if (others.length > 0) {
       throw new UnsupportedAtRun(
         '途中で待っているスレッドが持つロックを待つことは、この採点環境では使えません。',
         ctx.span
