@@ -401,7 +401,6 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     }
   }
 
-  // code-gauge-allow duplicateLines -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
   // code-gauge-allow functionCognitiveComplexity -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
   // code-gauge-allow functionNcss -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
   private *forEachIterationsSteps(
@@ -448,6 +447,10 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
       if (error instanceof JsThrow) {
         completion = 'throw';
         pending = error.value;
+      } else if (error instanceof GeneratorReturn) {
+        pending = error.value;
+      } else {
+        isExhausted = true;
       }
       throw error;
     } finally {

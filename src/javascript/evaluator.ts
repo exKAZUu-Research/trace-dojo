@@ -286,7 +286,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
 
   /** Runs the iterations of a `for...of` or `for...in` loop, holding the iterable meanwhile. */
   // code-gauge-allow functionNcss -- Inlines what a nested call in the loop body would otherwise pay host frames for.
-  // code-gauge-allow duplicateLines -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
   private forEachIterations(
     statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>,
     labels: string[],
@@ -335,6 +334,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
       if (error instanceof JsThrow) {
         completion = 'throw';
         pending = error.value;
+      } else {
+        isExhausted = true;
       }
       throw error;
     } finally {
