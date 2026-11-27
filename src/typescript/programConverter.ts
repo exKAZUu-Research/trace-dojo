@@ -107,7 +107,11 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     const row = rowOf(node);
     const nameNode = node.childForFieldName('name') as Node;
     const name = nameOf(nameNode);
-    this.declareVariable(nameNode, name, 'var');
+    const currentScope = this.enclosingScope.get(node);
+    const isBlockScoped = currentScope !== undefined && currentScope !== this.enclosingFnScope.get(node);
+    const isFirstInBlock = isBlockScoped && this.isFirstEnumInScope(currentScope, name, node);
+    if (!isBlockScoped) this.declareVariable(nameNode, name, 'var');
+    else if (isFirstInBlock) this.declareVariable(nameNode, name, 'let');
     const enumObject = (): Expression => ({ kind: 'identifier', name, row });
     const memberOf = (key: Expression): MemberExpression => ({
       kind: 'member',
@@ -118,7 +122,6 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     });
     const text = (value: string): Expression => ({ kind: 'literal', value, row });
     const assignments: Expression[] = [];
-    const currentScope = this.enclosingFnScope.get(node);
     const folded = currentScope ? this.foldedMapFor(currentScope, name) : new Map<string, FoldedValue>();
     const enumsInScope: EnumsInScope = (enumName) =>
       enumName === name ? folded : this.lookupFoldedEnum(node, enumName);
@@ -128,9 +131,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       if (member.type === 'comment') continue;
       const key = enumMemberName(member);
       const initializer = member.childForFieldName('value');
-      const known = initializer
-        ? foldEnumValue(initializer, enumsInScope, folded)
-        : countedEnumValue(previous, isFirst);
+      const known = initializer ? foldEnumValue(initializer, enumsInScope) : countedEnumValue(previous, isFirst);
       const value: Expression = initializer
         ? this.expression(initializer)
         : { kind: 'literal', value: known?.kind === 'number' ? known.value : undefined, row };
@@ -155,18 +156,13 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       value: { kind: 'logical', operator: '||', left: enumObject(), right: { kind: 'object', members: [], row }, row },
       row,
     };
-    return {
-      kind: 'declaration',
-      declarationKind: 'var',
-      declarators: [
-        {
-          target: { kind: 'identifier', name, row },
-          init: { kind: 'sequence', expressions: [created, ...assignments, enumObject()], row },
-        },
-      ],
-      stepRow: this.stepRowOf(node),
-      row,
-    };
+    const init: Expression = { kind: 'sequence', expressions: [created, ...assignments, enumObject()], row };
+    return enumStatementOf(name, init, this.stepRowOf(node), row, isBlockScoped, isFirstInBlock);
+  }
+
+  private isFirstEnumInScope(scope: Node, name: string, node: Node): boolean {
+    const first = (this.scopeNames.get(scope)?.get(name) ?? [])[0];
+    return first?.startIndex === node.startIndex;
   }
 
   override convert(root: Node): Program {
@@ -249,7 +245,9 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     declarations: Node[],
     fromNode: Node
   ): Map<string, FoldedValue> | undefined {
-    const isFullScope = this.enclosingFnScope.get(fromNode) !== scope || declarations.some(isConstEnumDeclaration);
+    const isFullScope =
+      this.enclosingFnScope.get(fromNode) !== this.enclosingFnScope.get(scope) ||
+      declarations.some(isConstEnumDeclaration);
     const existing = !isFullScope ? this.foldedEnums.get(scope)?.get(enumName) : undefined;
     if (existing) return existing;
     const key = `${scope.startIndex}:${enumName}`;
@@ -276,7 +274,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       const key = enumMemberName(member);
       const initializer = member.childForFieldName('value');
       const known = initializer
-        ? foldEnumValue(initializer, (name) => this.lookupFoldedEnum(initializer, name), folded)
+        ? foldEnumValue(initializer, (name) => this.lookupFoldedEnum(initializer, name))
         : countedEnumValue(previous, isFirst);
       folded.set(key, known);
       previous = known;
@@ -343,6 +341,25 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   }
 }
 
+function enumStatementOf(
+  name: string,
+  init: Expression,
+  stepRow: number | undefined,
+  row: number,
+  isBlockScoped: boolean,
+  isFirstInBlock: boolean
+): Statement {
+  const target: Expression = { kind: 'identifier', name, row };
+  if (isBlockScoped && !isFirstInBlock) return { kind: 'expression', expression: init, stepRow, row };
+  return {
+    kind: 'declaration',
+    declarationKind: isBlockScoped ? 'let' : 'var',
+    declarators: isBlockScoped ? [{ target }, { target, init }] : [{ target, init }],
+    stepRow,
+    row,
+  };
+}
+
 function isConstEnumDeclaration(declaration: Node): boolean {
   return declaration.children.some((child) => !child?.isNamed && child?.type === 'const');
 }
@@ -403,7 +420,7 @@ function declaredScopeEntry(
   blockScope: Node,
   fnScope: Node
 ): { scope: Node; names: string[]; enumNode?: Node } | undefined {
-  if (node.type === 'enum_declaration') return { scope: fnScope, names: declaredNodeName(node), enumNode: node };
+  if (node.type === 'enum_declaration') return { scope: blockScope, names: declaredNodeName(node), enumNode: node };
   if (blockNamedDeclarationTypes.has(node.type)) return { scope: blockScope, names: declaredNodeName(node) };
   if (!variableDeclarationTypes.has(node.type)) return undefined;
   const scope = node.type === 'variable_declaration' ? fnScope : blockScope;
