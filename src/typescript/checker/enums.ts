@@ -4,8 +4,18 @@ import { numberArithmetic } from '../../javascript/expressionEvaluator';
 import { decodeTemplateFragment } from '../../javascript/literals';
 import { isAmbient } from '../namespaceInstantiation';
 import type { Checker } from './checker';
+import { laterRunningTypes } from './expandos';
 import type { Sym } from './scopes';
-import { hasToken, isWithin, named, numberValue, propertyNameText, skipParentheses, stringValue } from './syntax';
+import {
+  hasToken,
+  isImmediatelyInvoked,
+  isWithin,
+  named,
+  numberValue,
+  propertyNameText,
+  skipParentheses,
+  stringValue,
+} from './syntax';
 import {
   anonymousObject,
   emptyStructure,
@@ -249,12 +259,12 @@ export class Enums {
       case 'identifier': {
         return (
           this.ownMemberValue(expression, expression.text, evaluation) ??
-          this.constantVariableValue(expression, evaluation)
+          this.identifierConstantValue(expression, evaluation)
         );
       }
       case 'member_expression':
       case 'subscript_expression': {
-        return this.otherEnumMember(expression, evaluation);
+        return this.qualifiedMemberValue(expression, evaluation);
       }
       case 'unary_expression': {
         const operand = this.evaluate(expression.childForFieldName('argument') as TreeNode, evaluation);
@@ -294,12 +304,17 @@ export class Enums {
     return node.text.slice(start - node.startIndex, end - node.startIndex);
   }
 
+  private identifierConstantValue(name: TreeNode, evaluation: Evaluation): EnumValue | undefined {
+    const symbol = this.unaliasedValue(this.c.scopeOf(name).lookupValue(name.text));
+    if (symbol?.valueKind === 'enumMember') return this.resolvedEnumMemberValue(name, symbol, evaluation);
+    return symbol ? this.constantSymbolValue(symbol, evaluation) : undefined;
+  }
+
   /** The value of a `const` an initializer names, when a constant expression initializes it, as tsc evaluates it. */
-  private constantVariableValue(name: TreeNode, evaluation: Evaluation): EnumValue | undefined {
-    const variable = this.c.scopeOf(name).lookupValue(name.text);
-    const declaration = variable?.valueDeclaration;
+  private constantSymbolValue(variable: Sym, evaluation: Evaluation): EnumValue | undefined {
+    const declaration = variable.valueDeclaration;
     const value = declaration?.type === 'variable_declarator' ? declaration.childForFieldName('value') : undefined;
-    if (variable?.valueKind !== 'const' || !value || this.evaluatingConstants.has(variable.id)) return undefined;
+    if (variable.valueKind !== 'const' || !value || this.evaluatingConstants.has(variable.id)) return undefined;
     this.evaluatingConstants.add(variable.id);
     try {
       return this.evaluate(value, { ...evaluation, members: new Map() });
@@ -308,24 +323,72 @@ export class Enums {
     }
   }
 
-  /** The value of `E.A` or `E["A"]`, a member of this or another enum. */
-  private otherEnumMember(node: TreeNode, evaluation: Evaluation): EnumValue | undefined {
+  /** The value of `E.A`, `Q.R.X`, or `C.base`, an enum member or exported constant along a namespace path. */
+  private qualifiedMemberValue(node: TreeNode, evaluation: Evaluation): EnumValue | undefined {
     const object = node.childForFieldName('object');
-    if (object?.type !== 'identifier') return undefined;
-    const key =
-      node.type === 'member_expression'
-        ? node.childForFieldName('property')?.text
-        : (() => {
-            const index = node.childForFieldName('index');
-            return index?.type === 'string' ? stringValue(index) : undefined;
-          })();
-    if (key === undefined) return undefined;
-    const other = this.c.scopeOf(object).lookupValue(object.text);
-    if (other?.valueKind !== 'enum') return undefined;
-    if (other.id === evaluation.symbol.id) return this.ownMemberValue(node, key, evaluation);
-    const member = this.infoOf(other)?.members.get(key);
-    if (member && member.node.startIndex > node.startIndex) return this.forwardReference(node, evaluation);
-    return member?.value;
+    const key = this.memberAccessKey(node, evaluation);
+    const container = object ? this.resolveContainerSymbol(skipParentheses(object), evaluation) : undefined;
+    if (!container || key === undefined) return undefined;
+    if (container.valueKind === 'enum') {
+      if (container.id === evaluation.symbol.id) return this.ownMemberValue(node, key, evaluation);
+      const member = this.infoOf(container)?.members.get(key);
+      if (member) return this.checkedEnumMemberValue(node, container, member, evaluation);
+    }
+    const exported = this.unaliasedValue(container.namespaceExports?.values.get(key));
+    if (exported?.valueKind === 'enumMember') return this.resolvedEnumMemberValue(node, exported, evaluation);
+    return exported ? this.constantSymbolValue(exported, evaluation) : undefined;
+  }
+
+  private resolveContainerSymbol(node: TreeNode, evaluation: Evaluation): Sym | undefined {
+    if (node.type === 'identifier') return this.unaliasedValue(this.c.scopeOf(node).lookupValue(node.text));
+    if (node.type !== 'member_expression' && node.type !== 'subscript_expression') return undefined;
+    const object = node.childForFieldName('object');
+    const key = this.memberAccessKey(node, evaluation);
+    const parent = object ? this.resolveContainerSymbol(skipParentheses(object), evaluation) : undefined;
+    return key === undefined ? undefined : this.unaliasedValue(parent?.namespaceExports?.values.get(key));
+  }
+
+  private memberAccessKey(node: TreeNode, evaluation: Evaluation): string | undefined {
+    if (node.type === 'member_expression') return node.childForFieldName('property')?.text;
+    const index = node.childForFieldName('index');
+    const value = index ? this.evaluate(index, evaluation) : undefined;
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  private unaliasedValue(symbol: Sym | undefined): Sym | undefined {
+    return symbol && (symbol.valueKind === 'import' || symbol.valueKind === 'importAlias')
+      ? this.c.namespaces.imported(symbol, 'value')
+      : symbol;
+  }
+
+  private resolvedEnumMemberValue(
+    reference: TreeNode,
+    memberSymbol: Sym,
+    evaluation: Evaluation
+  ): EnumValue | undefined {
+    const declaration = memberSymbol.valueDeclaration?.parent?.parent;
+    const name = declaration?.childForFieldName('name');
+    const enumSymbol = name ? this.c.scopeOf(declaration as TreeNode).lookupValue(name.text) : undefined;
+    if (!enumSymbol) return undefined;
+    if (enumSymbol.id === evaluation.symbol.id) return this.ownMemberValue(reference, memberSymbol.name, evaluation);
+    const member = this.infoOf(enumSymbol)?.members.get(memberSymbol.name);
+    return member ? this.checkedEnumMemberValue(reference, enumSymbol, member, evaluation) : undefined;
+  }
+
+  private checkedEnumMemberValue(
+    reference: TreeNode,
+    enumSymbol: Sym,
+    member: EnumMember,
+    evaluation: Evaluation
+  ): EnumValue | undefined {
+    if (
+      member.node.startIndex > reference.startIndex &&
+      !isConstEnum(enumSymbol) &&
+      !isDeferredFrom(reference, member.node)
+    ) {
+      return this.forwardReference(reference, evaluation);
+    }
+    return member.value;
   }
 
   /** The value of a member of the enum being evaluated, which only a member declared before may read. */
@@ -347,6 +410,22 @@ export class Enums {
     });
     return undefined;
   }
+}
+
+/** Whether a function or instance field that does not enclose `target` defers `reference` until after `target` runs. */
+function isDeferredFrom(reference: TreeNode, target: TreeNode): boolean {
+  for (let child = reference, current = reference.parent; current; child = current, current = current.parent) {
+    if (current.id === target.id) return false;
+    if (child.type === 'decorator') continue;
+    if (isDeferredBoundary(current, target)) return true;
+  }
+  return false;
+}
+
+function isDeferredBoundary(container: TreeNode, target: TreeNode): boolean {
+  if (container.type === 'field_definition') return !hasToken(container, 'static');
+  if (!laterRunningTypes.has(container.type) || isImmediatelyInvoked(container)) return false;
+  return !(container.startIndex <= target.startIndex && target.endIndex <= container.endIndex);
 }
 
 /** Only one declaration of an enum may start counting from 0, as two would give their first members the same value. */

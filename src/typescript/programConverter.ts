@@ -7,6 +7,24 @@ import { isConstructorDefinition, ProgramConverter } from '../javascript/program
 import { countedEnumValue, type EnumsInScope, type FoldedValue, foldEnumValue } from './enumFolding';
 import { IMPORTED_MODULE, isUnsteppedStatement, PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 
+const functionScopeTypes = new Set([
+  'function_declaration',
+  'function_expression',
+  'generator_function_declaration',
+  'generator_function',
+  'arrow_function',
+  'method_definition',
+  'class_static_block',
+]);
+
+const blockScopeTypes = new Set([
+  'statement_block',
+  'for_statement',
+  'for_in_statement',
+  'switch_body',
+  'catch_clause',
+]);
+
 /** Converts a TypeScript program, viewed as JavaScript, to the JavaScript interpreter's AST. */
 export class TypeScriptProgramConverter extends ProgramConverter {
   /**
@@ -15,8 +33,13 @@ export class TypeScriptProgramConverter extends ProgramConverter {
    */
   protected override readonly isStrictByDefault = false;
   protected override readonly hasAutoAccessors = true;
-  /** The folded members of each enum, by the scope declaring its name and the name, as esbuild resolves a reference. */
-  private readonly foldedEnums = new WeakMap<object, Map<string, Map<string, FoldedValue>>>();
+  /** The folded members of each enum, by the scope node declaring its name and the name, as esbuild resolves a reference. */
+  private readonly foldedEnums = new WeakMap<Node, Map<string, Map<string, FoldedValue>>>();
+  private readonly scopeParent = new WeakMap<Node, Node>();
+  private readonly scopeNames = new WeakMap<Node, Map<string, Node[]>>();
+  private readonly enclosingScope = new WeakMap<Node, Node>();
+  private readonly enclosingFnScope = new WeakMap<Node, Node>();
+  private readonly foldingEnums = new Set<string>();
   /** The errors of the statements that failed to convert, which tsc reports all of, unlike Node's first one. */
   private readonly statementErrors: SourceDiagnostic[] = [];
 
@@ -81,11 +104,9 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     });
     const text = (value: string): Expression => ({ kind: 'literal', value, row });
     const assignments: Expression[] = [];
-    const folded = this.foldedMembers(name);
-    const enumsInScope: EnumsInScope = (enumName) => {
-      const declaring = this.declaringScope(enumName);
-      return declaring && this.foldedEnums.get(declaring)?.get(enumName);
-    };
+    const currentScope = this.enclosingFnScope.get(node);
+    const folded = currentScope ? this.foldedMapFor(currentScope, name) : new Map<string, FoldedValue>();
+    const enumsInScope: EnumsInScope = (enumName) => this.lookupFoldedEnum(node, enumName);
     let previous: FoldedValue;
     let isFirst = true;
     for (const member of node.childForFieldName('body')?.namedChildren ?? []) {
@@ -132,6 +153,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   }
 
   override convert(root: Node): Program {
+    this.indexEnumScopes(root, root, root);
     const program = super.convert(root);
     if (this.statementErrors.length > 0) throw new CompileError(this.statementErrors);
     return {
@@ -142,9 +164,85 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     };
   }
 
-  /** The folded members of the enum `name` declares where the conversion is, which its declarations there add to. */
-  private foldedMembers(name: string): Map<string, FoldedValue> {
-    const scope = this.declaringScope(name) as object;
+  private indexEnumScopes(node: Node, blockScope: Node, fnScope: Node): void {
+    this.enclosingScope.set(node, blockScope);
+    this.enclosingFnScope.set(node, fnScope);
+    this.recordScopeDeclaration(node, blockScope, fnScope);
+    for (const child of node.namedChildren) {
+      const next = childScopesOf(child, blockScope, fnScope);
+      if (next.block !== blockScope && !this.scopeParent.has(next.block)) this.scopeParent.set(next.block, blockScope);
+      this.indexEnumScopes(child, next.block, next.fn);
+    }
+  }
+
+  private recordScopeDeclaration(node: Node, blockScope: Node, fnScope: Node): void {
+    const entry = declaredScopeEntry(node, blockScope, fnScope);
+    if (!entry) return;
+    for (const name of entry.names) this.addScopeEntry(entry.scope, name, entry.enumNode);
+  }
+
+  private addScopeEntry(scope: Node, name: string, enumNode?: Node): void {
+    let map = this.scopeNames.get(scope);
+    if (!map) {
+      map = new Map();
+      this.scopeNames.set(scope, map);
+    }
+    const list = map.get(name) ?? [];
+    if (enumNode) list.push(enumNode);
+    map.set(name, list);
+  }
+
+  private lookupFoldedEnum(fromNode: Node, enumName: string): Map<string, FoldedValue> | undefined {
+    for (let scope = this.enclosingScope.get(fromNode); scope; scope = this.scopeParent.get(scope)) {
+      const declarations = this.scopeNames.get(scope)?.get(enumName);
+      if (!declarations) continue;
+      if (declarations.length === 0) return undefined;
+      return this.ensureFoldedEnum(scope, enumName, declarations, fromNode);
+    }
+    return undefined;
+  }
+
+  private ensureFoldedEnum(
+    scope: Node,
+    enumName: string,
+    declarations: Node[],
+    fromNode: Node
+  ): Map<string, FoldedValue> | undefined {
+    const isDeferred = this.enclosingFnScope.get(fromNode) !== scope;
+    const existing = !isDeferred ? this.foldedEnums.get(scope)?.get(enumName) : undefined;
+    if (existing) return existing;
+    const key = `${scope.startIndex}:${enumName}`;
+    if (this.foldingEnums.has(key)) return undefined;
+    this.foldingEnums.add(key);
+    try {
+      const folded = new Map<string, FoldedValue>();
+      for (const declaration of declarations) {
+        if (!isDeferred && declaration.startIndex > fromNode.startIndex) continue;
+        this.foldDeclarationInto(declaration, folded);
+      }
+      return folded;
+    } finally {
+      this.foldingEnums.delete(key);
+    }
+  }
+
+  private foldDeclarationInto(declaration: Node, folded: Map<string, FoldedValue>): void {
+    let previous: FoldedValue;
+    let isFirst = true;
+    for (const member of declaration.childForFieldName('body')?.namedChildren ?? []) {
+      if (member.type === 'comment') continue;
+      const key = enumMemberName(member);
+      const initializer = member.childForFieldName('value');
+      const known = initializer
+        ? foldEnumValue(initializer, (name) => this.lookupFoldedEnum(initializer, name))
+        : countedEnumValue(previous, isFirst);
+      folded.set(key, known);
+      previous = known;
+      isFirst = false;
+    }
+  }
+
+  private foldedMapFor(scope: Node, name: string): Map<string, FoldedValue> {
     const scopeEnums = this.foldedEnums.get(scope) ?? new Map<string, Map<string, FoldedValue>>();
     this.foldedEnums.set(scope, scopeEnums);
     const folded = scopeEnums.get(name) ?? new Map<string, FoldedValue>();
@@ -203,4 +301,54 @@ function enumMemberName(member: Node): string {
   // tsx's esbuild does not compile a member name in brackets.
   if (name.type === 'computed_property_name') unsupported(name, 'enum のメンバー名を [ ] で書くこと');
   return name.type === 'string' ? decodeStringLiteral(name.text) : nameOf(name);
+}
+
+function childScopesOf(child: Node, blockScope: Node, fnScope: Node): { block: Node; fn: Node } {
+  if (functionScopeTypes.has(child.type)) return { block: child, fn: child };
+  if (blockScopeTypes.has(child.type)) return { block: child, fn: fnScope };
+  return { block: blockScope, fn: fnScope };
+}
+
+const blockNamedDeclarationTypes = new Set([
+  'function_declaration',
+  'generator_function_declaration',
+  'class_declaration',
+]);
+const variableDeclarationTypes = new Set(['variable_declaration', 'lexical_declaration', 'using_declaration']);
+
+function declaredScopeEntry(
+  node: Node,
+  blockScope: Node,
+  fnScope: Node
+): { scope: Node; names: string[]; enumNode?: Node } | undefined {
+  if (node.type === 'enum_declaration') return { scope: fnScope, names: declaredNodeName(node), enumNode: node };
+  if (blockNamedDeclarationTypes.has(node.type)) return { scope: blockScope, names: declaredNodeName(node) };
+  if (!variableDeclarationTypes.has(node.type)) return undefined;
+  const scope = node.type === 'variable_declaration' ? fnScope : blockScope;
+  return { scope, names: declaratorIdentifierNames(node) };
+}
+
+function declaredNodeName(node: Node): string[] {
+  const nameNode = node.childForFieldName('name');
+  return nameNode ? [nameOf(nameNode)] : [];
+}
+
+function declaratorIdentifierNames(declaration: Node): string[] {
+  return declaration.namedChildren.flatMap((declarator) => {
+    const nameNode = declarator.childForFieldName('name');
+    return nameNode ? patternIdentifierNames(nameNode) : [];
+  });
+}
+
+function patternIdentifierNames(node: Node): string[] {
+  if (node.type === 'identifier' || node.type === 'shorthand_property_identifier_pattern') return [nameOf(node)];
+  return node.namedChildren.flatMap((child) => {
+    if (node.type === 'pair_pattern' && child === node.childForFieldName('key')) return [];
+    if (
+      (node.type === 'assignment_pattern' || node.type === 'object_assignment_pattern') &&
+      child !== node.childForFieldName('left')
+    )
+      return [];
+    return patternIdentifierNames(child);
+  });
 }

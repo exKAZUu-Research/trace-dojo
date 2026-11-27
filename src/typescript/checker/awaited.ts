@@ -16,6 +16,7 @@ const awaitBoundaries = new Set([
   'arrow_function',
   'method_definition',
   'class_static_block',
+  'enum_body',
 ]);
 
 /**
@@ -102,7 +103,7 @@ export function checkAwaitPlace(c: Checker, node: TreeNode, isLoop: boolean): vo
   else if (!container)
     c.error(
       node,
-      `ファイルの一番外側の${what}は、ファイルがモジュールのときしか使えませんが、このファイルには import も export もありません。モジュールにするには、空の 'export {}' を書いてください。`
+      `ファイルの一番外側の${what}は、ファイルがモジュールのときしか使えず、この採点環境ではモジュールの一番外側の${what}も使えません。async 関数の中で使ってください。`
     );
   else if (!hasToken(container, 'async')) c.error(node, nonAsyncAwaitMessage(isLoop));
 }
