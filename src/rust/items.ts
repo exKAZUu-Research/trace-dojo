@@ -358,28 +358,26 @@ export class ItemCollector {
             params: new Map(params.map((param) => [param.name, param])),
             selfType: undefined,
           };
+          const resolve = (): Type => {
+            if (resolved) return resolved;
+            if (resolving) compileError(item.span, `型の別名 ${item.name} が、自分自身を使っています（E0391）。`);
+            resolving = true;
+            try {
+              resolved = lowerType(item.type, scope);
+            } finally {
+              resolving = false;
+            }
+            return resolved;
+          };
           this.declareType(
             module,
             item.name,
-            {
-              kind: 'alias',
-              params,
-              lifetimes: item.generics.lifetimes,
-              resolve: () => {
-                if (resolved) return resolved;
-                if (resolving) compileError(item.span, `型の別名 ${item.name} が、自分自身を使っています（E0391）。`);
-                resolving = true;
-                try {
-                  resolved = lowerType(item.type, scope);
-                } finally {
-                  resolving = false;
-                }
-                return resolved;
-              },
-            },
+            { kind: 'alias', params, lifetimes: item.generics.lifetimes, resolve },
             item.vis,
             item.span
           );
+          // rustc checks an alias's type whether or not anything uses the alias.
+          this.lowering.push(() => void resolve());
           break;
         }
       }
