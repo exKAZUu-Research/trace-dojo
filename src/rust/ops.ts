@@ -319,9 +319,7 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
     case 'Rc':
     case 'Arc':
     case 'RefCell':
-    case 'Cell':
-    case 'Ref':
-    case 'RefMut': {
+    case 'Cell': {
       return valuesEqual(t.args[0], pointee(x), pointee(y));
     }
     case 'CStr': {
@@ -522,10 +520,11 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
     case 'Rc':
     case 'Arc':
     case 'RefCell':
-    case 'Cell':
-    case 'Ref':
-    case 'RefMut': {
+    case 'Cell': {
       return compareValues(t.args[0], pointee(x), pointee(y), partial);
+    }
+    case 'CStr': {
+      return compareBytes(x as bigint[], y as bigint[]);
     }
     case 'Duration': {
       const a = (x as DurationValue).nanos;
@@ -897,4 +896,12 @@ function derefAll(value: Value): Value {
   let current = value;
   while (isPlace(current)) current = current.get();
   return current;
+}
+
+/** Orders byte strings as slices do: by their first differing byte, or the shorter first. */
+function compareBytes(a: bigint[], b: bigint[]): number {
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return Math.sign(a.length - b.length);
 }

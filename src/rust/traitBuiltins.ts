@@ -488,8 +488,21 @@ function debug(goal: Goal): Answer {
   if (t.def.builtin === 'Iter') {
     return supportsDebug(t.args[1]) ? all(debugOperands(t.args[0], t.args[1], t.def)) : 'no';
   }
+  // `Cell`'s `Debug` copies its value out to show it.
+  if (t.def.builtin === 'Cell')
+    return bothAnswers(all(t.args), goal.solver.implements(t.args[0], copyRef(goal.solver)));
   if (DEBUG_TYPES.has(t.def.builtin as string)) return all(t.args);
   return 'no';
+}
+
+function copyRef(solver: TraitSolver): TraitRef {
+  return { trait: solver.program.traitDef('Copy'), args: [] };
+}
+
+/** `yes` when both answers are, `no` when either is. */
+function bothAnswers(a: Answer, b: Answer): Answer {
+  if (a === 'no' || b === 'no') return 'no';
+  return a === 'yes' && b === 'yes' ? 'yes' : 'unknown';
 }
 
 function display({ solver, t, all }: Goal): Answer {
@@ -630,9 +643,7 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
   }
   if (builtin === 'BTreeMap' || builtin === 'BTreeSet') return all(t.args);
   if (builtin === 'Duration' || builtin === 'CStr') return 'yes';
-  if (
-    ['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse', 'Rc', 'RefCell', 'Ref', 'RefMut', 'Arc'].includes(builtin)
-  ) {
+  if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse', 'Rc', 'RefCell', 'Arc'].includes(builtin)) {
     return name === 'Hash' && builtin === 'RefCell' ? 'no' : all(t.args);
   }
   if (builtin === 'Cell')
