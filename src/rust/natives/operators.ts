@@ -6,6 +6,7 @@ import { type IntName, shallow, type Type, typeToString } from '../types';
 import {
   ElementPlace,
   isPlace,
+  MapValue,
   type Place,
   sliceBase,
   sliceLength,
@@ -87,6 +88,12 @@ define(natives);
 /** `Index::index` and `IndexMut::index_mut` of the sequences std implements them for, which generic code reaches. */
 function indexedPlace(self: Value, index: Value, ctx: NativeContext): Place {
   const container = deref(self);
+  if (container instanceof MapValue) {
+    // `Index<&K>` of a map, whose key type is the index's target.
+    const entry = container.entries.get(container.entries.key(operandType(ctx.typeArgs[1]), deref(index)));
+    if (!entry) panic(ctx, 'no entry found for key');
+    return new ElementPlace(entry, 1);
+  }
   if (!Array.isArray(container) && !(container instanceof SliceView)) {
     return panic(
       ctx,
