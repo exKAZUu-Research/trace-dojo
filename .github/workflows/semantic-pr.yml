@@ -8,3 +8,5 @@ on:
 jobs:
   semantic-pr:
     uses: exKAZUu-Research/reusable-workflows/.github/workflows/semantic-pr.yml@main
+    permissions:
+      pull-requests: read
