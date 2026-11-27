@@ -639,12 +639,16 @@ function reducedIntersectionMembers(members: Type[]): Type[] {
   const hasNonNullableMember = members.some(nonNullableIntersectionMember);
   const narrowDomains = new Set(members.map(narrowIntersectionDomain));
   const hasUndefined = members.some((type) => isIntrinsic(type, 'undefined'));
-  return members.filter(
-    (type) =>
-      (type.kind !== 'intrinsic' || !narrowDomains.has(type.name)) &&
-      (!isIntrinsic(type, 'void') || !hasUndefined) &&
-      (!isEmptyObject(type) || !hasNonNullableMember)
-  );
+  let seenEmptyObject = false;
+  return members.filter((type) => {
+    if (type.kind === 'intrinsic' && narrowDomains.has(type.name)) return false;
+    if (isIntrinsic(type, 'void') && hasUndefined) return false;
+    if (isEmptyObject(type)) {
+      if (hasNonNullableMember || seenEmptyObject) return false;
+      seenEmptyObject = true;
+    }
+    return true;
+  });
 }
 
 function narrowIntersectionDomain(type: Type): string | undefined {
