@@ -69,18 +69,20 @@ export function compilePatternInput(
  * only writing it calls `deref_mut` or `index_mut`.
  */
 export function readsThroughUserImpl(c: Compiler, expr: Expr): boolean {
-  for (let part = expr; ; part = part.operand) {
-    if (part.kind === 'index') {
-      const index = c.annotations.indexes.get(part);
-      if (index?.container === 'user' || index?.derefs.includes('user')) return true;
-    } else if (part.kind === 'field') {
-      if (c.annotations.fields.get(part)?.derefs.includes('user')) return true;
-    } else if (part.kind === 'unary' && part.op === '*') {
-      if (derefOnce(c.program, normalize(shallow(part.operand.ty!)))?.kind === 'user') return true;
-    } else {
-      return false;
-    }
+  for (let part = expr; part.kind === 'index' || part.kind === 'field' || part.kind === 'unary'; part = part.operand) {
+    if (part.kind === 'unary' && part.op !== '*') return false;
+    if (stepsThroughUserImpl(c, part)) return true;
   }
+  return false;
+}
+
+function stepsThroughUserImpl(c: Compiler, part: Extract<Expr, { kind: 'index' | 'field' | 'unary' }>): boolean {
+  if (part.kind === 'index') {
+    const index = c.annotations.indexes.get(part);
+    return index?.container === 'user' || index?.derefs.includes('user') === true;
+  }
+  if (part.kind === 'field') return c.annotations.fields.get(part)?.derefs.includes('user') === true;
+  return derefOnce(c.program, normalize(shallow(part.operand.ty!)))?.kind === 'user';
 }
 
 function bindsByRefMut(c: Compiler, pattern: Pattern): boolean {
@@ -214,15 +216,18 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
     if (restLocal) {
       const from = start + (rest as number);
       bindings.push(() => (frame.locals[restLocal.slot] = sliceRest(target, base, from, from + after, restMode)));
-      if (restMovesOut && (place || isPlace(value))) {
-        const moveRest = (): void => {
-          base.fill(MOVED, from, from + after);
-        };
-        bindings.push(Object.assign(moveRest, { movesOut: true }));
-      }
+      if (restMovesOut && (place || isPlace(value))) bindings.push(movingOut(base, from, from + after));
     }
     return true;
   };
+}
+
+/** Marks the elements a by-value `rest @ ..` takes as moved out of the array. */
+function movingOut(base: Value[], from: number, to: number): (() => void) & { movesOut: true } {
+  const moveOut = (): void => {
+    base.fill(MOVED, from, to);
+  };
+  return Object.assign(moveOut, { movesOut: true as const });
 }
 
 /**

@@ -51,15 +51,9 @@ export function compileMatch(c: Compiler, expr: ExprOf<'match'>, asStatement: bo
       for (const { matcher, guard, body, slots, takeAll } of arms) {
         const moveOut = matcher(frame, value, () => place);
         if (!moveOut) continue;
-        if (guard) {
-          const mark = frame.runtime.liveGuards.length;
-          const passed = guard(frame) === true;
-          // A guard's temporaries go before its arm runs.
-          frame.runtime.releaseGuards(frame, mark);
-          if (!passed) {
-            frame.endScope(slots, false);
-            continue;
-          }
+        if (guard && !passesGuard(frame, guard)) {
+          frame.endScope(slots, false);
+          continue;
         }
         moveOut();
         takeAll?.(frame);
@@ -72,6 +66,14 @@ export function compileMatch(c: Compiler, expr: ExprOf<'match'>, asStatement: bo
       throw new Error('No arm matched');
     });
   };
+}
+
+/** Runs a match guard, whose temporaries go before its arm runs. */
+function passesGuard(frame: Frame, guard: Eval): boolean {
+  const mark = frame.runtime.liveGuards.length;
+  const passed = guard(frame) === true;
+  frame.runtime.releaseGuards(frame, mark);
+  return passed;
 }
 
 export function compileLoop(c: Compiler, expr: ExprOf<'loop'>): Eval {
