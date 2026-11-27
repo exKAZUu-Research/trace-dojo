@@ -377,8 +377,11 @@ export type Condition = { kind: 'expr'; expr: Expr } | { kind: 'let'; pattern: P
 
 export interface MatchArm {
   pattern: Pattern;
-  /** The arm's `if` guard, which runs after the pattern matches and lets later arms try when it is false. */
-  guard: Expr | undefined;
+  /**
+   * The arm's `if` guard, which runs after the pattern matches and lets later arms try when it is false: conditions
+   * that must all hold, in order, whose `let` patterns bind variables for the arm's body (`if let Some(x) = f(v)`).
+   */
+  guard: Condition[] | undefined;
   body: Expr;
   span: Span;
 }

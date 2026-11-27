@@ -739,7 +739,7 @@ export abstract class ExpressionConverter extends MacroConverter {
       return { kind: 'if', cond: this.condition(condition), consequent, else: elseExpr, span };
     }
     const label = `chain#${span.row}:${span.col}`;
-    const parts = condition.namedChildren.filter((child) => !isComment(child)).map((child) => this.condition(child));
+    const parts = this.conditions(condition);
     let inner: Expr = { kind: 'break', label, value: consequent, span: consequent.span };
     for (const part of parts.toReversed()) {
       const body: Block = {
@@ -767,6 +767,12 @@ export abstract class ExpressionConverter extends MacroConverter {
     return { kind: 'loop', label, body: loopBody, span, isBlock: true };
   }
 
+  /** The conditions of a condition or of a `let` chain (`let Some(x) = a && x > 0`), in order. */
+  private conditions(node: Node): Condition[] {
+    if (node.type !== 'let_chain') return [this.condition(node)];
+    return node.namedChildren.filter((child) => !isComment(child)).map((child) => this.condition(child));
+  }
+
   private condition(node: Node): Condition {
     if (node.type === 'let_condition') {
       return {
@@ -790,12 +796,9 @@ export abstract class ExpressionConverter extends MacroConverter {
       if (attributes.length > 0 && !this.attributes.read(attributes)) continue;
       const matchPattern = this.field(arm, 'pattern');
       const condition = matchPattern.childForFieldName('condition');
-      if (condition && (condition.type === 'let_condition' || condition.type === 'let_chain')) {
-        syntaxError(this.span(condition), 'match の腕のガードの if let は、不安定な機能なので使えません（E0658）。');
-      }
       const inner = matchPattern.namedChildren.find((child) => !isComment(child) && child.id !== condition?.id);
       const pattern: Pattern = inner ? this.pattern(inner) : { kind: 'wild', span: this.span(matchPattern) };
-      const guard = condition ? this.expr(condition) : undefined;
+      const guard = condition ? this.conditions(condition) : undefined;
       arms.push({ pattern, guard, body: this.expr(this.field(arm, 'value')), span: this.span(arm) });
     }
     return { kind: 'match', scrutinee: this.expr(this.field(node, 'value')), arms, endRow: node.endPosition.row, span };

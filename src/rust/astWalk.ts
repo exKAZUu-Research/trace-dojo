@@ -148,7 +148,7 @@ function forEachDirectInControlFlow(expr: Expr, visit: (expr: Expr) => void, pat
       if (expr.arms.length === 1) visitPatternSource(expr.arms[0].pattern, expr.scrutinee, visit, patternSource);
       else visit(expr.scrutinee);
       for (const arm of expr.arms) {
-        if (arm.guard) visit(arm.guard);
+        for (const cond of arm.guard ?? []) visitCondition(cond, visit, patternSource);
         visit(arm.body);
       }
       return;

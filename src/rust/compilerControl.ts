@@ -1,11 +1,11 @@
-import type { Condition, Expr, Pattern } from './ast';
+import type { Condition, Expr, MatchArm, Pattern } from './ast';
 import type { Compiler, Eval } from './compiler';
 import { compileGuardedMatcher, compilePatternInput, takesWhole } from './compilerPatterns';
 import { normalize } from './infer';
 import { ControlSignal, type Frame, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { resolve, shallow, type Type } from './types';
-import { DONE, type IterValue, UNIT_VALUE, type Value } from './values';
+import { DONE, type IterValue, type Place, UNIT_VALUE, type Value } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 type ConditionalEval = (frame: Frame, onMatch: () => void) => boolean;
@@ -36,44 +36,87 @@ export function compileMatch(c: Compiler, expr: ExprOf<'match'>, asStatement: bo
     expr.scrutinee,
     expr.arms.map((arm) => arm.pattern)
   );
-  const arms = expr.arms.map((arm) => {
-    const matcher = compileGuardedMatcher(c, arm.pattern);
-    const guard = arm.guard && c.value(arm.guard);
-    const body = asStatement ? c.statement(arm.body) : c.value(arm.body);
-    const slots = c.patternSlots(arm.pattern);
-    const takeAll = takesWhole(c, expr.scrutinee, arm.pattern);
-    return { matcher, guard, body, slots, takeAll };
-  });
+  const arms = expr.arms.map((arm) => compileArm(c, expr, arm, asStatement));
   return (frame) => {
     frame.runtime.spend();
     const { value, place } = scrutinee(frame);
     return frame.runtime.withRoots([place], () => {
-      for (const { matcher, guard, body, slots, takeAll } of arms) {
-        const moveOut = matcher(frame, value, () => place);
-        if (!moveOut) continue;
-        if (guard && !passesGuard(frame, guard)) {
-          frame.endScope(slots, false);
-          continue;
-        }
-        moveOut();
-        takeAll?.(frame);
-        try {
-          return body(frame);
-        } finally {
-          frame.endScope(slots);
-        }
+      for (const arm of arms) {
+        const result = arm(frame, value, place);
+        if (result !== NO_MATCH) return result;
       }
       throw new Error('No arm matched');
     });
   };
 }
 
-/** Runs a match guard, whose temporaries go before its arm runs. */
-function passesGuard(frame: Frame, guard: Eval): boolean {
-  const mark = frame.runtime.liveGuards.length;
-  const passed = guard(frame) === true;
-  frame.runtime.releaseGuards(frame, mark);
-  return passed;
+const NO_MATCH: unique symbol = Symbol('no match');
+
+/** An arm, giving its body's value when its pattern matches and its guard holds, or `NO_MATCH` to try the next. */
+function compileArm(
+  c: Compiler,
+  expr: ExprOf<'match'>,
+  arm: MatchArm,
+  asStatement: boolean
+): (frame: Frame, value: Value, place: Place) => Value | typeof NO_MATCH {
+  const matcher = compileGuardedMatcher(c, arm.pattern);
+  const guard = arm.guard && compileGuard(c, arm.guard);
+  const body = asStatement ? c.statement(arm.body) : c.value(arm.body);
+  const slots = c.patternSlots(arm.pattern);
+  const takeAll = takesWhole(c, expr.scrutinee, arm.pattern);
+  return (frame, value, place) => {
+    const moveOut = matcher(frame, value, () => place);
+    if (!moveOut) return NO_MATCH;
+    const run = (): Value => {
+      moveOut();
+      takeAll?.(frame);
+      try {
+        return body(frame);
+      } finally {
+        frame.endScope(slots);
+      }
+    };
+    if (!guard) return run();
+    let result: Value = UNIT_VALUE;
+    // The guard's `let` bindings live through the arm's body, which runs once every condition holds.
+    const ran = guard.holds(frame, () => {
+      try {
+        result = run();
+      } finally {
+        frame.endScope(guard.slots);
+      }
+    });
+    if (ran) return result;
+    frame.endScope(slots, false);
+    frame.endScope(guard.slots, false);
+    return NO_MATCH;
+  };
+}
+
+/**
+ * A match guard: its conditions in order, each running the next once it holds and the arm last, telling whether all
+ * held; an expression's temporaries go before what follows it runs, as `if`'s do. `slots` are its `let` bindings'.
+ */
+function compileGuard(c: Compiler, conds: Condition[]): { holds: ConditionalEval; slots: number[] } {
+  const parts = conds.map((cond) => compileCondition(c, cond));
+  const slots = conds.flatMap((cond) => (cond.kind === 'let' ? c.patternSlots(cond.pattern) : []));
+  const from = (index: number): ConditionalEval => {
+    if (index === parts.length) {
+      return (_frame, onMatch) => {
+        onMatch();
+        return true;
+      };
+    }
+    const rest = from(index + 1);
+    return (frame, onMatch) => {
+      let held = false;
+      const holds = parts[index](frame, () => {
+        held = rest(frame, onMatch);
+      });
+      return holds && held;
+    };
+  };
+  return { holds: from(0), slots };
 }
 
 export function compileLoop(c: Compiler, expr: ExprOf<'loop'>): Eval {

@@ -3,7 +3,7 @@ import type { Expr, Pattern } from './ast';
 import { normalize } from './infer';
 import type { Place } from './loanGraph';
 import { type Layout, NONE } from './regions';
-import { shallow, type Type } from './types';
+import { type FnDef, shallow, type Type } from './types';
 
 /** How a pattern binds variables: by value, or by a shared or a mutable reference (match ergonomics). */
 export type BindingMode = 'shared' | 'mut' | undefined;
@@ -67,4 +67,16 @@ export function refTarget(type: Type | undefined): Type | undefined {
 export function isReference(type: Type | undefined): boolean {
   const t = type && normalize(shallow(type));
   return t?.kind === 'ref' || (t?.kind === 'adt' && t.def.builtin !== 'Box');
+}
+
+export function variantOf(annotations: Annotations, pattern: Pattern): number {
+  const res = annotations.paths.get(pattern);
+  return res?.kind === 'ctor' ? res.variant : 0;
+}
+
+/** The argument a collection's method stores in it (`push`, `insert`), whose drop goes with the collection. */
+export function storedElement<V>(fn: FnDef, args: V[]): V | undefined {
+  const key = fn.nativeKey;
+  if (!key || !/^(Vec|VecDeque|BinaryHeap)<_>::(push|push_back|push_front|insert|extend)$/.test(key)) return undefined;
+  return args[key.endsWith('::insert') ? 1 : 0];
 }

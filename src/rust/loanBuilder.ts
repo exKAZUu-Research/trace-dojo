@@ -22,7 +22,9 @@ import {
   matchDeref,
   project,
   refTarget,
+  storedElement,
   tupleElem,
+  variantOf,
 } from './loanPlaces';
 import { isMutableReference, reborrowedIteratorLayout, reborrowsIterator } from './receiverReborrow';
 import {
@@ -632,14 +634,14 @@ export class LoanBuilder {
       case 'tuple':
       case 'tupleStruct': {
         const [sub, mode] = matchDeref(p, place, byRef);
-        const prefix = p.kind === 'tuple' ? '' : `${this.variantOf(p)}:`;
+        const prefix = p.kind === 'tuple' ? '' : `${variantOf(this.annotations, p)}:`;
         for (const [index, elem] of p.elems.entries())
           this.bindPart(binding, elem, project(sub, `${prefix}${index}`), mode);
         return;
       }
       case 'struct': {
         const [sub, mode] = matchDeref(p, place, byRef);
-        const variant = this.variantOf(p);
+        const variant = variantOf(this.annotations, p);
         for (const field of p.fields) {
           this.bindPart(binding, field.pattern, project(sub, `${variant}:${field.name}`), mode);
         }
@@ -686,11 +688,6 @@ export class LoanBuilder {
     binding.accesses.push({ place, kind: mutable ? 'deep' : 'read', span: p.span });
     const target = layout.kind === 'ref' ? layout.target : NONE;
     binding.relations.push(() => this.relateBorrow(place, mutable, target, region));
-  }
-
-  private variantOf(pattern: Pattern): number {
-    const res = this.annotations.paths.get(pattern);
-    return res?.kind === 'ctor' ? res.variant : 0;
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -1043,24 +1040,38 @@ export class LoanBuilder {
     const ends: (number | undefined)[] = [];
     for (const arm of expr.arms) {
       this.current = start;
-      let failed: number | undefined;
+      const failures: (number | undefined)[] = [];
       this.patternScope(arm.pattern, arm.body, () => {
         this.bind(arm.pattern, source);
-        if (arm.guard) {
-          this.value(arm.guard);
-          failed = this.current;
-        }
-        const value = this.value(arm.body);
-        if (this.current !== undefined) this.store(value, result);
+        this.guarded(arm.guard ?? [], arm.body, failures, () => {
+          const value = this.value(arm.body);
+          if (this.current !== undefined) this.store(value, result);
+        });
       });
       ends.push(this.current);
       if (arm.guard) {
-        this.join([start, failed]);
+        this.join([start, ...failures]);
         start = this.current;
       }
     }
     this.join(expr.arms.length === 0 ? [] : ends);
     return result;
+  }
+
+  /**
+   * Evaluates a match guard's conditions in order, each `let` binding for the rest and the arm's body, collecting the
+   * points from which the program goes on to the next arm when one does not hold.
+   */
+  private guarded(conds: Condition[], body: Expr, failures: (number | undefined)[], visit: () => void): void {
+    const [cond, ...rest] = conds;
+    if (!cond) {
+      visit();
+      return;
+    }
+    this.patternScope(cond.kind === 'let' ? cond.pattern : undefined, body, () => {
+      failures.push(this.condition(cond));
+      this.guarded(rest, body, failures, visit);
+    });
   }
 
   /** A loop whose body `body` builds, which goes round again from its end. */
@@ -1167,9 +1178,7 @@ export class LoanBuilder {
   }
 
   private storeCollectionElement(target: Place, fn: FnDef, args: Value[], point: number): void {
-    const key = fn.nativeKey;
-    if (!key || !/^(Vec|VecDeque|BinaryHeap)<_>::(push|push_back|push_front|insert|extend)$/.test(key)) return;
-    const argument = args[key.endsWith('::insert') ? 1 : 0];
+    const argument = storedElement(fn, args);
     if (argument !== undefined) this.storeDrop(point, target, { root: argument, proj: [] });
   }
 

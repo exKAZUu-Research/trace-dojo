@@ -456,7 +456,7 @@ function matchExpr(c: Checker, expr: Extract<Expr, { kind: 'match' }>, expected:
     c.withScope(() => {
       checkPattern(c, arm.pattern, scrutinee, 'move');
       requireRefMutSource(c, arm.pattern, expr.scrutinee);
-      if (arm.guard) c.coerceExpr(arm.guard, BOOL);
+      for (const cond of arm.guard ?? []) checkCondition(c, cond);
       const type = c.expr(arm.body, expected);
       if (shallow(type).kind === 'never') return;
       completes = true;

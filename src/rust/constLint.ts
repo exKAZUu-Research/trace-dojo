@@ -528,6 +528,16 @@ export class ConstLint {
     return this.bindMatched(cond.pattern, this.expr(cond.value));
   }
 
+  /** Whether a match guard's conditions all hold, as far as their values are known. */
+  private guardHolds(conds: Condition[]): boolean | undefined {
+    for (const cond of conds) {
+      const holds = this.condition(cond);
+      if (typeof holds !== 'boolean') return undefined;
+      if (!holds) return false;
+    }
+    return true;
+  }
+
   private bindMatched(pattern: Pattern, value: Known | undefined): boolean | undefined {
     const matches = this.matchesPattern(pattern, value);
     this.bind(pattern, matches === true ? value : undefined);
@@ -549,11 +559,9 @@ export class ConstLint {
       if (matches === undefined) break;
       if (!matches) continue;
       this.bind(arm.pattern, scrutinee);
-      if (arm.guard) {
-        const guard = this.expr(arm.guard);
-        if (typeof guard !== 'boolean') break;
-        if (!guard) continue;
-      }
+      const guard = this.guardHolds(arm.guard ?? []);
+      if (guard === undefined) break;
+      if (!guard) continue;
       return this.expr(arm.body);
     }
     this.known.clear();
@@ -570,7 +578,7 @@ export class ConstLint {
       const matches = this.matchesPattern(arm.pattern, scrutinee);
       if (matches === false) continue;
       this.bind(arm.pattern, matches === true ? scrutinee : undefined);
-      if (arm.guard) this.expr(arm.guard);
+      for (const cond of arm.guard ?? []) this.condition(cond);
       allDiverge = this.branch(() => this.expr(arm.body)) && allDiverge;
       if (matches === true && !arm.guard) break;
     }

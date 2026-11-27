@@ -304,10 +304,16 @@ export class BorrowChecker {
     let next = afterScrutinee;
     for (const arm of expr.arms) {
       const bound = this.bindPattern(arm.pattern, expr.scrutinee, next);
-      const armState = arm.guard ? this.expr(arm.guard, bound, 'move') : bound;
+      let armState = bound;
+      let failed = BOTTOM;
+      for (const cond of arm.guard ?? []) {
+        const { matched, otherwise } = this.condition(cond, armState);
+        failed = join(failed, otherwise);
+        armState = matched;
+      }
       result = join(result, this.expr(arm.body, armState, 'move'));
       if (arm.guard) {
-        const passed = new Map(armState);
+        const passed = new Map(failed);
         for (const [local, varState] of next) if (bound.get(local) !== varState) passed.set(local, varState);
         next = join(next, passed);
       }

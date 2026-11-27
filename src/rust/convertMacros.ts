@@ -1,7 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { Block, Expr, FormatArgs, Item, MacroCall, MatchArm, Pattern, Span, TypeAst } from './ast';
+import type { Block, Condition, Expr, FormatArgs, Item, MacroCall, MatchArm, Pattern, Span, TypeAst } from './ast';
 import { PatternConverter } from './convertPatterns';
 import { isComment, syntaxError, unavailable } from './convertSyntax';
 import { parseFormatString } from './formatString';
@@ -448,7 +448,7 @@ export abstract class MacroConverter extends PatternConverter {
   }
 
   /** The value, the pattern, and the guard of `matches!(value, pattern if guard)`. */
-  private matchesParts(tree: Node, span: Span): { value: Expr; pattern: Pattern; guard: Expr | undefined } {
+  private matchesParts(tree: Node, span: Span): { value: Expr; pattern: Pattern; guard: Condition[] | undefined } {
     const tokens = tree.children.slice(1, -1).filter((child) => !isComment(child));
     const last = tokens.at(-1);
     const end = last?.type === ',' ? last.startIndex - tree.startIndex : tree.text.length - 1;
@@ -463,9 +463,9 @@ export abstract class MacroConverter extends PatternConverter {
       const patternNode = matchPattern.namedChildren.find((child) => !isComment(child) && child.id !== condition?.id);
       return {
         pattern: patternNode ? this.pattern(patternNode) : ({ kind: 'wild', span } as Pattern),
-        guard: condition ? this.expr(condition) : undefined,
+        guard: condition ? [{ kind: 'expr', expr: this.expr(condition) }] : undefined,
       };
-    }) as { pattern: Pattern; guard: Expr | undefined };
+    }) as { pattern: Pattern; guard: Condition[] | undefined };
     return { value, ...pattern };
   }
 
