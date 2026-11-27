@@ -101,10 +101,8 @@ export function unavailableMemberCheck(runtime: Runtime): UnavailableMemberCheck
 }
 
 function unavailableSymbolFeature(value: Value, key: Key | undefined, constructor: Value): string | undefined {
-  const name = typeof value === 'symbol' ? unavailableSymbolNames.get(value) : key;
-  if (typeof name !== 'string') return undefined;
-  if (typeof value !== 'symbol' && (value !== constructor || !unavailableWellKnownSymbols.has(name))) return undefined;
-  return wellKnownSymbolFeature(name);
+  const name = typeof value === 'symbol' ? unavailableSymbolNames.get(value) : value === constructor ? key : undefined;
+  return typeof name === 'string' && unavailableWellKnownSymbols.has(name) ? wellKnownSymbolFeature(name) : undefined;
 }
 
 export function wellKnownSymbolFeature(name: string): string {
