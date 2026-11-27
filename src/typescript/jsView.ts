@@ -39,6 +39,8 @@ class ViewNode implements Node {
   isUnboundCall = false;
   /** Whether an `imported_module` node wraps the CommonJS module in an ESM namespace object (`__toESM`). */
   isNamespaceImport = false;
+  /** Whether the root program has top-level `import` or `export` syntax (an external module). */
+  isExternalModule = false;
   /** Generated helper binding names allocated for this program, omitted from learner trace snapshots. */
   hiddenNames?: ReadonlySet<string>;
   /** A collision-free alias bound to an enum's object when a member initializer shadows the enum's source name. */
@@ -181,10 +183,11 @@ function collectIdentifierNames(root: TreeNode, budget: ExecutionBudget): Set<st
  * parameter properties become fields that the constructor assigns.
  */
 export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node {
+  const externalModule = isModule(root);
   const binder = new Binder(root, new Scope('global', undefined, undefined), {
     budget,
     skipAssignmentAnalysis: true,
-    isExternalModule: isModule(root),
+    isExternalModule: externalModule,
     augmentableModules: importableModules,
   });
   const context = new ViewContext(root, budget);
@@ -199,6 +202,7 @@ export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node 
   activeDisplayNames = context.displayNames;
   try {
     const viewed = view(root, binder);
+    viewed.isExternalModule = externalModule;
     if (context.hiddenNames.size > 0) viewed.hiddenNames = context.hiddenNames;
     return viewed;
   } finally {
@@ -1115,6 +1119,11 @@ export function isUnboundCallMember(node: Node): boolean {
 /** Whether an `imported_module` node wraps the module in an ESM namespace object. */
 export function isNamespaceImportNode(node: Node): boolean {
   return node instanceof ViewNode && node.isNamespaceImport;
+}
+
+/** Whether a viewed root program came from an external module (`import` or `export` at top level). */
+export function isExternalModuleView(node: Node): boolean {
+  return node instanceof ViewNode && node.isExternalModule;
 }
 
 /** Generated helper binding names allocated for a viewed program, omitted from learner trace snapshots. */

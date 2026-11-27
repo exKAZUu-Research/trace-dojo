@@ -19,6 +19,7 @@ import {
   hiddenNamesOf,
   IMPORTED_MODULE,
   inferredTargetNameOf,
+  isExternalModuleView,
   isHiddenCallFunction,
   isNamespaceImportNode,
   isUnboundCallMember,
@@ -234,7 +235,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     if (this.statementErrors.length > 0) throw new CompileError(this.statementErrors);
     return {
       ...program,
-      hasCommonJsReceiver: true,
+      hasCommonJsReceiver: !isExternalModuleView(root),
       rejectsFunctionText: true,
       rejectsUnavailableMembers: true,
       hiddenNames: hiddenNamesOf(root),
