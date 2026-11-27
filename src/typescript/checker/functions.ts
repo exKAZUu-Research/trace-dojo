@@ -744,10 +744,13 @@ export class FunctionChecker {
   }
 
   /** What `yield*` gives back: what the generator or other iterator it delegates to returns when done. */
-  private delegatedReturnType(operandType: Type, isAsync: boolean): Type {
+  private delegatedReturnType(site: TreeNode, operandType: Type, isAsync: boolean): Type {
+    const errorSite = { node: site, kind: 'yield' as const };
     const delegated = this.delegatedIteration(operandType, isAsync);
     if (delegated) {
-      return delegated.syncToAsync ? awaitedType(this.c, delegated.types.returnType) : delegated.types.returnType;
+      return delegated.syncToAsync
+        ? awaitedType(this.c, delegated.types.returnType, errorSite)
+        : delegated.types.returnType;
     }
     const apparent = this.c.apparentType(operandType);
     const hasAsyncMethod = isAsync && this.c.patterns.hasCallableIteratorMethod(apparent, 'asyncIterator');
@@ -755,7 +758,7 @@ export class FunctionChecker {
     if (asyncReturn) return asyncReturn;
     // An async generator delegates to a synchronous iterable through its `[Symbol.iterator]()` when it has no async one.
     const syncReturn = hasAsyncMethod ? undefined : this.c.patterns.iteratorReturnType(operandType, 'iterator');
-    return (syncReturn && isAsync ? awaitedType(this.c, syncReturn) : syncReturn) ?? anyType;
+    return (syncReturn && isAsync ? awaitedType(this.c, syncReturn, errorSite) : syncReturn) ?? anyType;
   }
 
   private delegatedIterationTypes(operandType: Type, isAsync: boolean): IterationTypes | undefined {
@@ -831,7 +834,7 @@ export class FunctionChecker {
       this.c.expressions.checkAssignable(operand ?? node, yielded, generator.yieldType, operand);
     if (delegated) {
       this.checkDelegatedNextType(operand ?? node, operandType, generator, isAsync);
-      return this.delegatedReturnType(operandType, isAsync);
+      return this.delegatedReturnType(operand ?? node, operandType, isAsync);
     }
     if (generator.nextType) return generator.nextType;
     if (contextual && !isAnyLike(contextual)) {
