@@ -145,16 +145,18 @@ export class Calls {
 
   private instantiationMembers(type: Type, seen = new Set<number>()): Type[] {
     if (type.kind === 'union') return type.types.flatMap((member) => this.instantiationMembers(member, seen));
-    if (type.kind === 'typeParameter') {
-      if (seen.has(type.id)) return [unknownType];
-      seen.add(type.id);
-      const constraint = this.c.constraintOf(type);
-      return constraint ? this.instantiationMembers(constraint, seen) : [unknownType];
-    }
-    if (type.kind === 'indexedAccess' || type.kind === 'conditional') {
+    if (type.kind !== 'typeParameter' && type.kind !== 'indexedAccess' && type.kind !== 'conditional') return [type];
+    if (seen.has(type.id)) return [unknownType];
+    seen.add(type.id);
+    try {
+      if (type.kind === 'typeParameter') {
+        const constraint = this.c.constraintOf(type);
+        return constraint ? this.instantiationMembers(constraint, seen) : [unknownType];
+      }
       return this.instantiationMembers(this.c.apparentType(type), seen);
+    } finally {
+      seen.delete(type.id);
     }
-    return [type];
   }
 
   private applicableInstantiationSignatures(
