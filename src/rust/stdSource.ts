@@ -1501,6 +1501,7 @@ pub mod io {
     }
     impl From<ErrorKind> for Error { fn from(kind: ErrorKind) -> Error; }
     pub trait Read {
+        fn read(&mut self, buf: &mut [u8]) -> Result<usize>;
         fn read_to_string(&mut self, buf: &mut String) -> Result<usize>;
         fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize>;
     }

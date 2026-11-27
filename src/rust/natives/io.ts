@@ -12,7 +12,9 @@ import {
   IoStream,
   IterValue,
   type Place,
+  sliceBase,
   sliceItems,
+  sliceLength,
   type SliceView,
   StringValue,
   StructValue,
@@ -208,6 +210,27 @@ function readerOf(ctx: NativeContext, source: Value): TextReader {
   return reader ?? panic(ctx, '書き込み用に開いたファイルからの読み込みは、この採点環境では使えません。');
 }
 
+/**
+ * `Read::read`: as many of the next bytes as the buffer holds, whole characters only, as the file system holds text; a
+ * buffer too small for the next character is not supported.
+ */
+function readInto(ctx: NativeContext, reader: TextReader, buf: Value): number {
+  const target = deref(buf) as Value[] | SliceView;
+  const capacity = sliceLength(target);
+  if (capacity === 0 || reader.isAtEnd) return 0;
+  const { base, start } = sliceBase(target);
+  const encoder = new TextEncoder();
+  let written = 0;
+  for (const char of reader.text.slice(reader.position)) {
+    const bytes = encoder.encode(char);
+    if (written + bytes.length > capacity) break;
+    for (const byte of bytes) base[start + written++] = BigInt(byte);
+    reader.position += char.length;
+  }
+  if (written === 0) panic(ctx, '1 文字より小さいバッファへの read は、この採点環境では使えません。');
+  return written;
+}
+
 function readLineInto(ctx: NativeContext, reader: TextReader, buf: Value): Value {
   const line = readLine(ctx, reader);
   return BigInt(line === undefined ? 0 : appendText(ctx, buf, line));
@@ -254,6 +277,7 @@ define({
   'Stdin::lock': ([self]) => stream(self),
   'Stdin::read_line': ([self, buf], ctx) => reading(ctx, self, (reader) => readLineInto(ctx, reader, buf)),
   'Stdin::lines': ([self], ctx) => linesOf(ctx, self),
+  'std::io::Read::read': ([self, buf], ctx) => reading(ctx, self, (reader) => BigInt(readInto(ctx, reader, buf))),
   'std::io::Read::read_to_string': ([self, buf], ctx) =>
     reading(ctx, self, (reader) => BigInt(appendText(ctx, buf, reader.readRest()))),
   'std::io::Read::read_to_end': ([self, buf], ctx) =>
