@@ -119,9 +119,13 @@ export class Unifier {
     return lengths && this.unify(x.elem, y.elem);
   }
 
-  /** Functions of the same signature; an `unsafe fn` item becomes only an `unsafe fn` pointer, and a safe one either. */
+  /**
+   * Functions of the same signature; an `unsafe fn` item becomes only an `unsafe fn` pointer, and a safe one either.
+   * Pointers are the same type only when both or neither are `unsafe` (a coercion makes a safe one `unsafe`).
+   */
   private unifyFns(x: Type & { kind: 'fn' }, y: Type & { kind: 'fn' }): boolean {
     if ((unsafeItem(x) && isSafePointer(y)) || (unsafeItem(y) && isSafePointer(x))) return false;
+    if (!x.item && !y.item && (x.isUnsafe ?? false) !== (y.isUnsafe ?? false)) return false;
     return this.unifySignatures(x, y);
   }
 

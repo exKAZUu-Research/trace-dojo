@@ -1076,6 +1076,8 @@ export class Checker {
       }
     }
     if (this.coercePointer(expr, a, t)) return;
+    // A safe function pointer coerces to an `unsafe` one.
+    if (a.kind === 'fn' && t.kind === 'fn' && t.isUnsafe && this.unifier.tryUnify({ ...a, isUnsafe: true }, t)) return;
     // Only a closure that captures nothing is a function.
     if (
       a.kind === 'closure' &&
