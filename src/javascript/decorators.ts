@@ -125,7 +125,7 @@ function applyClassDecorators(
   for (let index = definition.classDecorators.length - 1; index >= 0; index--) {
     const context = decoratorContext(runtime, 'class', definition.name, classInitializers, metadata);
     const decorator = requireCallable(runtime, definition.classDecorators[index]);
-    const result = runtime.call(decorator, undefined, [cls, context], definition.classDecoratorRows[index]);
+    const result = callDecorator(runtime, decorator, cls, context, definition.classDecoratorRows[index]);
     for (const value of classInitializers) temporaries.push(value);
     if (result === undefined) continue;
     if (!(result instanceof JsFunction)) runtime.throwError('TypeError', 'class decorators must return a function');
@@ -199,7 +199,7 @@ function decorateMember(
   const context = decoratorContext(runtime, kind, definition.name, added, metadata, definition);
   const callable = requireCallable(runtime, definition.decorators?.[index]);
   if (kind === 'field') {
-    const initializer = runtime.call(callable, undefined, [undefined, context], callRow);
+    const initializer = callDecorator(runtime, callable, undefined, context, callRow);
     if (initializer !== undefined) addTransform(field, requireCallable(runtime, initializer));
     return;
   }
@@ -208,12 +208,12 @@ function decorateMember(
     if (kind === 'accessor') decorateAutoAccessor(runtime, { property, field, decorator: callable, context, callRow });
     else {
       const slot = kind === 'getter' ? 'get' : 'set';
-      const result = runtime.call(callable, undefined, [property[slot], context], callRow);
+      const result = callDecorator(runtime, callable, property[slot], context, callRow);
       if (result !== undefined) property[slot] = requireFunction(runtime, result);
     }
     return;
   }
-  const result = runtime.call(callable, undefined, [property.value, context], callRow);
+  const result = callDecorator(runtime, callable, property.value, context, callRow);
   if (result !== undefined) property.value = requireFunction(runtime, result);
 }
 
@@ -226,12 +226,18 @@ function decorateAutoAccessor(
     decorator,
     context,
     callRow,
-  }: { property: AccessorProperty; field?: ClassField; decorator: Value; context: JsObject; callRow?: number }
+  }: {
+    property: AccessorProperty;
+    field?: ClassField;
+    decorator: Value;
+    context: DecoratorContextHandle;
+    callRow?: number;
+  }
 ): void {
   const target = runtime.newObject();
   runtime.createDataProperty(target, 'get', property.get);
   runtime.createDataProperty(target, 'set', property.set);
-  const result = runtime.call(decorator, undefined, [target, context], callRow);
+  const result = callDecorator(runtime, decorator, target, context, callRow);
   if (result === undefined) return;
   if (!isObject(result)) runtime.throwError('TypeError', 'accessor decorators must return an object');
   const get = runtime.get(result, 'get');
@@ -252,6 +258,25 @@ function addTransform(field: ClassField | undefined, transform: Value): void {
   if (field) (field.transforms ??= []).unshift(transform);
 }
 
+interface DecoratorContextHandle {
+  context: JsObject;
+  finish: () => void;
+}
+
+function callDecorator(
+  runtime: Runtime,
+  callable: Value,
+  target: Value,
+  { context, finish }: DecoratorContextHandle,
+  callRow?: number
+): Value {
+  try {
+    return runtime.call(callable, undefined, [target, context], callRow);
+  } finally {
+    finish();
+  }
+}
+
 function decoratorContext(
   runtime: Runtime,
   kind: string,
@@ -259,7 +284,7 @@ function decoratorContext(
   initializers: Value[],
   metadata: JsObject,
   definition?: MemberDefinition
-): JsObject {
+): DecoratorContextHandle {
   const context = runtime.newObject();
   runtime.createDataProperty(context, 'kind', kind);
   runtime.createDataProperty(context, 'name', name);
@@ -269,12 +294,19 @@ function decoratorContext(
     runtime.createDataProperty(context, 'access', memberAccess(runtime, definition, kind));
   }
   runtime.createDataProperty(context, 'metadata', metadata);
+  let finished = false;
   const addInitializer = runtime.newNativeFunction('addInitializer', 1, ({ runtime: caller, args }) => {
+    if (finished) caller.throwError('TypeError', 'Already initialized');
     initializers.push(requireCallable(caller, args[0]));
     return;
   });
   runtime.createDataProperty(context, 'addInitializer', addInitializer);
-  return context;
+  return {
+    context,
+    finish: () => {
+      finished = true;
+    },
+  };
 }
 
 /** `context.access`, whose `has`, `get`, and `set` reach the member on an object as the class's own code would. */

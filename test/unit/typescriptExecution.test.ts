@@ -833,3 +833,40 @@ console.log(typeof exists, p, boxed.value, ver);`;
   ]);
   expect(diagnosticsOf("type Bad = import('fs').Stats;")).toEqual(['1: fs.Stats は、この採点環境では使えません。']);
 });
+
+test('rejects context.addInitializer after its decorator finishes', () => {
+  const source = `const saved: ((fn: () => void) => void)[] = [];
+function save(_value: any, ctx: DecoratorContext) {
+  ctx.addInitializer(() => console.log('ok:' + String(ctx.name)));
+  saved.push(ctx.addInitializer);
+}
+function checkPrev(_value: any, _ctx: DecoratorContext) {
+  try {
+    saved.at(-1)!(() => console.log('during-next'));
+  } catch (e: any) {
+    console.log('next:' + e.name + ':' + e.message);
+  }
+}
+@save
+class C {
+  @checkPrev
+  @save
+  m() {}
+  @save
+  x = 1;
+}
+for (const add of saved) {
+  try {
+    add(() => console.log('late'));
+  } catch (e: any) {
+    console.log('after:' + e.name + ':' + e.message);
+  }
+}
+new C();`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'next:TypeError:Already initialized\nok:C\nafter:TypeError:Already initialized\nafter:TypeError:Already initialized\nafter:TypeError:Already initialized\nok:m\nok:x\n',
+    uncaughtException: undefined,
+  });
+});
