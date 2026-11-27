@@ -852,10 +852,13 @@ export class Calls {
   private checkExpandedArguments(signature: Signature, args: ExpressionListFlow): boolean {
     const expanded = this.expandedArguments(args);
     const parameterTypes = this.argumentParameterTypes(signature, expanded);
+    const contextualTypes = signature.contextualSignature
+      ? this.argumentParameterTypes(signature.contextualSignature, expanded)
+      : parameterTypes;
     return expanded.every(({ node, before, spread }, index) => {
       const target = parameterTypes[index];
       if (spread) return !target || this.c.relations.isAssignable(this.spreadValueType(spread), target);
-      return this.c.flow.probe(() => this.checkArgument(node, target, false, false), before);
+      return this.c.flow.probe(() => this.checkArgument(node, target, false, false, contextualTypes[index]), before);
     });
   }
 
@@ -967,11 +970,26 @@ export class Calls {
         ),
         args,
         report,
-        args[0] ?? call
+        args[0] ?? call,
+        signature.contextualSignature &&
+          this.c.tupleType(
+            signature.contextualSignature.parameters.map((parameter) => ({
+              type: parameter.type,
+              optional: parameter.optional,
+              rest: parameter.rest,
+            }))
+          )
       );
     if ((isTrailingRestTuple(signature) || structuredRest) && !leadingSpread) {
       const fixedFit = this.checkArguments(
-        { ...signature, parameters: signature.parameters.slice(0, -1) },
+        {
+          ...signature,
+          parameters: signature.parameters.slice(0, -1),
+          contextualSignature: signature.contextualSignature && {
+            ...signature.contextualSignature,
+            parameters: signature.contextualSignature.parameters.slice(0, -1),
+          },
+        },
         args.slice(0, restIndex),
         report
       );
@@ -979,7 +997,8 @@ export class Calls {
         signature.parameters[restIndex].type,
         args.slice(restIndex),
         report,
-        fixedFit ? (args[restIndex] ?? call) : undefined
+        fixedFit ? (args[restIndex] ?? call) : undefined,
+        signature.contextualSignature?.parameters[restIndex]?.type
       );
       return fixedFit && restFits;
     }
@@ -989,6 +1008,7 @@ export class Calls {
   private checkAlignedArguments(signature: Signature, args: TreeNode[], report: boolean): boolean {
     let ok = true;
     let index = 0;
+    const contextualSignature = signature.contextualSignature;
     for (const arg of args) {
       if (arg.type === 'spread_element') {
         const { count, fits } = this.checkSpreadArgument(signature, arg, index, report && ok);
@@ -997,7 +1017,9 @@ export class Calls {
         continue;
       }
       // TypeScript reports the first argument that does not fit.
-      ok = this.checkArgument(arg, this.parameterTypeAt(signature, index), report, report && ok) && ok;
+      const parameterType = this.parameterTypeAt(signature, index);
+      const contextualType = contextualSignature ? this.parameterTypeAt(contextualSignature, index) : parameterType;
+      ok = this.checkArgument(arg, parameterType, report, report && ok, contextualType) && ok;
       index++;
     }
     return ok;
@@ -1007,9 +1029,10 @@ export class Calls {
     arg: TreeNode,
     parameterType: Type | undefined,
     report: boolean,
-    reportMismatch: boolean
+    reportMismatch: boolean,
+    contextualType: Type | undefined = parameterType
   ): boolean {
-    const argType = this.c.expressions.check(arg, parameterType);
+    const argType = this.c.expressions.check(arg, contextualType);
     return this.checkPassedArgument(arg, argType, parameterType, report, reportMismatch);
   }
 
@@ -1042,10 +1065,11 @@ export class Calls {
     restType: Type,
     args: TreeNode[],
     report: boolean,
-    at: TreeNode | undefined
+    at: TreeNode | undefined,
+    contextualRestType: Type = restType
   ): boolean {
     const argumentFlow = new ExpressionListFlow(this.c, args);
-    const contexts = restTupleContexts(this.c, restType, argumentFlow);
+    const contexts = restTupleContexts(this.c, contextualRestType, argumentFlow);
     const tuple =
       args.length === 1 && args[0].type === 'spread_element'
         ? mapType(this.c.expressions.check(named(args[0])[0]), (type) => this.spreadArgumentType(type, restType))
@@ -1186,8 +1210,15 @@ export class Calls {
         this.c.inference.contextualMapper(parameters, run.inferences, fixes, typesCallbackParameter)
       );
     }
-    const mapper = this.c.inference.finalMapper(signature, parameters, run.inferences);
-    const instantiated = { ...this.c.instantiateSignature(signature, mapper), typeParameters: [] };
+    const { mapper, contextualMapper } = this.c.inference.finalMappers(signature, parameters, run.inferences);
+    const contextualSignature = contextualMapper
+      ? { ...this.c.instantiateSignature(signature, contextualMapper), typeParameters: [] }
+      : undefined;
+    const instantiated = {
+      ...this.c.instantiateSignature(signature, mapper),
+      typeParameters: [],
+      contextualSignature,
+    };
     return this.c.inference.withInferredCallbackParameters(run, instantiated);
   }
 
@@ -1307,14 +1338,21 @@ export class Calls {
     mapper: Mapper | undefined
   ): void {
     if (!parameterType) return;
-    const argType = arg.spread ? this.spreadValueType(arg.spread) : this.probeArgumentType(arg, parameterType, mapper);
-    if (arg.spread) this.c.inference.inferTypes(run, argType, parameterType, true);
-    else this.c.inference.inferArgument(run, argType, parameterType);
+    if (arg.spread) {
+      this.c.inference.inferTypes(run, this.spreadValueType(arg.spread), parameterType, true);
+      return;
+    }
+    this.c.inference.probeInferential(() => {
+      const argType = this.probeArgumentType(arg, parameterType, mapper);
+      this.c.silently(() => this.c.inference.inferArgument(run, argType, parameterType));
+    });
   }
 
   private probeArgumentType(arg: ExpandedArgument, contextual: Type | undefined, mapper?: Mapper): Type {
     const context = contextual && mapper ? this.c.instantiateContextual(contextual, mapper) : contextual;
-    return this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, context)), arg.before);
+    return this.c.inference.probeInferential(() =>
+      this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, context)), arg.before)
+    );
   }
 
   private spreadElements(arg: TreeNode, type: Type): TupleElement[] {

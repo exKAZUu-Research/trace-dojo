@@ -145,6 +145,8 @@ export interface Signature {
   minimumArguments?: number;
   /** The required count before expanding a rest tuple or checking whether trailing parameters accept void. */
   declaredMinimumArguments?: number;
+  /** Parameter types with uninferred or constraint-clamped type parameters kept non-inferrable for argument checking. */
+  contextualSignature?: Signature;
 }
 
 export interface IndexInfo {

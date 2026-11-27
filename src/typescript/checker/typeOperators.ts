@@ -848,25 +848,27 @@ export class TypeOperators {
     inferTypeParameters,
   }: ConditionalInstantiation): Type {
     if (outer.size === 0) return type;
+    const snapshot = createMapper(outer, outer.preserveLiterals);
+    const branchMapper = createMapper(mapper, mapper.preserveLiterals);
     const checker = this.c;
     return {
       kind: 'conditional',
       distributive: type.distributive,
       aliasName: type.aliasName,
-      aliasArguments: type.aliasArguments?.map((argument) => checker.instantiate(argument, outer)),
+      aliasArguments: type.aliasArguments?.map((argument) => checker.instantiate(argument, snapshot)),
       id: newTypeId(),
       checkType,
       extendsType,
       get trueType() {
-        return checker.instantiate(type.trueType, mapper);
+        return checker.instantiate(type.trueType, branchMapper);
       },
       get falseType() {
-        return checker.instantiate(type.falseType, outer);
+        return checker.instantiate(type.falseType, snapshot);
       },
       inferTypeParameters,
       outerTypeParameters: type.outerTypeParameters,
       root: type,
-      mapper: outer,
+      mapper: snapshot,
     };
   }
 

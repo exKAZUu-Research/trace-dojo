@@ -559,25 +559,26 @@ export class Checker {
    * deeper instantiations of itself.
    */
   deferredAliasUnion(alias: UnionAlias, mapper: Mapper): UnionType {
-    const key = `${alias.id}[${typeMapperCacheKey(mapper)}]`;
+    const snapshot = createMapper(mapper, mapper.preserveLiterals);
+    const key = `${alias.id}[${typeMapperCacheKey(snapshot)}]`;
     const cached = this.deferredAliasUnionCache.get(key);
     if (cached) return cached;
     let types: Type[] | undefined;
     const instantiate = (): Type[] | undefined => {
       const declared = alias.type();
       if (!declared) return undefined;
-      const instantiated = this.instantiate(declared, mapper);
+      const instantiated = this.instantiate(declared, snapshot);
       return instantiated.kind === 'union' ? instantiated.types : [instantiated];
     };
     const union: UnionType = {
       kind: 'union',
       id: newTypeId(),
-      aliasMapper: mapper,
+      aliasMapper: snapshot,
       get types() {
         return (types ??= instantiate()) ?? [];
       },
     };
-    this.aliasUnions.set(union, { alias, mapper });
+    this.aliasUnions.set(union, { alias, mapper: snapshot });
     this.deferredAliasUnionCache.set(key, union);
     return union;
   }
@@ -624,10 +625,11 @@ export class Checker {
         break;
       }
     }
-    const key = `${type.id}[${typeMapperCacheKey(mapper)}]`;
+    const snapshot = createMapper(mapper, mapper.preserveLiterals);
+    const key = `${type.id}[${typeMapperCacheKey(snapshot)}]`;
     const cached = this.instantiationCache.get(key);
     if (cached) return cached;
-    const instantiated = anonymousObject(() => this.instantiateStructure(type.resolve(), mapper), {
+    const instantiated = anonymousObject(() => this.instantiateStructure(type.resolve(), snapshot), {
       isFunction: type.isFunction,
       isLiteral: type.isLiteral,
       classInfo: type.classInfo,
@@ -638,9 +640,9 @@ export class Checker {
       name: type.name,
       aliasName: type.aliasName,
       aliasId: type.aliasId,
-      aliasArguments: type.aliasArguments?.map((argument) => this.instantiate(argument, mapper)),
+      aliasArguments: type.aliasArguments?.map((argument) => this.instantiate(argument, snapshot)),
       origin: type.origin ?? type,
-      mapper: type.mapper ? this.composeMappers(type.mapper, mapper) : mapper,
+      mapper: type.mapper ? this.composeMappers(type.mapper, snapshot) : snapshot,
     });
     this.instantiationCache.set(key, instantiated);
     return instantiated;
@@ -682,7 +684,8 @@ export class Checker {
     return reference;
   }
 
-  private instantiateMapped(type: ObjectType, mapper: Mapper): Type {
+  private instantiateMapped(type: ObjectType, rawMapper: Mapper): Type {
+    const mapper = createMapper(rawMapper, rawMapper.preserveLiterals);
     const mapped = type.mapped as MappedInfo;
     let constraint: Type | undefined;
     const getConstraint = (): Type => (constraint ??= this.instantiate(mapped.constraint, mapper));
