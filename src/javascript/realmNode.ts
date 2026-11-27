@@ -19,6 +19,8 @@ const ERRORS: Record<NodeErrorCode, { description: string; errno: number }> = {
 };
 
 const STDIN_PATHS = new Set(['/dev/stdin', '/dev/fd/0']);
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /** The paths that name the run's standard output streams, by the stream each names. */
 const STANDARD_STREAMS = {
@@ -47,7 +49,7 @@ export function defineNodeBuiltins(builder: RealmBuilder): void {
     builder.method(stream, 'write', 1, ({ runtime, args }) => {
       const unavailable = unavailableWriteArgument(`process.${name}.write`, args.slice(1));
       if (runtime.unavailableMember && unavailable) rejectUnavailableMember(unavailable, runtime.currentRow);
-      runtime.io[name].write(requireText(runtime, args[0], 'chunk'));
+      runtime.io[name].write(normalizeUtf8(requireText(runtime, args[0], 'chunk')));
       return true;
     });
     builder.constant(process, name, stream);
@@ -128,13 +130,15 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
       return;
     });
   }
-  builder.method(
-    fs,
-    'existsSync',
-    1,
-    ({ runtime, args }) =>
-      typeof args[0] === 'string' && args[0] !== '' && runtime.io.files.kindOf(args[0]) !== undefined
-  );
+  builder.method(fs, 'existsSync', 1, ({ runtime, args }) => {
+    if (typeof args[0] !== 'string' || args[0] === '') return false;
+    const resolved = resolvePath(args[0]);
+    return (
+      STDIN_PATHS.has(resolved) ||
+      Object.hasOwn(STANDARD_STREAMS, resolved) ||
+      runtime.io.files.kindOf(args[0]) !== undefined
+    );
+  });
   builder.method(fs, 'mkdirSync', 2, ({ runtime, args }) => {
     const path = requirePath(runtime, args[0]);
     const options = args[1];
@@ -253,7 +257,7 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
   // The descriptors 1 and 2 and the paths `/dev/stdout` and `/dev/stderr` are the run's standard streams, as 0 and
   // `/dev/stdin` are its standard input.
   const path = file === 1 || file === 2 ? `/dev/fd/${file}` : requirePath(runtime, file);
-  const data = requireText(runtime, content, 'data');
+  const data = normalizeUtf8(requireText(runtime, content, 'data'));
   const stream = STANDARD_STREAMS[resolvePath(path) as keyof typeof STANDARD_STREAMS];
   if (stream) {
     runtime.io[stream].write(data);
@@ -263,7 +267,20 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
   const parsed = parseOpenFlag(runtime, flag === undefined ? defaultFlag : runtime.toString(flag));
   const handle = withErrors(runtime, 'open', path, () => runtime.io.files.open(path, parsed.mode));
   if (!parsed.writable) throwNodeError(runtime, 'EBADF', 'write');
+  if (!parsed.mode.truncate && !parsed.mode.append) {
+    const oldBytes = UTF8_ENCODER.encode(handle.read());
+    const newBytes = UTF8_ENCODER.encode(data);
+    const merged = new Uint8Array(Math.max(oldBytes.length, newBytes.length));
+    merged.set(oldBytes);
+    merged.set(newBytes);
+    runtime.io.files.open(path, { create: 'always', truncate: true, append: false }).write(UTF8_DECODER.decode(merged));
+    return;
+  }
   handle.write(data);
+}
+
+function normalizeUtf8(text: string): string {
+  return UTF8_DECODER.decode(UTF8_ENCODER.encode(text));
 }
 
 /** Runs a file system call, throwing the error Node.js throws for its failure. */
