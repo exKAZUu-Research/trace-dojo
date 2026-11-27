@@ -655,17 +655,8 @@ export class BindingPatterns {
       );
     const asyncElement = this.iteratorElementType(type, 'asyncIterator', node, consumer);
     if (asyncElement) return asyncElement;
-    if (!this.hasCallableIteratorMethod(type, 'asyncIterator')) {
-      const element = this.iteratedType(undefined, type, consumer);
-      if (element !== errorType) {
-        if (node) this.iteratedType(node, type, consumer);
-        return awaitedType(
-          this.c,
-          element,
-          node ? { node, kind: consumer === 'yieldStar' ? 'yield' : 'await' } : undefined
-        );
-      }
-    }
+    const syncFallback = this.syncFallbackAsyncElement(node, type, consumer);
+    if (syncFallback) return syncFallback;
     if (node)
       this.c.error(
         node,
@@ -674,10 +665,29 @@ export class BindingPatterns {
     return errorType;
   }
 
+  private syncFallbackAsyncElement(
+    node: TreeNode | undefined,
+    type: Type,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar'
+  ): Type | undefined {
+    if (this.hasCallableIteratorMethod(type, 'asyncIterator')) return undefined;
+    const element = this.iteratedType(undefined, type, consumer);
+    if (element === errorType) return undefined;
+    if (node) this.iteratedType(node, type, consumer);
+    return awaitedType(this.c, element, this.iterationAwaitSite(node, consumer));
+  }
+
+  private iterationAwaitSite(
+    node: TreeNode | undefined,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar'
+  ): { node: TreeNode; kind: 'yield' | 'await' } | undefined {
+    return node ? { node, kind: consumer === 'yieldStar' ? 'yield' : 'await' } : undefined;
+  }
+
   /**
    * What the iterator a value's `[Symbol.iterator]()` or `[Symbol.asyncIterator]()` returns yields, as tsc reads it: the
-   * `value` of the results its `next()` gives that are not done (awaited for an async iterator), or else a library
-   * iterator's type argument.
+   * `value` of the results its `next()` gives that are not done (awaited for an async iterator, and awaited again for
+   * declared library async iterators), or else a library iterator's type argument.
    */
   private iteratorElementType(
     type: Type,
@@ -689,6 +699,14 @@ export class BindingPatterns {
     if (!iteration) return undefined;
     const { iteratorType, nextType, settled } = iteration;
     if (node && consumer !== 'yieldStar') this.checkIteratorNextInput(node, nextType, consumer);
+    const rawElement = this.rawIteratorElement(iteratorType, settled);
+    if (!rawElement) return undefined;
+    return method === 'asyncIterator' && this.c.functions.isKnownLibraryIterator(iteratorType, 'asyncIterator')
+      ? awaitedType(this.c, rawElement, this.iterationAwaitSite(node, consumer))
+      : rawElement;
+  }
+
+  private rawIteratorElement(iteratorType: ObjectType, settled: Type | undefined): Type | undefined {
     if (!settled) return iteratorType.typeArguments?.[0];
     if (isAnyLike(settled)) return anyType;
     const results = settled.kind === 'union' ? settled.types : [settled];
