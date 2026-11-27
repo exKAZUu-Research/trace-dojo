@@ -358,6 +358,10 @@ function resolvePrefix(
     if (!c.body.selfType) compileError(span, 'Self は、impl やトレイトの中にだけ書けます。');
     return { kind: 'type', type: c.body.selfType };
   }
+  // An associated type of `Self` or a type parameter (`Self::Out::default()`), as it is in a type's place.
+  if (names.length === 2 && (names[0] === 'Self' || c.body.typeParams.has(names[0]))) {
+    return { kind: 'type', type: c.lowerType({ kind: 'path', path: { segments: prefix, span }, span }) };
+  }
   const binding = resolveTypePath(names, c.body.module, span);
   switch (binding.kind) {
     case 'adt': {
