@@ -229,6 +229,10 @@ export class StatementChecker {
     }
   ): void {
     const inNamespace = isNamespaceBody(node.parent);
+    if (this.c.isModule && isAmbientModuleBody(node.parent) && (!declaration || hasToken(node, 'default'))) {
+      this.c.error(node, 'エクスポートとエクスポートの代入はモジュールの拡張では許可されていません。');
+      return;
+    }
     if (node.parent?.type !== 'program' && !isAmbientModuleBody(node.parent) && !inNamespace) {
       this.c.error(node, 'エクスポート宣言は、名前空間またはモジュールの最上位レベルでのみ使用できます。');
       return;

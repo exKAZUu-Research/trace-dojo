@@ -115,10 +115,10 @@ export class Namespaces {
     for (const [name, symbol] of table) {
       const entries = entriesOf(symbol);
       const declarations = declarationsOf(symbol);
-      if (!entries.some((entry) => entry.kind === 'importAlias')) continue;
+      if (!entries.some((entry) => entry.kind === 'importAlias' || entry.kind === 'import')) continue;
       const keptIndices = entries
         .map((_, index) => index)
-        .filter((index) => !this.isOtherSpaceImportAlias(entries[index].kind, declarations[index], meaning, other));
+        .filter((index) => !this.isOtherSpaceImport(symbol, entries[index].kind, declarations[index], meaning, other));
       if (keptIndices.length === entries.length) continue;
       if (keptIndices.length === 0) {
         table.delete(name);
@@ -144,12 +144,16 @@ export class Namespaces {
     symbol.typeKind = symbol.typeEntries.some((entry) => entry.kind === 'class') ? 'class' : symbol.typeEntries[0].kind;
   }
 
-  private isOtherSpaceImportAlias(
+  private isOtherSpaceImport(
+    symbol: Sym,
     kind: string,
     declaration: TreeNode | undefined,
     meaning: 'value' | 'type',
     other: 'value' | 'type'
   ): boolean {
+    if (kind === 'import' && declaration?.type === 'import_statement' && !symbol.importTarget?.typeOnly) {
+      return this.importTarget(symbol, meaning) === undefined && this.importTarget(symbol, other) !== undefined;
+    }
     return (
       kind === 'importAlias' &&
       declaration?.type === 'import_alias' &&
@@ -345,6 +349,13 @@ export class Namespaces {
       this.c.error(specifier ?? node, '名前空間内のインポート宣言は、モジュールを参照できません。');
       return;
     }
+    if (this.c.isModule && isAmbientModuleBody(node.parent)) {
+      this.c.error(
+        node,
+        'インポートはモジュールの拡張では許可されていません。外側の外部モジュールに移動することを検討してください。'
+      );
+      return;
+    }
     if (node.parent?.type !== 'program' && !isAmbientModuleBody(node.parent)) {
       this.c.error(node, 'インポート宣言は、名前空間またはモジュールの最上位レベルでのみ使用できます。');
       return;
@@ -430,7 +441,7 @@ export class Namespaces {
     this.checkDeclarationPlacement(node, name);
     const body = node.childForFieldName('body');
     if (!body || this.c.isLibrary(node)) return;
-    const ambientBody = isAmbient(node) || name?.type === 'string';
+    const ambientBody = isAmbient(node);
     const outer = this.c.flow.current;
     this.c.flow.current = new FlowState();
     try {
@@ -443,21 +454,44 @@ export class Namespaces {
   }
 
   private checkDeclarationPlacement(node: TreeNode, name: TreeNode | null): void {
-    if (node.type === 'module' && name?.type !== 'string')
+    if (name?.type === 'string') {
+      this.checkStringModulePlacement(node, name);
+      return;
+    }
+    if (node.type === 'module')
       this.c.error(
         node,
         "'namespace' の宣言に 'module' キーワードは使えません。代わりに 'namespace' キーワードを使ってください。"
       );
-    if (name?.type === 'string' && !isTopLevelAmbientModule(node)) {
+    if (!isNamespaceOrModuleTopLevel(node))
+      this.c.error(node, '名前空間宣言は、名前空間またはモジュールの最上位レベルでのみ許可されます。');
+  }
+
+  private checkStringModulePlacement(node: TreeNode, name: TreeNode): void {
+    if (!isAmbient(node)) {
+      this.c.error(name, '引用符付きの名前を使用できるのはアンビエント モジュールのみです。');
+      return;
+    }
+    if (!isTopLevelAmbientModule(node)) {
       this.c.error(
         isNamespaceOrModuleTopLevel(node) ? name : node,
         isNamespaceOrModuleTopLevel(node)
           ? 'アンビエント モジュールを、他のモジュールまたは名前空間内の入れ子にすることはできません。'
           : 'アンビエント モジュール宣言は、ファイルの最上位にのみ使用できます。'
       );
+      return;
     }
-    if (name?.type !== 'string' && !isNamespaceOrModuleTopLevel(node))
-      this.c.error(node, '名前空間宣言は、名前空間またはモジュールの最上位レベルでのみ許可されます。');
+    const exportSite = exportedModuleSite(node);
+    if (exportSite) {
+      this.c.error(
+        exportSite,
+        "環境モジュールとモジュール拡張は常に表示されるので、これらに 'export' 修飾子を適用することはできません。"
+      );
+    }
+    const specifier = stringValue(name);
+    if (this.c.isModule && !this.c.libraryBinder.ambientModules.has(specifier)) {
+      this.c.error(name, `拡張のモジュール名が無効です。モジュール '${specifier}' が見つかりません。`);
+    }
   }
 
   private checkGlobalAugmentationNamespace(node: TreeNode): void {
@@ -497,6 +531,11 @@ export function importTypeMemberChain(node: TreeNode): { call: TreeNode; members
 
 function canonicalImportSpecifier(node: TreeNode): string {
   return node.type === 'string' ? stringValue(node) : canonicalIdentifier(node.text, node);
+}
+
+function exportedModuleSite(node: TreeNode): TreeNode | undefined {
+  const outer = node.parent?.type === 'ambient_declaration' ? node.parent : node;
+  return outer.parent?.type === 'export_statement' ? outer.parent : undefined;
 }
 
 /** Whether a namespace is declared in the program or in another namespace's body, the places tsc allows one. */

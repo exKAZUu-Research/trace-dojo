@@ -2,6 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
+import { isAmbient } from '../namespaceInstantiation';
 import { memberNameOf } from './enums';
 import { fsImportMeanings } from './nodeLibrary';
 import { canonicalIdentifier, Scope, Sym, type ValueKind } from './scopes';
@@ -100,6 +101,9 @@ export class Binder {
       deferLibraryTypes?: boolean;
       budget?: ExecutionBudget;
       skipAssignmentAnalysis?: boolean;
+      isExternalModule?: boolean;
+      existingModules?: ReadonlyMap<string, Sym>;
+      augmentableModules?: ReadonlySet<string>;
     }
   ) {
     this.moduleScope = options?.rootScope ?? new Scope('module', globalScope, root);
@@ -261,13 +265,16 @@ export class Binder {
 
   /** `declare module "m" { ... }`, whose declarations are the exports an `import` of "m" sees. */
   private bindAmbientModule(node: TreeNode, name: string, scope: Scope): void {
-    const valid = Boolean(this.options?.deferLibraryTypes) || isTopLevelAmbientModule(node);
-    let module = valid ? this.ambientModules.get(name) : undefined;
+    const valid = Boolean(this.options?.deferLibraryTypes) || (isAmbient(node) && isTopLevelAmbientModule(node));
+    const existing = valid ? this.options?.existingModules?.get(name) : undefined;
+    const registersModule =
+      valid && (!this.isExternalModule || Boolean(existing) || Boolean(this.options?.augmentableModules?.has(name)));
+    let module = existing ?? (registersModule ? this.ambientModules.get(name) : undefined);
     if (!module) {
       module = new Sym(name, scope);
       module.valueKind = 'namespace';
       module.namespaceExports = new Scope('block', scope, node);
-      if (valid) this.ambientModules.set(name, module);
+      if (registersModule) this.ambientModules.set(name, module);
     }
     module.valueDeclarations.push(node);
     const body = node.childForFieldName('body');
@@ -277,6 +284,10 @@ export class Binder {
     for (const [exportName, exported] of exports.values) bodyScope.values.set(exportName, exported);
     for (const [exportName, exported] of exports.types) bodyScope.types.set(exportName, exported);
     this.bindNamespaceBody(body, bodyScope, true);
+  }
+
+  private get isExternalModule(): boolean {
+    return Boolean(this.options?.isExternalModule ?? (!this.options?.rootScope && !this.options?.deferLibraryTypes));
   }
 
   /** The names an `import` declares, which stand for what a module exports. */
@@ -301,14 +312,14 @@ export class Binder {
 
   private importMeaningsOf(module: string, name: string): { value: boolean; type: boolean } {
     const fsMeanings = fsImportMeanings(module, name);
-    if (fsMeanings) return fsMeanings;
-    const ambient = this.ambientModules.get(module)?.namespaceExports;
-    if (ambient) {
-      if (name === '*') return { value: true, type: false };
-      const value = ambient.values.has(name);
-      const type = ambient.types.has(name);
+    const ambient = (this.ambientModules.get(module) ?? this.options?.existingModules?.get(module))?.namespaceExports;
+    if (ambient && name !== '*') {
+      const value = Boolean(fsMeanings?.value) || ambient.values.has(name);
+      const type = Boolean(fsMeanings?.type) || ambient.types.has(name);
       if (value || type) return { value, type };
     }
+    if (fsMeanings) return fsMeanings;
+    if (ambient && name === '*') return { value: true, type: false };
     return { value: true, type: name !== '*' };
   }
 
@@ -529,9 +540,9 @@ export class Binder {
     else this.bind(node, scope);
   }
 
-  private globalAugmentationTarget(node: TreeNode, isAmbient: boolean): Scope | undefined {
+  private globalAugmentationTarget(node: TreeNode, isAmbientNode: boolean): Scope | undefined {
     if (this.options?.deferLibraryTypes) return this.moduleScope;
-    return isAmbient && isDirectGlobalAugmentationContainer(node, !this.options?.rootScope)
+    return isAmbientNode && isDirectGlobalAugmentationContainer(node, this.isExternalModule)
       ? (this.options?.rootScope ?? this.globalScope)
       : undefined;
   }

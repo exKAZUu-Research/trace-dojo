@@ -7,7 +7,7 @@ import { isConstructorDefinition } from '../javascript/programConverter';
 import { Binder } from './checker/binder';
 import { fsImportMeanings } from './checker/nodeLibrary';
 import { Scope, type Sym } from './checker/scopes';
-import { isParameterProperty, stringValue } from './checker/syntax';
+import { isModule, isParameterProperty, stringValue } from './checker/syntax';
 import {
   assertedExpression,
   assertionTypes,
@@ -16,6 +16,7 @@ import {
   erasedTypeNodes,
 } from './erasedSyntax';
 import { blockEmitsRuntimeNamespace, isAmbient, isInstantiatedNamespace } from './namespaceInstantiation';
+import { importableModules } from './unsupported';
 
 /**
  * The type of a synthesized statement that copies a constructor's parameter properties to `this`, which the
@@ -173,7 +174,12 @@ function collectIdentifierNames(root: TreeNode, budget: ExecutionBudget): Set<st
  * parameter properties become fields that the constructor assigns.
  */
 export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node {
-  const binder = new Binder(root, new Scope('global', undefined, undefined), { budget, skipAssignmentAnalysis: true });
+  const binder = new Binder(root, new Scope('global', undefined, undefined), {
+    budget,
+    skipAssignmentAnalysis: true,
+    isExternalModule: isModule(root),
+    augmentableModules: importableModules,
+  });
   const context = new ViewContext(root, budget);
   viewContexts.set(binder, context);
   for (const scope of binder.allScopes)
@@ -635,7 +641,8 @@ function isTypeOnlySpecifier(
   { moduleName, ambientExports }: { moduleName: string; ambientExports: Scope | undefined }
 ): boolean {
   if (specifier.children.some((child) => !child.isNamed && child.type === 'type')) return true;
-  if (fsImportMeanings(moduleName, importedName)?.value === false) return true;
+  if (fsImportMeanings(moduleName, importedName)?.value === false && !ambientExports?.values.has(importedName))
+    return true;
   return (
     ambientExports !== undefined && !ambientExports.values.has(importedName) && ambientExports.types.has(importedName)
   );
@@ -732,7 +739,9 @@ function stepAliasTarget(
   seen: Set<number>
 ): AliasValueTarget | undefined {
   if (current.kind === 'builtinModule') {
-    return isLast && fsImportMeanings(current.module, partName)?.value ? { kind: 'value' } : undefined;
+    if (isLast && fsImportMeanings(current.module, partName)?.value) return { kind: 'value' };
+    const augmented = binder.ambientModules.get(current.module)?.namespaceExports?.values.get(partName);
+    return unwrapAliasSymbol(augmented, binder, seen);
   }
   if (current.kind !== 'symbol') return undefined;
   const member =
@@ -761,15 +770,19 @@ function unwrapImportTarget(
   seen: Set<number>
 ): AliasValueTarget | undefined {
   if (target.typeOnly) return undefined;
+  if (target.module === 'fs' || target.module === 'node:fs') {
+    if (target.name === '*' || target.name === 'default') return { kind: 'builtinModule', module: target.module };
+    if (fsImportMeanings(target.module, target.name)?.value) return { kind: 'value' };
+    const augmented = binder.ambientModules.get(target.module)?.namespaceExports?.values.get(target.name);
+    return unwrapAliasSymbol(augmented, binder, seen);
+  }
   const ambient = binder.ambientModules.get(target.module);
   if (ambient) {
     return target.name === '*' || (target.name === 'default' && !ambient.namespaceExports?.values.has('default'))
       ? { kind: 'symbol', symbol: ambient }
       : unwrapAliasSymbol(ambient.namespaceExports?.values.get(target.name), binder, seen);
   }
-  if (target.module !== 'fs' && target.module !== 'node:fs') return { kind: 'value' };
-  if (target.name === '*' || target.name === 'default') return { kind: 'builtinModule', module: target.module };
-  return fsImportMeanings(target.module, target.name)?.value ? { kind: 'value' } : undefined;
+  return { kind: 'value' };
 }
 
 /** The statements of the first namespace of a path `A.B.C`, which declare the next ones down to the body's. */

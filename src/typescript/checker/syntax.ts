@@ -409,5 +409,10 @@ export function isNamespaceBody(node: TreeNode | null | undefined): boolean {
 }
 
 export function isDirectGlobalAugmentationContainer(node: TreeNode, isExternalModule: boolean): boolean {
-  return (node.parent?.type === 'program' && isExternalModule) || isAmbientModuleBody(node.parent);
+  return isExternalModule ? node.parent?.type === 'program' : isAmbientModuleBody(node.parent);
+}
+
+/** Whether a program has an `import` or an `export`, which makes it a module. */
+export function isModule(root: TreeNode): boolean {
+  return root.namedChildren.some((child) => child?.type === 'import_statement' || child?.type === 'export_statement');
 }

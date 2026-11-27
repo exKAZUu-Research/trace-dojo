@@ -1158,4 +1158,24 @@ test('enforces variance, thenable, import-query, optional-assertion, ambient-mod
     '2: グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。',
     "3: プロパティ 'extra' は型 'number[]' にありません。",
   ]);
+
+  expect(
+    diagnosticsOf(
+      'import * as fs from "fs";\ndeclare module "foo" { export const x: number }\ntype Missing = import("foo").x;\nconsole.log(fs.existsSync("a"));'
+    )
+  ).toEqual([
+    "2: 拡張のモジュール名が無効です。モジュール 'foo' が見つかりません。",
+    "3: モジュール 'foo' またはそれに対応する型宣言が見つかりません。",
+  ]);
+
+  expect(
+    executeProgram(
+      'typescript',
+      'import { extraVal, ExtraInfo, existsSync } from "fs";\ndeclare module "fs" { export const extraVal: number; export interface ExtraInfo { tag: string } }\nconst info: ExtraInfo = { tag: "ok" };\nconsole.log(existsSync("none"), typeof extraVal, info.tag);'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'false undefined ok\n',
+    uncaughtException: undefined,
+  });
 });

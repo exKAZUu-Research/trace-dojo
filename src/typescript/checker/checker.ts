@@ -34,7 +34,7 @@ import type { Scope } from './scopes';
 import { Signatures } from './signatures';
 import { SourceMethodUses } from './sourceMethodUses';
 import { StatementChecker } from './statements';
-import { bigIntPropertyNames } from './syntax';
+import { bigIntPropertyNames, isModule } from './syntax';
 import { tupleSliceReadType } from './tupleIndexes';
 import { tupleType } from './tupleTypes';
 import { TypeNodes } from './typeNodes';
@@ -155,9 +155,14 @@ export class Checker {
     markUnsupported(this.libraryBinder.moduleScope);
     // A program with an import or an export is a module, whose declarations shadow the globals rather than merge with them.
     this.isModule = isModule(root);
+    const existingModules = this.libraryBinder.ambientModules;
     this.binder = this.isModule
-      ? new Binder(root, this.libraryBinder.moduleScope, { budget })
-      : new Binder(root, this.libraryBinder.globalScope, { rootScope: this.libraryBinder.moduleScope, budget });
+      ? new Binder(root, this.libraryBinder.moduleScope, { budget, existingModules })
+      : new Binder(root, this.libraryBinder.globalScope, {
+          rootScope: this.libraryBinder.moduleScope,
+          budget,
+          existingModules,
+        });
   }
 
   check(): SourceDiagnostic[] {
@@ -1288,7 +1293,7 @@ export function checkTypeScript(root: TreeNode, budget: ExecutionBudget): Source
   return new Checker(root, budget).check();
 }
 
-export { regularOf };
+export { isModule, regularOf };
 
 const instantiableKinds = new Set<Type['kind']>([
   'typeParameter',
@@ -1306,9 +1311,4 @@ function isUnitType(type: Type): boolean {
 /** TypeScript's `isLiteralType`: a unit type or a union of them, `boolean` included. */
 function isLiteralType(type: Type): boolean {
   return type.kind === 'union' ? type.types.every((member) => isUnitType(member)) : isUnitType(type);
-}
-
-/** Whether a program has an `import` or an `export`, which makes it a module. */
-export function isModule(root: TreeNode): boolean {
-  return root.namedChildren.some((child) => child?.type === 'import_statement' || child?.type === 'export_statement');
 }
