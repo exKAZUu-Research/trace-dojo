@@ -117,9 +117,16 @@ function walkQualifiedDefaultContainers(path: TreeNode[], lookup: DefaultExportL
 }
 
 function lookupContainerInBodyOrExports(lookup: DefaultExportLookup, name: string): Sym | undefined {
+  for (let current: Scope | undefined = lookup.scope; current; current = current.parent) {
+    lookup.budget?.spend();
+    const allowClause = current === lookup.exports;
+    const ns = !allowClause && current.isClauseOnlyExport(name, 'namespace') ? undefined : current.namespaces.get(name);
+    const val = !allowClause && current.isClauseOnlyExport(name, 'value') ? undefined : current.values.get(name);
+    if (ns || val) return unaliasInBinder(ns, 'namespace', lookup) ?? unaliasInBinder(val, 'value', lookup);
+  }
   return (
-    unaliasInBinder(lookupInBodyOrExports(lookup, name, 'namespace'), 'namespace', lookup) ??
-    unaliasInBinder(lookupInBodyOrExports(lookup, name, 'value'), 'value', lookup)
+    unaliasInBinder(lookup.scope.lookupNamespace(name, lookup.budget), 'namespace', lookup) ??
+    unaliasInBinder(lookup.scope.lookupValue(name, lookup.budget), 'value', lookup)
   );
 }
 
@@ -173,7 +180,11 @@ function syntheticDefaultValueSymbol(node: TreeNode, valueNode: TreeNode, scope:
 }
 
 function lookupInBodyOrExports(lookup: DefaultExportLookup, name: string, meaning: MeaningSpace): Sym | undefined {
-  return lookup.scope.tableOf(meaning).get(name) ?? lookup.exports.tableOf(meaning).get(name);
+  return (
+    lookup.scope.tableOf(meaning).get(name) ??
+    lookup.exports.tableOf(meaning).get(name) ??
+    lookupScopeMeaning(lookup.scope, name, meaning, lookup.budget)
+  );
 }
 
 function unaliasInBinder(
