@@ -105,29 +105,58 @@ export class Calls {
     const type = this.c.expressions.check(expression);
     const typeArguments = this.typeArguments.written(node) ?? [];
     if (isAnyLike(type) || type === errorType) return type;
-    const structure = this.c.structureOf(type);
-    const applicable = (signatures: Signature[]): Signature[] =>
-      signatures
-        .filter(
-          ({ typeParameters }) =>
-            typeParameters.length >= typeArguments.length &&
-            typeParameters.filter((parameter) => !parameter.default).length <= typeArguments.length
-        )
-        .map((signature) => {
-          const mismatch = this.typeArguments.firstMismatch(signature, typeArguments);
-          if (mismatch) this.typeArguments.reportMismatch(node, mismatch);
-          return this.typeArguments.instantiate(signature, typeArguments);
-        });
-    const callSignatures = applicable(structure.callSignatures);
-    const constructSignatures = applicable(structure.constructSignatures);
-    if (callSignatures.length === 0 && constructSignatures.length === 0) {
-      this.c.error(
-        named(node).at(-1) ?? node,
-        `型 '${this.c.print(type)}' には、この型引数の並びを使えるシグネチャがありません。`
+    const members = type.kind === 'union' ? type.types : [type];
+    let hasCallableMember = false;
+    const instantiated = members.map((member) => {
+      if (isAnyLike(member)) {
+        hasCallableMember = true;
+        return member;
+      }
+      const structure = this.c.structureOf(member);
+      if (structure.callSignatures.length === 0 && structure.constructSignatures.length === 0) return member;
+      hasCallableMember = true;
+      const callSignatures = this.applicableInstantiationSignatures(node, structure.callSignatures, typeArguments);
+      const constructSignatures = this.applicableInstantiationSignatures(
+        node,
+        structure.constructSignatures,
+        typeArguments
       );
+      if (callSignatures.length === 0 && constructSignatures.length === 0) {
+        this.reportNoApplicableSignature(node, member);
+        return errorType;
+      }
+      return anonymousObject(() => ({ ...structure, callSignatures, constructSignatures }));
+    });
+    if (!hasCallableMember) {
+      this.reportNoApplicableSignature(node, type);
       return errorType;
     }
-    return anonymousObject(() => ({ ...structure, callSignatures, constructSignatures }));
+    return instantiated.includes(errorType) ? errorType : unionOf(instantiated);
+  }
+
+  private applicableInstantiationSignatures(
+    node: TreeNode,
+    signatures: Signature[],
+    typeArguments: Type[]
+  ): Signature[] {
+    return signatures
+      .filter(
+        ({ typeParameters }) =>
+          typeParameters.length >= typeArguments.length &&
+          typeParameters.filter((parameter) => !parameter.default).length <= typeArguments.length
+      )
+      .map((signature) => {
+        const mismatch = this.typeArguments.firstMismatch(signature, typeArguments);
+        if (mismatch) this.typeArguments.reportMismatch(node, mismatch);
+        return this.typeArguments.instantiate(signature, typeArguments);
+      });
+  }
+
+  private reportNoApplicableSignature(node: TreeNode, target: Type): void {
+    this.c.error(
+      named(node).at(-1) ?? node,
+      `型 '${this.c.print(target)}' には、この型引数の並びを使えるシグネチャがありません。`
+    );
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's checks of a call's callee in order, each with its own error.
