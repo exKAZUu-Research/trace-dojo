@@ -211,7 +211,7 @@ function hygienic(tokens: Token[]): Token[] {
   return renamed(tokens, binders, `__${expansions}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity -- One case per way a rule's code introduces a variable.
+/** Collects the variables a rule's own code binds: in `let`, `for`, closure parameters, and `match` arms. */
 function collectBinders(tokens: Token[], binders: Set<string>): void {
   for (const [index, token] of tokens.entries()) {
     if (token.kind === 'group') {
@@ -219,49 +219,120 @@ function collectBinders(tokens: Token[], binders: Set<string>): void {
       continue;
     }
     if (!token.fromRule) continue;
-    if (token.text === 'let' || token.text === 'for') {
-      let next = index + 1;
-      while (leafText(tokens[next]) === 'mut' || leafText(tokens[next]) === 'ref') next++;
-      addPatternBinders(tokens[next], binders);
-    } else if (token.text === '|' && opensClosure(tokens, 0, index)) {
-      for (let next = index + 1; next < tokens.length && leafText(tokens[next]) !== '|'; next++) {
-        if (next === index + 1 || leafText(tokens[next - 1]) === ',' || leafText(tokens[next - 1]) === 'mut') {
-          addPatternBinders(tokens[next], binders);
-        }
-      }
-    }
+    if (token.text === 'let')
+      addPatternBinders(tokens.slice(index + 1, patternEnd(tokens, index + 1, ['=', ':', 'else'])), binders);
+    else if (token.text === 'for')
+      addPatternBinders(tokens.slice(index + 1, patternEnd(tokens, index + 1, ['in'])), binders);
+    else if (token.text === '|' && opensClosure(tokens, 0, index)) {
+      addPatternBinders(tokens.slice(index + 1, patternEnd(tokens, index + 1, ['|'])), binders);
+    } else if (token.text === 'match')
+      addArmBinders(
+        tokens.slice(index + 1).find((next) => next.kind === 'group' && next.open === '{'),
+        binders
+      );
   }
 }
 
-/** The variables a pattern of a rule's own code binds: a name, or the names in a tuple or slice pattern. */
-function addPatternBinders(token: Token | undefined, binders: Set<string>): void {
-  if (token?.kind === 'group' && token.open !== '{') {
-    for (const [index, inner] of token.tokens.entries()) {
-      const after = leafText(token.tokens[index + 1]);
-      if (after !== '(' && after !== '::' && after !== '{') addPatternBinders(inner, binders);
-    }
-    return;
-  }
-  const isName = token?.kind === 'leaf' && /^[\p{Ll}_][\p{L}\p{N}_]*$/u.test(token.text);
-  if (isName && token.fromRule && !['_', 'mut', 'ref'].includes(token.text)) binders.add(token.text);
+/** Where a pattern starting at `start` ends: at the first of `stops` outside its groups, or at the end. */
+function patternEnd(tokens: Token[], start: number, stops: string[]): number {
+  const end = tokens.findIndex((token, index) => index >= start && stops.includes(leafText(token) ?? ''));
+  return end === -1 ? tokens.length : end;
 }
 
-function renamed(tokens: Token[], binders: Set<string>, suffix: string): Token[] {
-  return tokens.map((token, index) => {
-    if (token.kind === 'group') return { ...token, tokens: renamed(token.tokens, binders, suffix) };
-    if (!token.fromRule) return token;
+/** The variables the patterns of a `match`'s arms bind: what comes before each `=>`. */
+function addArmBinders(body: Token | undefined, binders: Set<string>): void {
+  if (body?.kind !== 'group') return;
+  let start = 0;
+  while (start < body.tokens.length) {
+    const arrow = patternEnd(body.tokens, start, ['=>']);
+    addPatternBinders(body.tokens.slice(start, arrow), binders);
+    // An arm's body is a `{ ... }` block or an expression up to the next `,`.
+    const first = body.tokens[arrow + 1];
+    const end = first?.kind === 'group' && first.open === '{' ? arrow + 2 : patternEnd(body.tokens, arrow + 1, [',']);
+    start = leafText(body.tokens[end]) === ',' ? end + 1 : end;
+  }
+}
+
+/**
+ * The variables a pattern of a rule's own code binds: its lowercase names, but not the paths, functions, and
+ * constructors they are parts of (`Some(x)`, `S::A`), nor the field names of a struct pattern (`S { a: x }`).
+ */
+function addPatternBinders(tokens: Token[], binders: Set<string>): void {
+  for (const [index, token] of tokens.entries()) {
+    if (token.kind === 'group') {
+      addPatternBinders(token.tokens, binders);
+      continue;
+    }
+    const after = leafText(tokens[index + 1]);
+    const before = leafText(tokens[index - 1]);
+    if (after === '(' || after === '::' || after === '{' || after === '!' || after === ':' || before === '::') continue;
+    if (tokens[index + 1]?.kind === 'group' && (tokens[index + 1] as { open: string }).open !== '[') continue;
+    const isName = /^[\p{Ll}_][\p{L}\p{N}_]*$/u.test(token.text);
+    if (isName && token.fromRule && !['_', 'mut', 'ref', 'in', 'if'].includes(token.text)) binders.add(token.text);
+  }
+}
+
+/** The macros whose first string literal (after the target, for `write!`) is a format string. */
+const FORMAT_MACROS = new Set([
+  'format',
+  'print',
+  'println',
+  'eprint',
+  'eprintln',
+  'write',
+  'writeln',
+  'panic',
+  'assert',
+  'assert_eq',
+  'assert_ne',
+  'format_args',
+]);
+
+/**
+ * Renames the variables a rule's code binds (`x` to `x__2`) where the rule's code uses them: not as fields, paths,
+ * or macros, not as a struct expression's field name (whose shorthand `S { x }` becomes `S { x: x__2 }`), and in a
+ * string literal only where it is a format string, whose inline arguments (`{x}`) name variables.
+ */
+function renamed(
+  tokens: Token[],
+  binders: Set<string>,
+  suffix: string,
+  context: 'struct' | 'format' | undefined = undefined
+): Token[] {
+  let formatDone = false;
+  return tokens.flatMap((token, index): Token[] => {
+    if (token.kind === 'group')
+      return [{ ...token, tokens: renamed(token.tokens, binders, suffix, groupContext(tokens, index)) }];
+    if (!token.fromRule) return [token];
     if (token.type === 'string_literal') {
-      // A format string's inline arguments (`{t}`, `{t:>3}`) name the rule's variables too.
+      if (context !== 'format' || formatDone) return [token];
+      formatDone = true;
       const text = token.text.replaceAll(/(?<!\{)\{([\p{L}_][\p{L}\p{N}_]*)(?=[}:])/gu, (whole, name: string) =>
         binders.has(name) ? `{${name}${suffix}` : whole
       );
-      return { ...token, text };
+      return [{ ...token, text }];
     }
     const before = leafText(tokens[index - 1]);
     const after = leafText(tokens[index + 1]);
     const isVariable = binders.has(token.text) && before !== '.' && before !== '::' && after !== '!' && after !== '::';
-    return isVariable ? { ...token, text: `${token.text}${suffix}` } : token;
+    if (!isVariable) return [token];
+    const fieldPlace = context === 'struct' && (index === 0 || before === ',');
+    if (fieldPlace && after === ':') return [token];
+    const variable = { ...token, text: `${token.text}${suffix}` };
+    if (fieldPlace && (after === ',' || after === undefined)) {
+      return [token, { kind: 'leaf', text: ':', type: ':', fromRule: true }, variable];
+    }
+    return [variable];
   });
+}
+
+/** What a group is: the fields of a struct expression or pattern (`S { .. }`), a format macro's arguments, or neither. */
+function groupContext(tokens: Token[], index: number): 'struct' | 'format' | undefined {
+  const group = tokens[index] as Token & { kind: 'group' };
+  const before = leafText(tokens[index - 1]);
+  if (group.open === '{' && before !== undefined && /^[\p{Lu}]/u.test(before)) return 'struct';
+  if (before === '!' && FORMAT_MACROS.has(leafText(tokens[index - 2]) ?? '')) return 'format';
+  return undefined;
 }
 
 /** Matches parts against tokens from `start`, binding variables, and gives the position after them, or -1. */
