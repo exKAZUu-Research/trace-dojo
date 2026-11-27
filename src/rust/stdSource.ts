@@ -900,7 +900,6 @@ pub mod ptr {
     pub struct MutPtr<T>;
     pub fn null<T>() -> ConstPtr<T>;
     pub fn null_mut<T>() -> MutPtr<T>;
-    pub fn eq<T>(a: ConstPtr<T>, b: ConstPtr<T>) -> bool;
     impl<T> ConstPtr<T> {
         pub unsafe fn add(self, count: usize) -> ConstPtr<T>;
         pub unsafe fn sub(self, count: usize) -> ConstPtr<T>;

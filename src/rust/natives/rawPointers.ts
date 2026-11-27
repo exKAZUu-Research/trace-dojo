@@ -34,7 +34,6 @@ define({
   'MutPtr<[_]>::is_empty': ([p], ctx) => sliceLength(pointee(pointer(p), ctx.span).get()) === 0,
   'std::ptr::null': () => new RawPtr(undefined),
   'std::ptr::null_mut': () => new RawPtr(undefined),
-  'std::ptr::eq': ([a, b]) => samePlace(pointer(a), pointer(b)),
   'ConstPtr<_>::is_null': ([p]) => !pointer(p).place,
   'MutPtr<_>::is_null': ([p]) => !pointer(p).place,
   'ConstPtr<_>::read': ([p], ctx) => copyValue(pointee(pointer(p), ctx.span).get()),
@@ -56,14 +55,3 @@ define({
     return place ? some(ctx, place) : none(ctx);
   },
 });
-
-/** Whether two pointers point to the same place: the same variable, element, or field, or both nowhere. */
-export function samePlace(a: RawPtr, b: RawPtr): boolean {
-  if (a === b || a.place === b.place) return true;
-  if (!a.place || !b.place) return false;
-  const x = a.place as unknown as Record<string, unknown>;
-  const y = b.place as unknown as Record<string, unknown>;
-  if (x.constructor !== y.constructor) return false;
-  const keys = Object.keys(x);
-  return keys.length > 0 && keys.every((key) => x[key] === y[key]);
-}
