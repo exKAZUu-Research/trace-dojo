@@ -168,13 +168,23 @@ function threadScope(ctx: NativeContext, f: Value): Value {
 }
 
 function lock(ctx: NativeContext, target: CellBox, mutable: boolean): Value {
-  // The thread holding the lock waits below this one, so no thread can free it.
+  const threads = scheduler(ctx);
+  const current = threads.running.at(-1) ?? 1;
   if (mutable ? target.borrows !== 0 : target.borrows < 0) {
+    // A thread taking a lock it holds waits forever; one held by a thread waiting below would be let go in Rust,
+    // which threads that run to their ends cannot do.
+    if (target.holders.some((holder) => holder !== current && threads.running.includes(holder))) {
+      throw new UnsupportedAtRun(
+        '途中で待っているスレッドが持つロックを待つことは、この採点環境では使えません。',
+        ctx.span
+      );
+    }
     panic(ctx, 'デッドロックしました（ロックを持っているスレッドが、このスレッドを待っています）。');
   }
   target.borrows = mutable ? -1 : target.borrows + 1;
+  target.holders.push(current);
   const { runtime } = ctx;
-  const guard = new BorrowGuard(target, mutable, () => runtime.unwinding);
+  const guard = new BorrowGuard(target, mutable, () => runtime.unwinding, current);
   runtime.liveGuards.push(guard);
   return target.poisoned ? err(ctx, poisonError(ctx, guard)) : ok(ctx, guard);
 }

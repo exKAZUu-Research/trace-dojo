@@ -359,6 +359,8 @@ export class CellBox {
   borrows = 0;
   /** Whether a thread panicked while it held the lock for writing, as a `Mutex` or an `RwLock` records. */
   poisoned = false;
+  /** For a lock, the threads holding it, one entry per guard. */
+  readonly holders: number[] = [];
   constructor(public value: Value) {}
 }
 
@@ -369,13 +371,16 @@ export class BorrowGuard {
     readonly cell: CellBox,
     readonly mutable: boolean,
     /** For a lock's guard, whether a panic is unwinding the thread, which poisons a lock held for writing. */
-    readonly unwinding?: () => boolean
+    readonly unwinding?: () => boolean,
+    /** For a lock's guard, the thread holding it. */
+    readonly holder?: number
   ) {}
 
   /** Ends the borrow, once. */
   release(): void {
     if (this.released) return;
     this.released = true;
+    if (this.holder !== undefined) this.cell.holders.splice(this.cell.holders.indexOf(this.holder), 1);
     if (this.mutable && this.unwinding?.()) this.cell.poisoned = true;
     if (this.mutable) this.cell.borrows = 0;
     else this.cell.borrows--;
