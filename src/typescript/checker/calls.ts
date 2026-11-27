@@ -2,15 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
-import {
-  CallArity,
-  ExpressionListFlow,
-  minimumArguments,
-  stringsArgumentCount,
-  takesNoArguments,
-  tupleArgumentContexts,
-  tupleTypeAt,
-} from './callArity';
+import { CallArity, ExpressionListFlow, minimumArguments, tupleArgumentContexts, tupleTypeAt } from './callArity';
 import { CallTypeArguments } from './callTypeArguments';
 import type { Checker, Mapper } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
@@ -143,7 +135,7 @@ export class Calls {
   call(node: TreeNode, contextual?: Type): Type {
     const callee = node.childForFieldName('function') as TreeNode;
     const argumentsNode = node.childForFieldName('arguments');
-    if (argumentsNode?.type === 'template_string') return this.taggedTemplate(node, callee, argumentsNode);
+    if (argumentsNode?.type === 'template_string') return this.taggedTemplate(node, callee, argumentsNode, contextual);
     const args = argumentsNode ? named(argumentsNode) : [];
     const typeArguments = this.typeArguments.written(node);
     if (callee.type === 'super') return this.c.classes.superCall(node, args);
@@ -432,7 +424,7 @@ export class Calls {
    * `` tag`a${x}b` ``, a call of `tag` with a `TemplateStringsArray` of the strings and then the substitutions, which
    * `String.raw` turns into text.
    */
-  private taggedTemplate(node: TreeNode, callee: TreeNode, template: TreeNode): Type {
+  private taggedTemplate(node: TreeNode, callee: TreeNode, template: TreeNode, contextual?: Type): Type {
     const substitutions = named(template)
       .filter((part) => part.type === 'template_substitution')
       .map((part) => named(part)[0]);
@@ -452,30 +444,14 @@ export class Calls {
       this.checkArgumentsOnly(substitutions, errorType);
       return this.uncallableType(callee, calleeType);
     }
-    const strings = this.c.globalType('TemplateStringsArray');
-    const fitting = signatures.filter((signature) => this.takesStrings(signature, strings));
-    if (takesNoArguments(signatures)) {
-      // The strings are the first argument, so a tag that takes none is given one more than the substitutions.
-      this.c.error(template, `引数は 0 個必要ですが、${substitutions.length + 1} 個渡されています。`);
-      return this.checkArgumentsOnly(substitutions, errorType);
-    }
-    if (fitting.length === 0) {
-      const parameter = signatures[0].parameters[0];
-      this.c.error(
-        template,
-        `型 'TemplateStringsArray' の引数を型 '${this.c.print(parameter?.type ?? anyType)}' のパラメーターに渡すことはできません。`
-      );
-      return this.checkArgumentsOnly(substitutions, errorType);
-    }
-    const rest = fitting.map((signature) =>
-      signature.parameters[0]?.rest ? signature : { ...signature, parameters: signature.parameters.slice(1) }
-    );
+    const args = [template, ...substitutions];
     const resolution = isStringRaw
-      ? this.resolveWithTextConversions(node, callee, rest, substitutions, {
+      ? this.resolveWithTextConversions(node, callee, signatures, args, {
           typeArguments,
+          contextual,
           receiver: access?.receiver,
         })
-      : this.resolve(node, callee, rest, substitutions, typeArguments, undefined, access?.receiver);
+      : this.resolve(node, callee, signatures, args, typeArguments, contextual, access?.receiver);
     if (isStringRaw)
       for (const substitution of substitutions)
         this.c.expressions.checkFunctionText(
@@ -515,14 +491,6 @@ export class Calls {
       unsupportedMessage(name === undefined ? '名前が定数で決まらない require' : `モジュール '${name}' の require`)
     );
     return errorType;
-  }
-
-  /** Whether a signature's first parameter takes the strings of a tagged template. */
-  private takesStrings(signature: Signature, strings: Type): boolean {
-    const parameter = signature.parameters[0];
-    if (!parameter) return false;
-    const type = parameter.rest ? this.c.restElementType(parameter.type) : parameter.type;
-    return this.c.relations.isAssignable(strings, type);
   }
 
   private isStringRawTag(callee: TreeNode): boolean {
@@ -781,13 +749,12 @@ export class Calls {
       this.checkArgumentsOnly(args.nodes);
       const minimum = Math.min(...candidates.map((candidate) => minimumArguments(candidate)));
       const maximum = Math.max(...candidates.map((candidate) => this.arity.maximumArguments(candidate)));
-      const strings = stringsArgumentCount(node);
-      const [least, most, count] = [minimum + strings, maximum + strings, args.nodes.length + strings];
+      const count = args.nodes.length;
       this.c.error(
-        args.nodes.length > maximum ? args.nodes[maximum] : node,
+        count > maximum ? args.nodes[maximum] : node,
         maximum === Number.POSITIVE_INFINITY || minimum === maximum
-          ? `引数は ${least} 個必要ですが、${count} 個渡されています。`
-          : `引数は ${least} 個から ${most} 個必要ですが、${count} 個渡されています。`
+          ? `引数は ${minimum} 個必要ですが、${count} 個渡されています。`
+          : `引数は ${minimum} 個から ${maximum} 個必要ですが、${count} 個渡されています。`
       );
       return { signature: candidates[0], returnType: candidates[0].returnType() };
     }

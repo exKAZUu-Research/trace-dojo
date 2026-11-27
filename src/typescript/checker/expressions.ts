@@ -22,6 +22,7 @@ import {
   isDirectEmptyArray,
   isFunctionWithOwnThis,
   isImmediatelyInvoked,
+  isTaggedTemplateArgument,
   named,
   numberValue,
   skipParentheses,
@@ -355,17 +356,8 @@ export class ExpressionChecker {
   }
 
   private templateString(node: TreeNode, contextual: Type | undefined): Type {
-    const texts = [''];
-    const types: Type[] = [];
-    for (const child of named(node)) {
-      if (child.type !== 'template_substitution') {
-        if (child.type === 'string_fragment' || child.type === 'escape_sequence')
-          texts[texts.length - 1] += templateFragmentText(child);
-        continue;
-      }
-      types.push(this.templateSubstitution(named(child)[0]));
-      texts.push('');
-    }
+    if (isTaggedTemplateArgument(node)) return this.c.globalType('TemplateStringsArray');
+    const { texts, types } = this.readTemplateParts(node);
     // A template without substitutions is a string literal, as TypeScript's `NoSubstitutionTemplateLiteral` is.
     if (types.length === 0) return freshLiteralType(texts[0]);
     const spellsType =
@@ -379,6 +371,20 @@ export class ExpressionChecker {
     );
     const spelled = this.c.typeOperators.templateLiteral(texts, placeholders);
     return spelled.kind === 'literal' ? freshLiteralType(spelled.value as string) : spelled;
+  }
+
+  private readTemplateParts(node: TreeNode): { texts: string[]; types: Type[] } {
+    const texts = [''];
+    const types: Type[] = [];
+    for (const child of named(node)) {
+      if (child.type === 'template_substitution') {
+        types.push(this.templateSubstitution(named(child)[0]));
+        texts.push('');
+      } else if (child.type === 'string_fragment' || child.type === 'escape_sequence') {
+        texts[texts.length - 1] += templateFragmentText(child);
+      }
+    }
+    return { texts, types };
   }
 
   /** The type of a template's substitution, which a function or a symbol cannot stand in as text. */

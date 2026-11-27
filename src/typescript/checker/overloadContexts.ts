@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { isContextSensitiveFunction } from './signatures';
-import { named } from './syntax';
+import { isTaggedTemplateArgument, named } from './syntax';
 import type { Type } from './types';
 
 interface Callbacks {
@@ -46,7 +46,7 @@ export class OverloadContexts {
           nodes.add(node.id);
           mayDefer ||= allowsDeferral;
         }
-      } else {
+      } else if (!isTaggedTemplateArgument(node)) {
         for (const child of named(node))
           pending.push({ node: child, allowsDeferral: allowsDeferral && triggersDeferral(node, child) });
       }

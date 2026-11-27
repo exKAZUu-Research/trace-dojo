@@ -250,6 +250,15 @@ export function isRawTypeTemplateFragment(node: TreeNode): boolean {
   return parent?.type === 'template_literal_type' && !named(parent).some((child) => child.type === 'template_type');
 }
 
+/** Whether `node` is the template of `` tag`...` ``, which stands for the `TemplateStringsArray` argument. */
+export function isTaggedTemplateArgument(node: TreeNode): boolean {
+  return (
+    node.type === 'template_string' &&
+    node.parent?.type === 'call_expression' &&
+    node.parent.childForFieldName('arguments')?.id === node.id
+  );
+}
+
 export function hasInvalidCharacterEscape(node: TreeNode): boolean {
   if (node.type !== 'escape_sequence') return false;
   const body = node.text.slice(1);
