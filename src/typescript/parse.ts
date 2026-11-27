@@ -9,6 +9,7 @@ import { nameOf } from '../javascript/convertNodes';
 import { unparsedAwaitMessage } from './checker/awaited';
 import { checkTypeScript } from './checker/checker';
 import { hasInvalidCharacterEscape, isRawTypeTemplateFragment } from './checker/syntax';
+import { repairDecoratedSignatures } from './decoratedSignatures';
 import { javaScriptViewOf } from './jsView';
 import { TypeScriptProgramConverter } from './programConverter';
 import { rejectUnsupportedSyntax } from './unsupported';
@@ -59,12 +60,13 @@ const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter
  * @param trace Makes the statements that record steps report their rows, for a model program.
  */
 export function parseTypeScript(source: string, trace?: TraceOptions): Program {
+  const budget = new ExecutionBudget();
+  const repaired = repairDecoratedSignatures(parser, source, budget);
   return parseSource(
     parser,
-    source,
+    repaired.source,
     MISSING_TOKEN_NAMES,
     (root) => {
-      const budget = new ExecutionBudget();
       rejectUnsupportedSyntax(root);
       let program: Program | undefined;
       let converterErrors: SourceDiagnostic[] = [];
@@ -74,7 +76,7 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
         if (!(error instanceof CompileError)) throw error;
         converterErrors = error.diagnostics;
       }
-      const diagnostics = checkWithDecodedNames(root, source, budget);
+      const diagnostics = [...repaired.diagnostics, ...checkWithDecodedNames(root, repaired.source, budget)];
       const described = new Set(diagnostics.map(diagnosticIndex).filter((index) => index !== undefined));
       const all = [
         ...diagnostics,
@@ -83,7 +85,7 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
       if (all.length > 0 || !program) throw new CompileError(all);
       return program;
     },
-    { locateErrors: (root, errors) => typeScriptSyntaxErrors(root, source, errors) }
+    { locateErrors: (root, errors) => typeScriptSyntaxErrors(root, repaired.source, errors) }
   );
 }
 
