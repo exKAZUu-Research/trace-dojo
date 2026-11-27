@@ -83,6 +83,11 @@ define({
       box.strong--;
       box = new SharedBox(cloneValue(elemType(ctx), box.value));
       place.set(box);
+    } else if (box.weak > 0) {
+      // The only `Rc` with `Weak`s left moves the value to an allocation of its own, which the `Weak`s lose.
+      box.strong = 0;
+      box = new SharedBox(box.value);
+      place.set(box);
     }
     return valuePlace(box);
   },
