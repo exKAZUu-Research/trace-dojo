@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { takesNoArguments } from './callArity';
 import type { Checker } from './checker';
 import { newInferenceRun } from './inference';
-import { hasToken, isConstructorName, named } from './syntax';
+import { hasToken, isConstructorName, named, propertyNameText } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -12,16 +12,23 @@ import {
   functionType,
   intersectionOf,
   isAnyLike,
+  isIntrinsic,
+  isTemplateOrStringMapping,
   literalType,
   type Signature,
   simpleProperty,
+  stringType,
+  symbolType,
   type Type,
+  typeMembers,
   undefinedType,
   unionOf,
   voidType,
 } from './types';
 
 type DecoratedKind = 'class' | 'method' | 'getter' | 'setter' | 'field' | 'accessor';
+
+const genericKeyKinds = new Set(['typeParameter', 'indexedAccess', 'conditional', 'keyof']);
 
 const contextTypeNames: Record<DecoratedKind, string> = {
   class: 'ClassDecoratorContext',
@@ -47,8 +54,9 @@ const failureMessages: Record<DecoratedKind, string> = {
  */
 export function checkDecorators(c: Checker, classNode: TreeNode, info: ClassInfo): void {
   const classType = c.classes.valueTypeOf(info);
+  const classContext = c.globalType('ClassDecoratorContext', [classType]);
   for (const decorator of decoratorsOf(classNode))
-    checkDecorator(c, decorator, 'class', [classType, contextType(c, 'class', [classType], info.name)], classType);
+    checkDecorator(c, decorator, 'class', [classType, classContext], classType);
   for (const member of named(classNode.childForFieldName('body') ?? classNode)) {
     const decorators = decoratorsOf(member);
     if (decorators.length === 0) continue;
@@ -58,10 +66,12 @@ export function checkDecorators(c: Checker, classNode: TreeNode, info: ClassInfo
     const isStatic = hasToken(member, 'static');
     const thisType = isStatic ? classType : c.classes.selfType(info);
     const owner = isStatic ? info.staticType : info.instanceType;
-    const name = nameNode.text;
     const valueType = c.structureOf(owner).properties.get(c.classes.propertyKey(nameNode, nameNode))?.type() ?? anyType;
-    const extra = { name, isPrivate: nameNode.type === 'private_property_identifier', isStatic };
-    const context = contextType(c, kind, [thisType, valueType], name, extra);
+    const context = memberContextType(c, kind, [thisType, valueType], {
+      name: contextNameType(c, nameNode),
+      isPrivate: nameNode.type === 'private_property_identifier',
+      isStatic,
+    });
     const decorated = decoratedValue(c, kind, thisType, valueType);
     const replacement = replacementType(c, kind, thisType, valueType, decorated);
     for (const decorator of decorators) checkDecorator(c, decorator, kind, [decorated, context], replacement);
@@ -141,25 +151,48 @@ function replacementType(c: Checker, kind: DecoratedKind, thisType: Type, valueT
   });
 }
 
-/** The context a decorator receives: the library's context type, with its name and placement as literal types. */
-function contextType(
+/** The context a member decorator receives: the library's context type, with its resolved key and placement. */
+function memberContextType(
   c: Checker,
   kind: DecoratedKind,
   typeArguments: Type[],
-  name: string,
-  member?: { name: string; isPrivate: boolean; isStatic: boolean }
+  member: { name: Type; isPrivate: boolean; isStatic: boolean }
 ): Type {
   const context = c.globalType(contextTypeNames[kind], typeArguments);
   const literals = anonymousObject(() => {
     const structure = emptyStructure();
-    structure.properties.set('name', simpleProperty('name', literalType(name), { readonly: true }));
-    if (member) {
-      structure.properties.set('private', simpleProperty('private', literalType(member.isPrivate), { readonly: true }));
-      structure.properties.set('static', simpleProperty('static', literalType(member.isStatic), { readonly: true }));
-    }
+    structure.properties.set('name', simpleProperty('name', member.name, { readonly: true }));
+    structure.properties.set('private', simpleProperty('private', literalType(member.isPrivate), { readonly: true }));
+    structure.properties.set('static', simpleProperty('static', literalType(member.isStatic), { readonly: true }));
     return structure;
   });
   return intersectionOf([context, literals], c);
+}
+
+function contextNameType(c: Checker, nameNode: TreeNode): Type {
+  if (nameNode.type !== 'computed_property_name') {
+    return literalType(propertyNameText(nameNode) ?? nameNode.text);
+  }
+  const inner = named(nameNode)[0];
+  if (!inner) return unionOf([stringType, symbolType]);
+  return computedKeyNameType(
+    c,
+    c.silently(() => c.expressions.check(inner))
+  );
+}
+
+function computedKeyNameType(c: Checker, keyType: Type): Type {
+  if (isAnyLike(keyType)) return unionOf([stringType, symbolType]);
+  return unionOf(typeMembers(keyType).map((member) => computedKeyMemberType(c, member)));
+}
+
+function computedKeyMemberType(c: Checker, member: Type): Type {
+  if (member.kind === 'literal') return typeof member.value === 'symbol' ? member : literalType(String(member.value));
+  if (isIntrinsic(member, 'symbol')) return symbolType;
+  if (isTemplateOrStringMapping(member)) return member;
+  if (!genericKeyKinds.has(member.kind)) return stringType;
+  const bound = c.baseConstraint(member);
+  return bound !== member ? computedKeyNameType(c, bound) : unionOf([stringType, symbolType]);
 }
 
 /** Checks one decorator, called with `args`, which must fit one of its call signatures. */

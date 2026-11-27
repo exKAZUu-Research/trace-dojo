@@ -166,14 +166,14 @@ export function propertyNameText(node: TreeNode): string | undefined {
     }
     case 'number': {
       const value = numberValue(node.text);
-      return typeof value === 'number' ? String(value) : undefined;
+      return value !== undefined ? String(value) : undefined;
     }
     case 'computed_property_name': {
       const inner = named(node)[0];
       if (inner?.type === 'string') return stringValue(inner);
       if (inner?.type === 'number') {
         const value = numberValue(inner.text);
-        return typeof value === 'number' ? String(value) : undefined;
+        return value !== undefined ? String(value) : undefined;
       }
       return undefined;
     }
