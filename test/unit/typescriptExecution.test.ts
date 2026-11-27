@@ -431,7 +431,7 @@ test('a function turned into text through any or an array ends the program as un
 });
 
 test('Node.js features beyond the standard streams and fs are unavailable', () => {
-  expect(diagnosticsOf('process.exit(0);')).toEqual(['1: process.exit は、この採点環境では使えません。']);
+  expect(diagnosticsOf('process.cwd();')).toEqual(['1: process.cwd は、この採点環境では使えません。']);
 });
 
 test('a type error is reported in Japanese on its row and stops the program before it runs', () => {
