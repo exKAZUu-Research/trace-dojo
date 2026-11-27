@@ -180,7 +180,8 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
     case 'Range':
     case 'RangeInclusive':
     case 'RangeFrom': {
-      return mode === 'value' ? rangeIterator(value as RangeValue, type.args[0]) : undefined;
+      // A range iterates by advancing itself, which a `&mut` of it does in place.
+      return mode === 'ref' ? undefined : rangeIterator(value as RangeValue, type.args[0]);
     }
     case 'Option':
     case 'Result': {

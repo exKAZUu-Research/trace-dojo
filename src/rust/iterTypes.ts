@@ -91,6 +91,8 @@ function borrowedIterItem(type: Extract<Type, { kind: 'ref' }>): Type | undefine
   if (type.mutable && target.kind === 'adt' && !target.def.builtin) return userIteratorItem(target);
   if (target.kind === 'array' || target.kind === 'slice') return ref(target.elem, type.mutable);
   if (target.kind !== 'adt') return undefined;
+  // A range is an iterator, so a `&mut` of one is too.
+  if (type.mutable && RANGE_SHAPES[target.def.builtin as string]) return target.args[0];
   switch (target.def.builtin) {
     case 'Vec':
     case 'VecDeque': {
@@ -155,6 +157,8 @@ function borrowedIterShape(program: Program, type: Type, mutable: boolean): Type
   }
   if (target.kind !== 'adt') return undefined;
   if (target.def.builtin === 'Iter') return mutable ? program.shapeType('ByRefShape', [target.args[1]]) : undefined;
+  const range = RANGE_SHAPES[target.def.builtin as string];
+  if (range) return mutable ? program.shapeType('ByRefShape', [program.shapeType(range, [target.args[0]])]) : undefined;
   const name = COLLECTION_SHAPES[target.def.builtin as string]?.[mutable ? 1 : 0];
   if (!name) return;
   return program.shapeType(name, name === 'OptionIterShape' ? [ref(target.args[0], mutable)] : []);
