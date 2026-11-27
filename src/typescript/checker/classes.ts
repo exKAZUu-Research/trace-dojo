@@ -860,8 +860,9 @@ export class ClassChecker {
     return anyType;
   }
 
-  /** TypeScript checks top-level `this` as `typeof globalThis`. CommonJS supplies `module.exports` at runtime. */
+  /** TypeScript checks top-level `this` as `undefined` in a module and `typeof globalThis` in a script. */
   private globalThisType(node: TreeNode): Type {
+    if (this.c.isModule) return undefinedType;
     for (let current = node.parent; current; current = current.parent) {
       if (current.type !== 'arrow_function') continue;
       this.c.error(node, "アロー関数が、グローバルの 'this' の値を取り込んでいます。");
