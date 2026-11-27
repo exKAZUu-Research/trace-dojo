@@ -425,8 +425,31 @@ function matchFragment(fragment: string, tokens: Token[], start: number, followi
   const single = SINGLE_TOKEN_FRAGMENTS[fragment] as ((token: Token) => boolean) | undefined;
   if (single) return token && single(token) ? start + 1 : -1;
   // rustc tells from the first token whether an item or a meta can begin, and tries the next rule when neither can.
-  const begins = fragment === 'item' ? beginsItem(tokens, start) : fragment !== 'meta' || isPathStart(leafText(token));
+  if (fragment === 'item') return beginsItem(tokens, start) ? itemEnd(tokens, start) : -1;
+  const begins = fragment !== 'meta' || isPathStart(leafText(token));
   return begins ? matchUntilStop(fragment, tokens, start, following) : -1;
+}
+
+/** The keywords of items whose `{ ... }` body ends them; the others end at their `;`. */
+const BODY_ITEMS = new Set(['fn', 'impl', 'trait', 'mod', 'enum', 'macro_rules']);
+
+/**
+ * Where one item from `start` ends: after its body (`fn f() {}`, `impl X {}`, a braced struct or union, a macro
+ * called with braces) or after its `;` (`const C: i32 = 3;`, `struct S(i32);`, `use a::{b, c};`), or -1.
+ */
+function itemEnd(tokens: Token[], start: number): number {
+  let keyword: string | undefined;
+  for (let index = start; index < tokens.length; index++) {
+    const token = tokens[index];
+    const text = leafText(token);
+    if (text === ';') return index + 1;
+    if (keyword === undefined && text !== undefined && /^[a-z_]+$/.test(text) && text !== 'pub') keyword = text;
+    const isBody = token.kind === 'group' && token.open === '{';
+    if (!isBody) continue;
+    const braced = keyword !== undefined && (BODY_ITEMS.has(keyword) || keyword === 'struct' || keyword === 'union');
+    if (braced || leafText(tokens[index - 1]) === '!') return index + 1;
+  }
+  return -1;
 }
 
 /** A literal, with a `-` before a number. */
