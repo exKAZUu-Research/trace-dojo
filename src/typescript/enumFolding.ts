@@ -6,7 +6,7 @@ import { decodeStringLiteral, decodeTemplateFragment } from '../javascript/liter
  * What tsx's esbuild knows of an enum member's value as it compiles the enum: a number it folded, a string, or
  * nothing, as for a member whose initializer reads a variable.
  */
-export type FoldedValue = { kind: 'number'; value: number } | { kind: 'string' } | undefined;
+export type FoldedValue = { kind: 'number'; value: number } | { kind: 'string'; value?: string } | undefined;
 
 /** The folded members of the enum a name refers to where an initializer is, if it is an enum compiled before. */
 export type EnumsInScope = (name: string) => Map<string, FoldedValue> | undefined;
@@ -22,9 +22,11 @@ export function foldEnumValue(node: Node, enums: EnumsInScope): FoldedValue {
     case 'number': {
       return { kind: 'number', value: Number(node.text.replaceAll('_', '')) };
     }
-    case 'string':
+    case 'string': {
+      return { kind: 'string', value: decodeStringLiteral(node.text) };
+    }
     case 'template_string': {
-      return { kind: 'string' };
+      return foldTemplate(node, enums);
     }
     case 'parenthesized_expression': {
       return node.namedChildren[0] ? foldEnumValue(node.namedChildren[0], enums) : undefined;
@@ -45,6 +47,20 @@ export function foldEnumValue(node: Node, enums: EnumsInScope): FoldedValue {
   }
 }
 
+function foldTemplate(node: Node, enums: EnumsInScope): FoldedValue {
+  let value = '';
+  for (const child of node.children) {
+    if (child.type === 'string_fragment' || child.type === 'escape_sequence') {
+      value += decodeTemplateFragment(child.text.replaceAll(/\r\n?/g, '\n'));
+    } else if (child.type === 'template_substitution') {
+      const inner = child.namedChildren[0] ? foldEnumValue(child.namedChildren[0], enums) : undefined;
+      if (inner?.value === undefined) return { kind: 'string' };
+      value += String(inner.value);
+    }
+  }
+  return { kind: 'string', value };
+}
+
 function foldUnary(node: Node, enums: EnumsInScope): FoldedValue {
   const operator = node.childForFieldName('operator')?.text;
   const operand = foldEnumValue(node.childForFieldName('argument') as Node, enums);
@@ -58,8 +74,10 @@ function foldBinary(node: Node, enums: EnumsInScope): FoldedValue {
   const operator = node.childForFieldName('operator')?.text ?? '';
   const left = foldEnumValue(node.childForFieldName('left') as Node, enums);
   const right = foldEnumValue(node.childForFieldName('right') as Node, enums);
-  if (operator === '+' && left && right && (left.kind === 'string' || right.kind === 'string'))
-    return { kind: 'string' };
+  if (operator === '+' && left && right && (left.kind === 'string' || right.kind === 'string')) {
+    const value = left.value !== undefined && right.value !== undefined ? `${left.value}${right.value}` : undefined;
+    return { kind: 'string', value };
+  }
   if (left?.kind !== 'number' || right?.kind !== 'number' || !arithmeticOperators.has(operator)) return undefined;
   return { kind: 'number', value: numberArithmetic(operator, left.value, right.value) };
 }
@@ -72,7 +90,7 @@ function foldedMember(node: Node, enums: EnumsInScope): FoldedValue {
   return name === undefined ? undefined : enums(nameOf(object))?.get(name);
 }
 
-function memberKeyName(node: Node): string | undefined {
+export function memberKeyName(node: Node): string | undefined {
   if (node.type === 'member_expression') {
     const property = node.childForFieldName('property');
     return property ? nameOf(property) : undefined;

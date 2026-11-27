@@ -4,7 +4,7 @@ import type { ClassNode, Expression, IterationSource, MemberExpression, Program,
 import { nameOf, type Node, rowOf, unsupported, unwrapParentheses } from '../javascript/convertNodes';
 import { decodeStringLiteral } from '../javascript/literals';
 import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
-import { countedEnumValue, type EnumsInScope, type FoldedValue, foldEnumValue } from './enumFolding';
+import { countedEnumValue, type EnumsInScope, type FoldedValue, foldEnumValue, memberKeyName } from './enumFolding';
 import { IMPORTED_MODULE, isUnsteppedStatement, PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 
 const functionScopeTypes = new Set([
@@ -54,6 +54,10 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       return statement;
     };
     this.statementConverters.enum_declaration = (node) => this.enumDeclaration(node);
+    for (const type of ['member_expression', 'subscript_expression'] as const) {
+      const convertMember = this.expressionConverters[type];
+      this.expressionConverters[type] = (node) => this.inlinedConstEnumMember(node) ?? convertMember(node);
+    }
     this.expressionConverters[IMPORTED_MODULE] = (node) => ({
       kind: 'importedModule',
       specifier: decodeStringLiteral(node.text),
@@ -192,6 +196,23 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     map.set(name, list);
   }
 
+  private inlinedConstEnumMember(node: Node): Expression | undefined {
+    const object = node.childForFieldName('object');
+    const key = object?.type === 'identifier' ? memberKeyName(node) : undefined;
+    if (!object || key === undefined || !this.isConstEnumReference(object, nameOf(object))) return undefined;
+    const folded = this.lookupFoldedEnum(node, nameOf(object))?.get(key);
+    return folded?.value === undefined ? undefined : { kind: 'literal', value: folded.value, row: rowOf(node) };
+  }
+
+  private isConstEnumReference(fromNode: Node, enumName: string): boolean {
+    for (let scope = this.enclosingScope.get(fromNode); scope; scope = this.scopeParent.get(scope)) {
+      const declarations = this.scopeNames.get(scope)?.get(enumName);
+      if (!declarations) continue;
+      return declarations.some(isConstEnumDeclaration);
+    }
+    return false;
+  }
+
   private lookupFoldedEnum(fromNode: Node, enumName: string): Map<string, FoldedValue> | undefined {
     for (let scope = this.enclosingScope.get(fromNode); scope; scope = this.scopeParent.get(scope)) {
       const declarations = this.scopeNames.get(scope)?.get(enumName);
@@ -208,8 +229,8 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     declarations: Node[],
     fromNode: Node
   ): Map<string, FoldedValue> | undefined {
-    const isDeferred = this.enclosingFnScope.get(fromNode) !== scope;
-    const existing = !isDeferred ? this.foldedEnums.get(scope)?.get(enumName) : undefined;
+    const isFullScope = this.enclosingFnScope.get(fromNode) !== scope || declarations.some(isConstEnumDeclaration);
+    const existing = !isFullScope ? this.foldedEnums.get(scope)?.get(enumName) : undefined;
     if (existing) return existing;
     const key = `${scope.startIndex}:${enumName}`;
     if (this.foldingEnums.has(key)) return undefined;
@@ -217,7 +238,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     try {
       const folded = new Map<string, FoldedValue>();
       for (const declaration of declarations) {
-        if (!isDeferred && declaration.startIndex > fromNode.startIndex) continue;
+        if (!isFullScope && declaration.startIndex > fromNode.startIndex) continue;
         this.foldDeclarationInto(declaration, folded);
       }
       return folded;
@@ -293,6 +314,10 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   protected override arrayDestructuringSource(node: Node): IterationSource | undefined {
     return super.arrayDestructuringSource(unwrapParentheses(node));
   }
+}
+
+function isConstEnumDeclaration(declaration: Node): boolean {
+  return declaration.children.some((child) => !child?.isNamed && child?.type === 'const');
 }
 
 /** The name of an enum member, which an identifier or a string literal gives. */

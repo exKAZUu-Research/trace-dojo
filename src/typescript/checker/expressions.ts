@@ -8,7 +8,7 @@ import { Calls } from './calls';
 import type { Checker } from './checker';
 import { DeferredContexts } from './deferredContexts';
 import { arrayTargets, Elaboration, targetElementType } from './elaboration';
-import { isAllowedConstEnumUse, isConstEnum } from './enums';
+import { isConstEnum } from './enums';
 import { Expandos, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
@@ -749,12 +749,7 @@ export class ExpressionChecker {
       }
       if (current.type === 'field_definition' && !hasToken(current, 'static')) return;
     }
-    // tsc accepts a const enum used before its declaration, whose members esbuild inlines and this interpreter does not.
-    if (symbol.valueKind === 'enum' && isConstEnum(symbol)) {
-      // Another use of a const enum is an error wherever it is, which checkConstEnumUse reports.
-      if (isAllowedConstEnumUse(node)) this.c.error(node, unsupportedMessage('宣言より前での const enum の使用'));
-      return;
-    }
+    if (symbol.valueKind === 'enum' && isConstEnum(symbol)) return;
     const kind = symbol.valueKind === 'class' ? 'クラス' : symbol.valueKind === 'enum' ? '列挙型' : '変数';
     this.c.error(node, `${kind} ${symbol.name} は宣言より前で使われています。`);
   }

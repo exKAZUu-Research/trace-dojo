@@ -192,7 +192,6 @@ test.each([
   ["process.stdout.write('x', () => {});", 'process.stdout.write のコールバックは、この採点環境では使えません。'],
   ['console.log(typeof Symbol.dispose);', 'Symbol.dispose などの well-known シンボルは、この採点環境では使えません。'],
   ["enum H { ['key'] = 4 }", 'enum のメンバー名を [ ] で書くことは、この採点環境では使えません。'],
-  ['console.log(E.A); const enum E { A }', '宣言より前での const enum の使用は、この採点環境では使えません。'],
   [
     'console.log(E); const enum E { A }',
     "'const' enum は、プロパティやインデックスのアクセス式、import 宣言やエクスポート代入の右辺、型のクエリーでしか使えません。",
