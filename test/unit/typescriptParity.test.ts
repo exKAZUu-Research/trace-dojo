@@ -24,11 +24,12 @@ afterEach(() => {
 // Each `.out` holds reference Node.js output for a program accepted by TypeScript 7.0.2 (`tsc --strict`),
 // followed by the first line of the exception that ended it, if one did.
 test.each(programsIn(PARITY_DIR))('%s prints what Node.js prints', (name) => {
-  const expected = read(PARITY_DIR, name.replace(/\.ts\.txt$/, '.out'));
   const execution = executeProgram('typescript', read(PARITY_DIR, name));
   if (execution.kind !== 'executed') throw new Error(`${name} did not run: ${JSON.stringify(execution)}`);
   const uncaught = execution.uncaughtException ? `[uncaught] ${execution.uncaughtException.split('\n')[0]}\n` : '';
-  expect(execution.stdout + uncaught).toBe(expected);
+  expect(execution.stdout + uncaught).toBe(read(PARITY_DIR, name.replace(/\.ts\.txt$/, '.out')));
+  if (fs.existsSync(path.join(PARITY_DIR, name.replace(/\.ts\.txt$/, '.err'))))
+    expect(execution.stderr).toBe(read(PARITY_DIR, name.replace(/\.ts\.txt$/, '.err')));
 });
 
 // Each `.out` file holds the errors TypeScript 7.0.2 (`tsc --strict`) reported for its program, one per line as
