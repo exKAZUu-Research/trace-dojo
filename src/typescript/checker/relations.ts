@@ -26,6 +26,7 @@ import {
   anyType,
   booleanType,
   type ConditionalType,
+  type EnumMemberInfo,
   errorType,
   filterType,
   freshTypeCacheKey,
@@ -713,7 +714,8 @@ export class Relations {
     if (isIntrinsic(type, 'number')) return isNumberTemplateText(text);
     // TypeScript accepts what scans as a bigint literal, so radix prefixes but no leading zero, sign, or separator.
     if (isIntrinsic(type, 'bigint')) return isBigintTemplateText(text);
-    if (type.kind === 'literal') return String(type.value) === text;
+    if (type.kind === 'literal')
+      return type.enumMember?.computed ? isNumberTemplateText(text) : String(type.value) === text;
     if (type.kind === 'union') return type.types.some((member) => this.matchesPlaceholder(text, member));
     if (type.kind === 'templateLiteral' || type.kind === 'stringMapping') return this.matchesTemplate(text, type);
     return false;
@@ -1490,11 +1492,43 @@ function literalTargetRelated(s: Type, t: LiteralType, relation: Relation): bool
 }
 
 /**
- * Whether a literal type is related to another of the same value, where an enum member's type is related only from a
- * member of its enum, which tsc identifies by value, and from a numeric literal's, except when comparing.
+ * Whether two enum declarations are compatible in TypeScript (`isEnumTypeRelatedTo`): the same declaration, or two
+ * non-computed enums of the same name where every member of `source` exists in `target` with the same value.
+ */
+export function enumDeclarationsRelated(source: EnumMemberInfo, target: EnumMemberInfo): boolean {
+  if (source.enumId === target.enumId) return true;
+  if (source.enumName !== target.enumName) return false;
+  const [sourceMembers, targetMembers] = [source.members(), target.members()];
+  for (const [, member] of targetMembers) if (member.computed) return false;
+  for (const [name, member] of sourceMembers) {
+    if (member.computed) return false;
+    const other = targetMembers.get(name);
+    if (!other || other.value !== member.value) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether a literal or enum-member type is related to another, where computed enum members match only themselves (or a
+ * number on the source when assigning, or on either side when comparing) and distinct enum declarations require
+ * compatible member sets.
  */
 function literalRelated(s: LiteralType, t: LiteralType, relation: Relation): boolean {
-  if (s.value !== t.value) return false;
-  if (relation === 'comparable' || !t.enumMember) return true;
-  return s.enumMember ? s.enumMember.enumName === t.enumMember.enumName : typeof s.value === 'number';
+  if (s.enumMember && t.enumMember) return enumMembersRelated(s, t);
+  if (s.enumMember) {
+    return s.enumMember.computed ? relation === 'comparable' && typeof t.value === 'number' : s.value === t.value;
+  }
+  return t.enumMember ? literalToEnumRelated(s, t, relation) : s.value === t.value;
+}
+
+function enumMembersRelated(s: LiteralType, t: LiteralType): boolean {
+  const [from, to] = [s.enumMember as EnumMemberInfo, t.enumMember as EnumMemberInfo];
+  if (from.computed || to.computed) return regularOf(s) === regularOf(t);
+  return s.value === t.value && enumDeclarationsRelated(from, to);
+}
+
+function literalToEnumRelated(s: LiteralType, t: LiteralType, relation: Relation): boolean {
+  if (t.enumMember?.computed)
+    return (relation === 'assignable' || relation === 'comparable') && typeof s.value === 'number';
+  return s.value === t.value && (relation === 'comparable' || typeof s.value === 'number');
 }

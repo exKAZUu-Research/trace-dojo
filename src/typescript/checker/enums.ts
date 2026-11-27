@@ -9,6 +9,7 @@ import { hasToken, isWithin, named, numberValue, propertyNameText, skipParenthes
 import {
   anonymousObject,
   emptyStructure,
+  type EnumMemberInfo,
   type LiteralType,
   newTypeId,
   numberType,
@@ -154,16 +155,23 @@ export class Enums {
   private computeInfo(symbol: Sym): EnumInfo {
     const info = {} as EnumInfo;
     const { members, errors } = this.memberValues(symbol);
-    const literals = [...members.values()].filter((member) => member.value !== undefined);
-    const types = literals.map((member) => {
-      member.type = enumLiteralType(member.value as EnumValue, symbol.name, member.name, () => info.type);
+    const summary = new Map(
+      [...members].map(([name, member]) => [name, { value: member.value, computed: member.value === undefined }])
+    );
+    const types = [...members.values()].map((member) => {
+      member.type = enumLiteralType(member.value, {
+        enumId: symbol.id,
+        enumName: symbol.name,
+        name: member.name,
+        computed: member.value === undefined,
+        members: () => summary,
+        base: () => info.type,
+      });
       return member.type;
     });
-    const isUnion = literals.length === members.size && types.length > 0;
-    const union = isUnion ? unionOf(types) : numberType;
+    const union = types.length > 0 ? unionOf(types) : numberType;
     if (union.kind === 'union') union.enumName = symbol.name;
     info.type = union;
-    for (const member of members.values()) if (member.value === undefined) member.type = numberType;
     info.members = members;
     info.errors = errors;
     info.objectType = enumObjectType(symbol.name, members);
@@ -383,13 +391,14 @@ export function memberNameOf(member: TreeNode): string | undefined {
   return name.type === 'string' ? stringValue(name) : propertyNameText(name);
 }
 
-function enumLiteralType(value: EnumValue, enumName: string, name: string, base: () => Type): LiteralType {
-  const enumMember = { enumName, name, base };
-  const regular = { kind: 'literal', id: newTypeId(), value, fresh: false, enumMember } as LiteralType;
+function enumLiteralType(value: EnumValue | undefined, enumMember: EnumMemberInfo): LiteralType {
+  // A computed member is a numeric enum member whose value is not known until run time.
+  const stored = value ?? Number.NaN;
+  const regular = { kind: 'literal', id: newTypeId(), value: stored, fresh: false, enumMember } as LiteralType;
   const fresh = {
     kind: 'literal',
     id: newTypeId(),
-    value,
+    value: stored,
     fresh: true,
     counterpart: regular,
     enumMember,

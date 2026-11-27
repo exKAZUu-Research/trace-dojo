@@ -513,11 +513,14 @@ export class Flow {
     if (assumeTrue)
       return nonNullableType(
         this.c,
-        filterType(type, (member) => member.kind !== 'literal' || Boolean(member.value))
+        filterType(
+          type,
+          (member) => member.kind !== 'literal' || Boolean(member.enumMember?.computed) || Boolean(member.value)
+        )
       );
     if (isAnyLike(type) || isIntrinsic(type, 'unknown')) return type;
     return mapType(type, (member) => {
-      if (member.kind === 'literal') return member.value ? neverType : member;
+      if (member.kind === 'literal') return member.enumMember?.computed ? member : member.value ? neverType : member;
       if (member === narrowedUnknownObjectType || member === emptyObjectType) return member;
       if (member.kind === 'object' || isIntrinsic(member, 'object') || isIntrinsic(member, 'symbol')) return neverType;
       if (member === booleanType) return falseType;
@@ -740,7 +743,10 @@ function isUnitIntrinsic(type: Type): boolean {
 }
 
 function sameUnit(a: Type, b: Type): boolean {
-  if (a.kind === 'literal' && b.kind === 'literal') return a.value === b.value;
+  if (a.kind === 'literal' && b.kind === 'literal') {
+    if (a.enumMember?.computed || b.enumMember?.computed) return regularOf(a) === regularOf(b);
+    return a.value === b.value;
+  }
   if (isIntrinsic(a, 'void') || isIntrinsic(b, 'void'))
     return (
       isUnitIntrinsic(a) &&

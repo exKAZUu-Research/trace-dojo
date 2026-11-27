@@ -53,6 +53,15 @@ export interface IntrinsicType {
 export type LiteralValue = string | number | bigint | boolean | symbol;
 type LiteralKind = 'string' | 'number' | 'bigint' | 'boolean' | 'symbol';
 
+export interface EnumMemberInfo {
+  enumId: number;
+  enumName: string;
+  name: string;
+  computed: boolean;
+  members: () => ReadonlyMap<string, { value: string | number | undefined; computed: boolean }>;
+  base: () => Type;
+}
+
 export interface LiteralType {
   kind: 'literal';
   id: number;
@@ -63,7 +72,7 @@ export interface LiteralType {
   /** The other of the fresh and regular types of the same value. */
   counterpart: LiteralType;
   /** For an enum member's type, the enum and the member, and the enum's type, to which the member's type widens. */
-  enumMember?: { enumName: string; name: string; base: () => Type };
+  enumMember?: EnumMemberInfo;
 }
 
 export interface UnionType {
@@ -388,7 +397,9 @@ export function uniqueSymbolName(propertyName: string): string | undefined {
 
 /** Whether a type is a literal that names a property: a string, a number, or a unique symbol. */
 export function isPropertyKeyLiteral(type: Type): type is LiteralType & { value: string | number | symbol } {
-  return type.kind === 'literal' && ['string', 'number', 'symbol'].includes(typeof type.value);
+  return (
+    type.kind === 'literal' && !type.enumMember?.computed && ['string', 'number', 'symbol'].includes(typeof type.value)
+  );
 }
 
 const literalPrimitives: Record<LiteralKind, Type> = {
