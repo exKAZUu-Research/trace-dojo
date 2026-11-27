@@ -192,6 +192,7 @@ export class AttributeReader {
   /** Evaluates a `cfg` predicate as rustc does for a debug build without tests or features. */
   private condition(tokens: Node[], span: Span): boolean {
     const [head, second, third] = tokens;
+    if (head?.type === 'boolean_literal' && tokens.length === 1) return head.text === 'true';
     if (head?.type !== 'identifier') syntaxError(span, '#[cfg] の条件の書き方に誤りがあります。');
     const name = head.text;
     if (TARGET_OPTIONS.has(name)) unavailable(span, `OS や CPU によって変わる条件（cfg(${name})）`);
