@@ -119,7 +119,13 @@ function projectionType(solver: TraitSolver, type: Type & { kind: 'adt' }): Type
 /** The associated type a bound of a type parameter, a trait object, or an `impl Trait` sets. */
 function boundAssocType(bounds: TraitRef[], self: Type, trait: TraitDef, name: string): Type | undefined {
   for (const bound of allSupertraits(bounds, self)) {
-    if (bound.trait !== trait) continue;
+    if (bound.trait !== trait) {
+      // A bound may set an associated type of a supertrait (`IndexMut<usize, Output = i32>` sets `Index`'s).
+      const inherited = bound.assoc?.get(name);
+      const ofSupertrait = allSupertraits([bound], self).some((parent) => parent.trait === trait);
+      if (inherited && ofSupertrait && !bound.trait.assocTypes.has(name)) return inherited;
+      continue;
+    }
     const set = bound.assoc?.get(name) ?? (name === 'Item' ? bound.item : undefined);
     if (set) return set;
   }
