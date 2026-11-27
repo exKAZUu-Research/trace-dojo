@@ -523,9 +523,13 @@ export class Calls {
    * other module, or one a string literal does not name, is rejected before the program runs.
    */
   private requiredModule(callee: TreeNode, args: TreeNode[]): Type | undefined {
-    if (callee.type !== 'identifier' || callee.text !== 'require') return undefined;
+    const target = withoutAssertions(callee);
+    if (target.type !== 'identifier' || target.text !== 'require') return undefined;
     const library = this.c.libraryBinder.moduleScope.lookupValue('require');
-    if (!library || this.c.scopeOf(callee).lookupValue('require') !== library) return undefined;
+    if (!library || this.c.scopeOf(target).lookupValue('require') !== library) return undefined;
+    if (callee !== target && !this.checkWrappedRequireCallee(callee, target, this.c.expressions.valueTypeOf(library))) {
+      return this.checkArgumentsOnly(args, errorType);
+    }
     // @types/node declares `require(id: string)`, whose argument count and type tsc checks first.
     if (args.length !== 1) {
       this.c.error(args[1] ?? callee, `引数は 1 個必要ですが、${args.length} 個渡されています。`);
@@ -550,16 +554,80 @@ export class Calls {
     return errorType;
   }
 
+  private checkWrappedRequireCallee(callee: TreeNode, target: TreeNode, requireType: Type): boolean {
+    let currentType: Type | undefined = requireType;
+    for (const wrapper of wrapperChain(target, callee)) {
+      currentType = this.applyRequireWrapper(wrapper, currentType);
+      if (!currentType) return false;
+    }
+    if (!isAnyLike(currentType) && this.c.signaturesOf(currentType, 'call').length === 0) {
+      this.uncallableType(callee, currentType);
+      return false;
+    }
+    return true;
+  }
+
+  private applyRequireWrapper(wrapper: TreeNode, currentType: Type): Type | undefined {
+    if (wrapper.type === 'parenthesized_expression' || wrapper.type === 'non_null_expression') return currentType;
+    const typeNode = wrapper.type === 'type_assertion' ? named(named(wrapper)[0])[0] : named(wrapper)[1];
+    if (!typeNode) return currentType;
+    const written = this.c.typeNodes.typeFromNode(typeNode);
+    if (wrapper.type === 'satisfies_expression') {
+      if (this.c.relations.isAssignable(currentType, written)) return currentType;
+      this.c.error(
+        wrapper,
+        `型 '${this.c.print(currentType)}' は想定された型 '${this.c.print(written)}' を満たしていません。`
+      );
+      return undefined;
+    }
+    if (!this.c.relations.isAssignable(currentType, written) && !this.c.relations.isAssignable(written, currentType)) {
+      this.c.error(
+        wrapper,
+        `型 '${this.c.print(currentType)}' から型 '${this.c.print(written)}' への変換は、互いに十分に重なっていないため間違っている可能性があります。意図的な変換である場合は、まず式を 'unknown' に変換してください。`
+      );
+    }
+    return written;
+  }
+
   private isStringRawTag(callee: TreeNode): boolean {
     const expression = withoutAssertions(callee);
     const receiver = expression.childForFieldName('object');
     const object = receiver && withoutAssertions(receiver);
     if (object?.type !== 'identifier') return false;
     const symbol = this.c.scopeOf(object).lookupValue(object.text);
-    if (symbol !== this.c.libraryBinder.moduleScope.lookupValue('String')) return false;
-    if (expression.type === 'member_expression') return expression.childForFieldName('property')?.text === 'raw';
-    const index = expression.type === 'subscript_expression' ? expression.childForFieldName('index') : undefined;
-    return index !== undefined && index !== null && this.c.flow.constantIndexName(index) === 'raw';
+    if (!symbol || symbol !== this.c.libraryBinder.moduleScope.lookupValue('String')) return false;
+    const isRawMember =
+      expression.type === 'member_expression'
+        ? expression.childForFieldName('property')?.text === 'raw'
+        : expression.type === 'subscript_expression' &&
+          Boolean(expression.childForFieldName('index')) &&
+          this.c.flow.constantIndexName(expression.childForFieldName('index') as TreeNode) === 'raw';
+    return isRawMember && !this.mayMutateStringRaw(symbol);
+  }
+
+  private mayMutateStringRaw(stringSymbol: unknown): boolean {
+    const stack: TreeNode[] = [this.c.root];
+    for (let node = stack.pop(); node; node = stack.pop()) {
+      this.c.budget.spend();
+      if (this.targetsStringOrRaw(node, stringSymbol)) return true;
+      for (const child of node.namedChildren) if (child) stack.push(child);
+    }
+    return false;
+  }
+
+  private targetsStringOrRaw(node: TreeNode, stringSymbol: unknown): boolean {
+    const writeTarget = mutatedWriteTarget(node);
+    if (writeTarget) {
+      const receiver = withoutAssertions(writeTarget).childForFieldName('object');
+      if (receiver && this.isSymbolIdentifier(withoutAssertions(receiver), stringSymbol)) return true;
+    }
+    if (node.type !== 'call_expression') return false;
+    const firstArg = named(node.childForFieldName('arguments') ?? node)[0];
+    return Boolean(firstArg && this.isSymbolIdentifier(withoutAssertions(firstArg), stringSymbol));
+  }
+
+  private isSymbolIdentifier(node: TreeNode, symbol: unknown): boolean {
+    return node.type === 'identifier' && this.c.scopeOf(node).lookupValue(node.text) === symbol;
   }
 
   /** Resolves a call to one of `signatures`, as `super(...)` does with its base class's constructors. */
@@ -1308,4 +1376,26 @@ function restTupleContexts(c: Checker, restType: Type, args: ExpressionListFlow)
     args.nodes.map((node) => args.length(node))
   );
   return contexts.map((context, index) => (args.nodes[index].type === 'spread_element' ? undefined : context));
+}
+
+function wrapperChain(target: TreeNode, callee: TreeNode): TreeNode[] {
+  const wrappers: TreeNode[] = [];
+  for (let current: TreeNode | null = target.parent; current; current = current.parent) {
+    wrappers.push(current);
+    if (current.id === callee.id) break;
+  }
+  return wrappers;
+}
+
+function mutatedWriteTarget(node: TreeNode): TreeNode | null | undefined {
+  if (node.type === 'assignment_expression' || node.type === 'augmented_assignment_expression') {
+    return node.childForFieldName('left');
+  }
+  if (
+    node.type === 'update_expression' ||
+    (node.type === 'unary_expression' && node.children.some((child) => child?.type === 'delete'))
+  ) {
+    return node.childForFieldName('argument');
+  }
+  return undefined;
 }

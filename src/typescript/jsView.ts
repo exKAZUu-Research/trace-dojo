@@ -230,8 +230,13 @@ function view(node: TreeNode, binder: Binder): ViewNode {
       return inner?.type === 'internal_module' ? namespaceView(inner, binder) : generic(node, node.type, binder);
     }
     case 'enum_declaration': {
+      const context = contextOf(binder);
+      const nameNode = node.childForFieldName('name');
+      if (isTopLevelEnumDeclaration(node) && nameNode && !context.enumAliases.has(node.id)) {
+        context.enumAliases.set(node.id, context.freshHelperName(nameOf(nameNode)));
+      }
       const viewed = generic(node, node.type, binder);
-      viewed.enumAlias = contextOf(binder).enumAliases.get(node.id);
+      viewed.enumAlias = context.enumAliases.get(node.id);
       return viewed;
     }
     default: {
@@ -350,6 +355,14 @@ function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode 
   }
   // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
   if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode, binder);
+  if (symbol?.valueKind === 'enum') {
+    const enclosing = enclosingEnumOf(node);
+    const alias =
+      enclosing && symbol.valueDeclarations.some((decl) => decl.id === enclosing.id)
+        ? contextOf(binder).enumAliases.get(enclosing.id)
+        : undefined;
+    if (alias) return leaf(node, 'identifier', alias);
+  }
   return undefined;
 }
 
@@ -483,10 +496,13 @@ function enumMemberReference(node: TreeNode, member: TreeNode, binder: Binder): 
   const enumName = nameNode ? nameOf(nameNode) : '';
   if (!declaration || !enumName) return memberReference(node, enumName, nameOf(node));
   const enumSymbol = binder.lookupValue(declaration, enumName);
-  if (binder.lookupValue(node, enumName) === enumSymbol) return memberReference(node, enumName, nameOf(node));
   const targetEnum = enclosingEnumOf(node) ?? declaration;
   const context = contextOf(binder);
-  let alias = context.enumAliases.get(targetEnum.id);
+  const preassigned = context.enumAliases.get(targetEnum.id);
+  if (!preassigned && binder.lookupValue(node, enumName) === enumSymbol) {
+    return memberReference(node, enumName, nameOf(node));
+  }
+  let alias = preassigned;
   if (!alias) {
     alias = context.freshHelperName(enumName);
     context.enumAliases.set(targetEnum.id, alias);
@@ -499,6 +515,13 @@ function enclosingEnumOf(node: TreeNode): TreeNode | undefined {
     if (current.type === 'enum_declaration') return current;
   }
   return undefined;
+}
+
+function isTopLevelEnumDeclaration(node: TreeNode): boolean {
+  return (
+    node.parent?.type === 'program' ||
+    (node.parent?.type === 'export_statement' && node.parent.parent?.type === 'program')
+  );
 }
 
 function exportedMemberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {

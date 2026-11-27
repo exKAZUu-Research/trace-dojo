@@ -2,7 +2,7 @@ import fs from 'node:fs';
 
 import { expect, test } from 'vitest';
 
-import { executeProgram } from '../../src/interpreter/program';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 const diagnosticsOf = (source: string): string[] => {
   const execution = executeProgram('typescript', source);
@@ -1177,5 +1177,48 @@ test('enforces variance, thenable, import-query, optional-assertion, ambient-mod
     kind: 'executed',
     stdout: 'false undefined ok\n',
     uncaughtException: undefined,
+  });
+
+  expect(
+    diagnosticsOf(
+      'declare namespace N { interface Visible { x: number } interface Hidden { y: string } export { Visible as Pub }; }\nconst ok: N.Pub = { x: 1 };\nconst bad: N.Hidden = { y: "no" };'
+    )
+  ).toEqual(["3: 名前空間 'N' には、エクスポートされたメンバー 'Hidden' がありません。"]);
+
+  expect(
+    executeProgram(
+      'typescript',
+      'type Box<T> = { value: T };\ntype Read<out T> = Box<T>;\nconst p: Read<string> = { value: "hi" };\nfunction initial(): number { return typeof E === "undefined" ? 1 : 2; }\nenum E { A = initial() }\nString.raw = () => "ok";\nfunction dec(_v: any, c: ClassMethodDecoratorContext) { try { console.log(c.access.has(1)); } catch (e: any) { console.log(e.name); } }\nclass D { @dec m() {} }\nimport * as fs from "fs";\nconsole.log(p.value, E.A, String.raw`x${() => 1}`, JSON.stringify(fs.readdirSync(".")));',
+      { files: { '😀.txt': '', 'Ａ.txt': '' } }
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\nhi 1 ok ["Ａ.txt","😀.txt"]\n',
+    uncaughtException: undefined,
+  });
+
+  expect(diagnosticsOf('enum E { A }\nE = {} as any;\nnamespace N { export const x = 1 }\nN = {} as any;')).toEqual([
+    "2: 列挙型であるため、'E' に割り当てることはできません。",
+    "4: 名前空間であるため、'N' に割り当てることはできません。",
+  ]);
+
+  expect(
+    executeProgram(
+      'typescript',
+      'declare module "short";\ndeclare module "pkg-*" { export interface Box { x: number } }\nconst q: typeof import("short") = { a: 7 };\nconst b: import("pkg-one").Box = { x: 9 };\nfunction d(value: any, c: ClassDecoratorContext) { c.addInitializer(function(this: any) { console.log(C.name, this === C); }); return class Replacement extends value {}; }\n@d class C {}\nconst sym = Symbol("x");\nclass Acc { accessor [sym] = 1; }\nconst desc = Object.getOwnPropertyDescriptor(Acc.prototype, sym)!;\nconst fsMod = (require as NodeJS.Require)("fs");\nlet Mut: any = (class { static current() { return Mut; } });\nconst before = Mut;\nMut = class {};\nconsole.log(q.a, b.x, desc.get!.name, desc.set!.name, fsMod.existsSync("none"), before.current() === Mut, before.name);'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'Replacement true\n7 9 get [x] set [x] false true Mut\n',
+    uncaughtException: undefined,
+  });
+
+  const factoryTrace = traceProgram(
+    'typescript',
+    'function d(C: any): any { return class extends C {}; }\nfunction make() { @d class C { static count = 1; } return C; }\nconst Returned = make();\nconsole.log(Returned.count);',
+    'function d(C: any): any { return class extends C {}; }\nfunction make() { @d class C { static count = 1; } return C; }\nconst Returned = make();\nconsole.log(Returned.count);'
+  );
+  expect('traceItems' in factoryTrace ? factoryTrace.traceItems.at(-1)?.vars : undefined).toEqual({
+    'Returned.count': 1,
   });
 });

@@ -25,6 +25,7 @@ import {
   JsThrow,
   Scope,
   toBoolean,
+  UNINITIALIZED,
   type Value,
 } from './values';
 
@@ -286,7 +287,8 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
 
   protected declareClass(cls: ClassNode): void {
     const binding = this.runtime.frame.scope.lookup(cls.name);
-    this.writeVariable(cls.name, this.evaluateClass(cls, undefined, binding), 'initialize');
+    const value = this.evaluateClass(cls, undefined, binding, true);
+    if (!binding || binding.value === UNINITIALIZED) this.writeVariable(cls.name, value, 'initialize');
   }
 
   protected classBinding(target: Pattern): Binding | undefined {

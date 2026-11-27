@@ -19,6 +19,7 @@ import {
   calleeText,
   fail,
   field,
+  firstUndecoratedChild,
   hasChild,
   hasUseStrictDirective,
   isOptionalChain,
@@ -529,30 +530,32 @@ export class ProgramConverter extends ExpressionConverter {
         decorators: this.decoratorsOf(member),
       };
     }
-    if (member.type === 'field_definition') {
-      const nameNode = field(member, 'name');
-      const key = this.propertyName(nameNode);
-      checkMemberName(member, key, isStatic, true);
-      const valueNode = member.childForFieldName('value');
-      // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
-      const value = valueNode ? this.withContext(initializerContext(), () => this.expression(valueNode)) : undefined;
-      const constant = value !== undefined && isStatic && isConstantExpression(value);
-      const fieldMember: ClassMember = {
-        kind: 'field',
-        isStatic,
-        isTraceConstant: constant && hasChild(member, 'readonly') ? true : undefined,
-        key,
-        value,
-        // The name's row, since the member node starts at its decorators, which may be on earlier rows.
-        row: rowOf(nameNode),
-        decorators: this.decoratorsOf(member),
-        isAutoAccessor: this.hasAutoAccessors && hasChild(member, 'accessor') ? true : undefined,
-      };
-      const recordsStep = value !== undefined && !constant;
-      return recordsStep ? this.steppable(nameNode, fieldMember) : fieldMember;
-    }
+    if (member.type === 'field_definition') return this.fieldMember(member, isStatic);
     if (member.type === 'class_static_block') return this.staticBlock(member);
     return unsupported(member, `クラスの中の「${member.type}」`);
+  }
+
+  private fieldMember(member: Node, isStatic: boolean): ClassMember {
+    const nameNode = field(member, 'name');
+    const key = this.propertyName(nameNode);
+    checkMemberName(member, key, isStatic, true);
+    const valueNode = member.childForFieldName('value');
+    // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
+    const value = valueNode ? this.withContext(initializerContext(), () => this.expression(valueNode)) : undefined;
+    const constant = value !== undefined && isStatic && isConstantExpression(value);
+    const fieldMember: ClassMember = {
+      kind: 'field',
+      isStatic,
+      isTraceConstant: constant && hasChild(member, 'readonly') ? true : undefined,
+      key,
+      value,
+      // The name's row, since the member node starts at its decorators, which may be on earlier rows.
+      row: rowOf(nameNode),
+      decorators: this.decoratorsOf(member),
+      isAutoAccessor: this.hasAutoAccessors && hasChild(member, 'accessor') ? true : undefined,
+    };
+    const stepNode = firstUndecoratedChild(member) ?? nameNode;
+    return value !== undefined && !constant ? this.steppable(stepNode, fieldMember) : fieldMember;
   }
 
   /** Converts a static block, whose body runs like a method's with the class as `this` and keeps its `var`s. */
@@ -560,8 +563,12 @@ export class ProgramConverter extends ExpressionConverter {
     return this.withContext(initializerContext(), () => {
       const scope = this.pushScope(true);
       try {
-        const body = this.statementList(namedChildren(field(member, 'body')));
-        return { kind: 'staticBlock', body, scope, row: rowOf(member) };
+        return {
+          kind: 'staticBlock',
+          body: this.statementList(namedChildren(field(member, 'body'))),
+          scope,
+          row: rowOf(member),
+        };
       } finally {
         this.popScope();
       }

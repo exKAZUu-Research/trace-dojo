@@ -127,7 +127,7 @@ function classBindings(scope: Scope): TracedClass[] {
   for (const [name, binding] of scope.bindings) {
     const live = binding.initializingClass ?? binding.value;
     if (!(live instanceof JsFunction)) continue;
-    const declared = binding.initializingClass ?? binding.declaredClass ?? live;
+    const declared = binding.initializingClass ?? binding.declaredClass ?? live.declaredClass ?? live;
     if (declared.behavior.kind !== 'class' && live.behavior.kind !== 'class') continue;
     const owner = declared.behavior.kind === 'class' ? declared.behavior.traceBinding : undefined;
     if (binding === owner) classes.delete(live);

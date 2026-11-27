@@ -192,6 +192,8 @@ export class JsFunction extends JsObject {
   /** Values a native function's closure keeps, such as what `bind` bound, which garbage collection must see. */
   captured: Value[] = [];
   boundTarget?: JsFunction;
+  /** The source class whose static fields trace snapshots keep showing when a class decorator returns a subclass. */
+  declaredClass?: JsFunction;
   forwardsLegacyCaller?: true;
   initialName = '';
 

@@ -515,11 +515,9 @@ export class AssignmentChecker {
       this.c.error(expression, `${expression.text} は定数なので、代入できません。`);
       return errorType;
     }
-    if (symbol.valueKind === 'function' || symbol.valueKind === 'class') {
-      this.c.error(
-        expression,
-        `${expression.text} は${symbol.valueKind === 'class' ? 'クラス' : '関数'}なので、代入できません。`
-      );
+    const immutableMessage = immutableSymbolAssignmentMessage(expression.text, symbol);
+    if (immutableMessage) {
+      this.c.error(expression, immutableMessage);
       return errorType;
     }
     if (compound) return this.c.expressions.identifier(expression);
@@ -639,4 +637,17 @@ export class AssignmentChecker {
 
 function isAssignmentPattern(node: TreeNode): boolean {
   return ['array', 'object', 'array_pattern', 'object_pattern'].includes(node.type);
+}
+
+function immutableSymbolAssignmentMessage(
+  name: string,
+  symbol: { valueKind?: string; namespaceExports?: unknown }
+): string | undefined {
+  if (symbol.valueKind === 'enum') return `列挙型であるため、'${name}' に割り当てることはできません。`;
+  if (symbol.valueKind === 'class') return `${name} はクラスなので、代入できません。`;
+  if (symbol.valueKind === 'namespace' || (symbol.valueKind === 'function' && symbol.namespaceExports)) {
+    return `名前空間であるため、'${name}' に割り当てることはできません。`;
+  }
+  if (symbol.valueKind === 'function') return `${name} は関数なので、代入できません。`;
+  return undefined;
 }

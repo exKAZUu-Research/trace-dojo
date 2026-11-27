@@ -359,9 +359,12 @@ export abstract class EvaluatorBase {
 /** Names a function by the variable or parameter default it was assigned to when it has no name yet. */
 export function nameFunction(runtime: Runtime, fn: JsFunction, name: Key): void {
   if (runtime.functionName(fn) !== '' || fn.behavior.kind === 'native') return;
-  // A function named by a symbol key takes the symbol's description in brackets.
-  const text = typeof name === 'string' ? name : name.description === undefined ? '' : `[${name.description}]`;
-  defineFunctionName(fn, text);
+  defineFunctionName(fn, functionKeyText(name));
+}
+
+/** A function or accessor key as ECMAScript formats it in `name`: a symbol's description in brackets, or `""`. */
+export function functionKeyText(name: Key): string {
+  return typeof name === 'string' ? name : name.description === undefined ? '' : `[${name.description}]`;
 }
 
 /** The variables a pattern declares, in order. */

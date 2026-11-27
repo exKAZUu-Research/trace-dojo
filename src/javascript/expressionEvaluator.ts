@@ -29,7 +29,12 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   /** The strings array of each tagged template site, which every evaluation of the site passes to its tag. */
   private readonly templateObjects = new WeakMap<Expression, JsArray>();
 
-  abstract evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding): JsFunction;
+  abstract evaluateClass(
+    cls: ClassNode,
+    inferredName?: Key,
+    binding?: Binding,
+    initializesBinding?: boolean
+  ): JsFunction;
 
   abstract superCall(args: Value[], callRow: number, skipsAfterSuper?: boolean): JsObject;
 

@@ -246,7 +246,10 @@ export class StatementChecker {
       );
       return;
     }
-    if (!inNamespace) return;
+    if (inNamespace) this.checkNamespaceExportForm(node, clause, source);
+  }
+
+  private checkNamespaceExportForm(node: TreeNode, clause: TreeNode | undefined, source: TreeNode | null): void {
     if (hasToken(node, 'default'))
       this.c.error(node, '既定のエクスポートは、ECMAScript スタイルのモジュールでのみ使用できます。');
     else if ((clause && (!isAmbient(node) || source !== null)) || (!clause && source !== null))

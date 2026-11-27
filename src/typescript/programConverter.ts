@@ -147,25 +147,48 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     else if (isFirstInBlock) this.declareVariable(nameNode, name, 'let');
     const alias = enumAliasOf(node);
     if (alias) this.declareVariable(nameNode, alias, 'var');
-    const enumObject = (): Expression => ({ kind: 'identifier', name, row });
+    const deferPublication = Boolean(alias && currentScope && !this.scopeParent.has(currentScope));
+    const id = (identifierName: string): { kind: 'identifier'; name: string; row: number } => ({
+      kind: 'identifier',
+      name: identifierName,
+      row,
+    });
+    const enumObject = (): { kind: 'identifier'; name: string; row: number } => id(name);
+    const receiverName = deferPublication ? (alias as string) : name;
     const folded = currentScope ? this.foldedMapFor(currentScope, name) : new Map<string, FoldedValue>();
-    const assignments = this.enumMemberAssignments(node, name, folded, row);
-    const baseCreated: Expression = {
-      kind: 'assign',
-      operator: '=',
-      target: { kind: 'identifier', name, row },
-      value: { kind: 'logical', operator: '||', left: enumObject(), right: { kind: 'object', members: [], row }, row },
+    const assignments = this.enumMemberAssignments(node, name, receiverName, folded, row);
+    const fallbackObject: Expression = {
+      kind: 'logical',
+      operator: '||',
+      left: enumObject(),
+      right: { kind: 'object', members: [], row },
       row,
     };
-    const created: Expression = alias
-      ? { kind: 'assign', operator: '=', target: { kind: 'identifier', name: alias, row }, value: baseCreated, row }
-      : baseCreated;
-    const init: Expression = { kind: 'sequence', expressions: [created, ...assignments, enumObject()], row };
+    const assign = (target: { kind: 'identifier'; name: string; row: number }, value: Expression): Expression => ({
+      kind: 'assign',
+      operator: '=',
+      target,
+      value,
+      row,
+    });
+    const created: Expression = deferPublication
+      ? assign(id(receiverName), fallbackObject)
+      : alias
+        ? assign(id(alias), assign(enumObject(), fallbackObject))
+        : assign(enumObject(), fallbackObject);
+    const published: Expression = deferPublication ? assign(enumObject(), id(receiverName)) : enumObject();
+    const init: Expression = { kind: 'sequence', expressions: [created, ...assignments, published], row };
     return enumStatementOf(name, init, this.stepRowOf(node), row, isBlockScoped, isFirstInBlock);
   }
 
-  private enumMemberAssignments(node: Node, name: string, folded: Map<string, FoldedValue>, row: number): Expression[] {
-    const enumObject = (): Expression => ({ kind: 'identifier', name, row });
+  private enumMemberAssignments(
+    node: Node,
+    name: string,
+    receiverName: string,
+    folded: Map<string, FoldedValue>,
+    row: number
+  ): Expression[] {
+    const enumObject = (): Expression => ({ kind: 'identifier', name: receiverName, row });
     const memberOf = (key: Expression): MemberExpression => ({
       kind: 'member',
       object: enumObject(),
@@ -175,7 +198,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     });
     const text = (value: string): Expression => ({ kind: 'literal', value, row });
     const enumsInScope: EnumsInScope = (enumName) =>
-      enumName === name ? folded : this.lookupFoldedEnum(node, enumName);
+      enumName === name || enumName === receiverName ? folded : this.lookupFoldedEnum(node, enumName);
     const assignments: Expression[] = [];
     let previous: FoldedValue;
     let isFirst = true;

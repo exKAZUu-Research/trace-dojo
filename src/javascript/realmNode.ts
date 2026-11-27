@@ -181,7 +181,9 @@ function defineDirectoryMethods(builder: RealmBuilder, fs: JsObject): void {
     const unavailable = unavailableReaddirOption(runtime, args[1]);
     if (runtime.unavailableMember && unavailable) rejectUnavailableMember(unavailable, runtime.currentRow);
     const path = requirePath(runtime, args[0]);
-    return runtime.newArray(withErrors(runtime, 'scandir', path, () => runtime.io.files.list(path)));
+    return runtime.newArray(
+      withErrors(runtime, 'scandir', path, () => runtime.io.files.list(path)).toSorted(compareUtf8)
+    );
   });
   for (const [name, syscall, kind] of [
     ['unlinkSync', 'unlink', 'file'],
@@ -319,6 +321,15 @@ function writeStandardStreamPath(runtime: Runtime, path: string, bytes: Uint8Arr
 
 function normalizeUtf8(text: string): string {
   return UTF8_DECODER.decode(UTF8_ENCODER.encode(text));
+}
+
+function compareUtf8(a: string, b: string): number {
+  const [bytesA, bytesB] = [UTF8_ENCODER.encode(a), UTF8_ENCODER.encode(b)];
+  const length = Math.min(bytesA.length, bytesB.length);
+  for (let index = 0; index < length; index++) {
+    if (bytesA[index] !== bytesB[index]) return bytesA[index] - bytesB[index];
+  }
+  return bytesA.length - bytesB.length;
 }
 
 /** Runs a file system call, throwing the error Node.js throws for its failure. */

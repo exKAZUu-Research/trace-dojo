@@ -15,7 +15,7 @@ import type {
 } from './ast';
 import { createAsyncGeneratorObject } from './asyncGenerators';
 import { decorateClassDefinition, evaluateClassDecorators, type MemberDefinition, runInitializers } from './decorators';
-import { nameFunction, patternNames } from './evaluatorBase';
+import { functionKeyText, nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor } from './expressionEvaluator';
 import { createGeneratorObject, type Steps } from './generators';
 import { DONE, ValueIterator } from './iteration';
@@ -573,7 +573,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
 
   // code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
   // code-gauge-allow functionNcss -- Keeps temporary GC rooting around the full ClassDefinitionEvaluation lifecycle.
-  evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding): JsFunction {
+  evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding, initializesBinding?: boolean): JsFunction {
     const { runtime } = this;
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
@@ -588,13 +588,14 @@ export class Evaluator extends SuspendableStatementEvaluator {
       temporaries.push(prototypeParent, constructorParent);
       const classScope = new Scope(runtime.frame.scope);
       if (cls.name) classScope.bindings.set(cls.name, { value: UNINITIALIZED, isMutable: false });
+      const ownerLabel = cls.name || (typeof inferredName === 'string' ? inferredName : '');
       for (const member of cls.members) {
         if (member.kind === 'staticBlock') continue;
         const { key } = member;
         // Private names live in the class scope, where `#` keeps them apart from variables.
         if (key.kind === 'private' && !classScope.bindings.has(key.name)) {
           const brand = member.kind === 'field' ? 'field' : member.isStatic ? 'static' : 'instance';
-          const identity = `${key.name}\0${cls.name}\0${nextPrivateId++}\0${brand}`;
+          const identity = `${key.name}\0${ownerLabel}\0${nextPrivateId++}\0${brand}`;
           classScope.bindings.set(key.name, { value: identity, isMutable: false });
         }
       }
@@ -627,7 +628,11 @@ export class Evaluator extends SuspendableStatementEvaluator {
         enumerable: false,
         configurable: true,
       });
-      return this.defineDecoratedMembers(cls, fn, prototype, behavior, classDecorators, { inferredName, binding });
+      return this.defineDecoratedMembers(cls, fn, prototype, behavior, classDecorators, {
+        inferredName,
+        binding,
+        initializesBinding,
+      });
     } finally {
       temporaries.length = held;
     }
@@ -640,7 +645,11 @@ export class Evaluator extends SuspendableStatementEvaluator {
     prototype: JsObject,
     behavior: Extract<ClassBehavior, { kind: 'class' }>,
     classDecorators: Value[] | undefined,
-    { inferredName, binding }: { inferredName: Key | undefined; binding: Binding | undefined }
+    {
+      inferredName,
+      binding,
+      initializesBinding,
+    }: { inferredName: Key | undefined; binding: Binding | undefined; initializesBinding: boolean | undefined }
   ): JsFunction {
     const { runtime } = this;
     const classScope = behavior.scope;
@@ -672,7 +681,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
         this.initializeStaticMembers(classScope, fn, staticInitializers, binding)
       );
       if (!decorated) return fn;
-      if (binding && decorated.cls !== fn) binding.declaredClass = fn;
+      recordDecoratedSourceClass(fn, decorated.cls, binding);
+      if (initializesBinding) this.writeVariable(cls.name, decorated.cls, 'initialize');
       runInitializers(runtime, decorated.classInitializers, decorated.cls, true);
       return decorated.cls;
     } finally {
@@ -816,11 +826,12 @@ export class Evaluator extends SuspendableStatementEvaluator {
       stepRow: member.stepRow,
       onlyCalls: value !== undefined && isObjectCreation(value),
     };
+    const accessorLabel = functionKeyText(name);
     const property: Property = {
-      get: runtime.newNativeFunction(`get ${String(name)}`, 0, ({ runtime: caller, thisValue }) =>
+      get: runtime.newNativeFunction(`get ${accessorLabel}`, 0, ({ runtime: caller, thisValue }) =>
         caller.getPrivate(thisValue, storage)
       ),
-      set: runtime.newNativeFunction(`set ${String(name)}`, 1, ({ runtime: caller, thisValue, args }) => {
+      set: runtime.newNativeFunction(`set ${accessorLabel}`, 1, ({ runtime: caller, thisValue, args }) => {
         caller.setPrivate(thisValue, storage, args[0]);
         return;
       }),
@@ -1111,4 +1122,10 @@ function withTemporaryStaticDefaultName(
 function hasOwnFunctionName(fn: JsFunction, expected: string): boolean {
   const property = fn.properties.get('name');
   return Boolean(property && !isAccessor(property) && property.value === expected);
+}
+
+function recordDecoratedSourceClass(source: JsFunction, decorated: JsFunction, binding: Binding | undefined): void {
+  if (decorated === source) return;
+  decorated.declaredClass ??= source;
+  if (binding) binding.declaredClass = source;
 }

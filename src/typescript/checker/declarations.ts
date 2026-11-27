@@ -341,10 +341,22 @@ function isExportedDeclaration(declaration: TreeNode | undefined, entryName: Tre
     current = current.parent;
   }
   if (current?.type === 'export_statement') return true;
-  return (
-    current?.type === 'statement_block' &&
-    isAmbient(current) &&
-    !named(current).some((child) => child.type === 'export_statement' && !child.childForFieldName('declaration'))
+  if (current?.type !== 'statement_block' || !isAmbient(current)) return false;
+  if (!named(current).some((child) => child.type === 'export_statement' && !child.childForFieldName('declaration')))
+    return true;
+  return isNamedInExportClause(current, entryName.text);
+}
+
+function isNamedInExportClause(body: TreeNode, targetName: string): boolean {
+  return named(body).some(
+    (child) =>
+      child.type === 'export_statement' &&
+      !child.childForFieldName('source') &&
+      named(child).some(
+        (part) =>
+          part.type === 'export_clause' &&
+          named(part).some((specifier) => specifier.childForFieldName('name')?.text === targetName)
+      )
   );
 }
 

@@ -251,16 +251,44 @@ export class Binder {
   }
 
   /** The statements of a namespace's body, where those of a `declare namespace` are ambient and all exported. */
-  private bindNamespaceBody(body: TreeNode, scope: Scope, isAmbient: boolean): void {
+  private bindNamespaceBody(body: TreeNode, scope: Scope, isAmbientBody: boolean): void {
     this.scopes.set(body.id, scope);
+    const hasExplicitExportList = isAmbientBody && hasAmbientExportClause(body);
     for (const child of named(body)) {
-      if (!isAmbient) {
+      if (!isAmbientBody) {
         this.bind(child, scope);
         continue;
       }
       this.bindAmbientChild(child, scope);
-      this.exportDeclared(child, scope);
+      if (!hasExplicitExportList) this.exportDeclared(child, scope);
     }
+    if (scope.namespace) this.bindNamespaceExportClauses(body, scope);
+  }
+
+  private bindNamespaceExportClauses(body: TreeNode, scope: Scope): void {
+    const exports = (scope.namespace as Sym).namespaceExports as Scope;
+    for (const child of named(body)) {
+      if (child.type !== 'export_statement' || child.childForFieldName('source')) continue;
+      const stmtTypeOnly = child.children.some((part) => !part.isNamed && part.type === 'type');
+      for (const part of named(child)) {
+        if (part.type !== 'export_clause') continue;
+        for (const specifier of named(part)) this.exportClauseSpecifier(specifier, scope, exports, stmtTypeOnly);
+      }
+    }
+  }
+
+  private exportClauseSpecifier(specifier: TreeNode, scope: Scope, exports: Scope, stmtTypeOnly: boolean): void {
+    const nameNode = specifier.childForFieldName('name');
+    const aliasNode = specifier.childForFieldName('alias') ?? nameNode;
+    if (!nameNode || !aliasNode) return;
+    const localName = nameNode.type === 'string' ? stringValue(nameNode) : canonicalIdentifier(nameNode.text, nameNode);
+    const exportedName =
+      aliasNode.type === 'string' ? stringValue(aliasNode) : canonicalIdentifier(aliasNode.text, aliasNode);
+    const typeOnly = stmtTypeOnly || specifier.children.some((part) => !part.isNamed && part.type === 'type');
+    const value = !typeOnly ? scope.values.get(localName) : undefined;
+    if (value) exports.values.set(exportedName, value);
+    const type = scope.types.get(localName);
+    if (type) exports.types.set(exportedName, type);
   }
 
   /** `declare module "m" { ... }`, whose declarations are the exports an `import` of "m" sees. */
@@ -625,6 +653,10 @@ function isExportedNamespaceRoot(node: TreeNode): boolean {
   const outer =
     node.parent?.type === 'expression_statement' || node.parent?.type === 'ambient_declaration' ? node.parent : node;
   return outer.parent?.type === 'export_statement';
+}
+
+function hasAmbientExportClause(body: TreeNode): boolean {
+  return named(body).some((child) => child.type === 'export_statement' && !child.childForFieldName('declaration'));
 }
 
 /**

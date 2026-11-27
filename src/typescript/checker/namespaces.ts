@@ -271,7 +271,11 @@ export class Namespaces {
   }
 
   moduleNamed(name: string): Sym | undefined {
-    return this.c.libraryBinder.ambientModules.get(name) ?? this.c.binder.ambientModules.get(name);
+    return (
+      this.c.libraryBinder.ambientModules.get(name) ??
+      this.c.binder.ambientModules.get(name) ??
+      matchWildcardAmbientModule(this.c.binder.ambientModules, name)
+    );
   }
 
   /** Resolves the target module of a type-position `import("...")`, reporting invalid specifiers or unknown modules. */
@@ -300,7 +304,8 @@ export class Namespaces {
   /** Resolves `typeof import("...")` to the module's namespace object type. */
   importTypeQuery(callNode: TreeNode): Type {
     const module = this.resolveImportTypeModule(callNode);
-    return module ? this.objectType(module) : errorType;
+    if (!module) return errorType;
+    return isShorthandAmbientModule(module) ? anyType : this.objectType(module);
   }
 
   /** Resolves `import("...").A.B` in type space, enforcing unavailable Node member checks and TS2694 diagnostics. */
@@ -344,21 +349,34 @@ export class Namespaces {
   checkImport(node: TreeNode): void {
     const source = node.childForFieldName('source');
     const clause = node.childForFieldName('import_clause');
+    if (!this.checkImportPlacementAndSyntax(node, source, clause)) return;
+    if (!source || !clause || clause.type === 'import_require_clause') return;
+    const module = this.moduleNamed(stringValue(source));
+    if (!module) return;
+    const moduleName = `'"${stringValue(source)}"'`;
+    for (const part of named(clause)) {
+      if (part.type === 'identifier' && !this.isSyntheticDefault(module, 'default'))
+        this.c.error(part, `モジュール ${moduleName} には既定のエクスポートがありません。`);
+      if (part.type === 'named_imports') this.checkNamedImports(part, module, moduleName);
+    }
+  }
+
+  private checkImportPlacementAndSyntax(node: TreeNode, source: TreeNode | null, clause: TreeNode | null): boolean {
     const specifier = source ?? clause?.childForFieldName('source');
     if (isNamespaceBody(node.parent)) {
       this.c.error(specifier ?? node, '名前空間内のインポート宣言は、モジュールを参照できません。');
-      return;
+      return false;
     }
     if (this.c.isModule && isAmbientModuleBody(node.parent)) {
       this.c.error(
         node,
         'インポートはモジュールの拡張では許可されていません。外側の外部モジュールに移動することを検討してください。'
       );
-      return;
+      return false;
     }
     if (node.parent?.type !== 'program' && !isAmbientModuleBody(node.parent)) {
       this.c.error(node, 'インポート宣言は、名前空間またはモジュールの最上位レベルでのみ使用できます。');
-      return;
+      return false;
     }
     const attributes = named(node).find((child) => child.type === 'import_attribute');
     if (attributes)
@@ -372,15 +390,7 @@ export class Namespaces {
         node,
         `ECMAScript モジュールを対象にする場合は、インポート代入を使用できません。代わりに 'import * as ns from "mod"'、'import {a} from "mod"'、'import d from "mod"' などのモジュール書式の使用をご検討ください。`
       );
-    if (!source || !clause || clause.type === 'import_require_clause') return;
-    const module = this.moduleNamed(stringValue(source));
-    if (!module) return;
-    const moduleName = `'"${stringValue(source)}"'`;
-    for (const part of named(clause)) {
-      if (part.type === 'identifier' && !this.isSyntheticDefault(module, 'default'))
-        this.c.error(part, `モジュール ${moduleName} には既定のエクスポートがありません。`);
-      if (part.type === 'named_imports') this.checkNamedImports(part, module, moduleName);
-    }
+    return true;
   }
 
   checkReExport(clause: TreeNode | undefined, source: TreeNode): void {
@@ -536,6 +546,33 @@ function canonicalImportSpecifier(node: TreeNode): string {
 function exportedModuleSite(node: TreeNode): TreeNode | undefined {
   const outer = node.parent?.type === 'ambient_declaration' ? node.parent : node;
   return outer.parent?.type === 'export_statement' ? outer.parent : undefined;
+}
+
+function isShorthandAmbientModule(module: Sym): boolean {
+  return (
+    module.valueDeclarations.length > 0 && module.valueDeclarations.every((decl) => !decl.childForFieldName('body'))
+  );
+}
+
+function matchWildcardAmbientModule(modules: ReadonlyMap<string, Sym>, specifier: string): Sym | undefined {
+  let best: Sym | undefined;
+  let bestPrefixLength = -1;
+  for (const [pattern, symbol] of modules) {
+    const star = pattern.indexOf('*');
+    if (star === -1 || pattern.includes('*', star + 1)) continue;
+    const prefix = pattern.slice(0, star);
+    const suffix = pattern.slice(star + 1);
+    if (
+      specifier.length >= prefix.length + suffix.length &&
+      specifier.startsWith(prefix) &&
+      specifier.endsWith(suffix) &&
+      prefix.length > bestPrefixLength
+    ) {
+      bestPrefixLength = prefix.length;
+      best = symbol;
+    }
+  }
+  return best;
 }
 
 /** Whether a namespace is declared in the program or in another namespace's body, the places tsc allows one. */

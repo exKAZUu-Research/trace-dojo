@@ -153,7 +153,13 @@ export function nameAnonymous(value: Expression, name: string): void {
   let inner = value;
   while (inner.kind === 'parenthesized') inner = inner.expression;
   if (inner.kind === 'functionExpression' && inner.fn.name === '') inner.fn.name = name;
-  if (inner.kind === 'classExpression' && inner.cls.name === '') inner.cls.name = name;
+  if (inner.kind === 'classExpression' && inner.cls.name === '') inner.inferredName ??= name;
+}
+
+export function firstUndecoratedChild(member: Node): Node | undefined {
+  return member.children.find(
+    (child): child is Node => child !== null && child.type !== 'decorator' && child.type !== 'comment'
+  );
 }
 
 export function keyName(key: PropertyName): string {

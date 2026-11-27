@@ -423,7 +423,7 @@ function memberAccess(runtime: Runtime, definition: MemberDefinition, kind: stri
       name,
       runtime.newNativeFunction(name, length, ({ args }) => run(args))
     );
-  define('has', 1, ([target]) => isObject(target) && hasMember(runtime, target as JsObject, key, privateKey));
+  define('has', 1, ([target]) => hasMember(runtime, target, key, privateKey));
   if (kind !== 'setter')
     define('get', 1, ([target]) => (privateKey ? runtime.getPrivate(target, privateKey) : runtime.get(target, key)));
   if (kind === 'field' || kind === 'accessor' || kind === 'setter')
@@ -435,7 +435,15 @@ function memberAccess(runtime: Runtime, definition: MemberDefinition, kind: stri
   return access;
 }
 
-function hasMember(runtime: Runtime, target: JsObject, key: Key, privateKey: string | undefined): boolean {
+function hasMember(runtime: Runtime, target: Value, key: Key, privateKey: string | undefined): boolean {
+  if (!isObject(target)) {
+    runtime.throwError(
+      'TypeError',
+      privateKey
+        ? 'Cannot use the "in" operator on this value'
+        : `Cannot use 'in' operator to search for '${String(key)}' in ${runtime.describePlain(target)}`
+    );
+  }
   return privateKey ? target.privateMembers?.has(privateKey) === true : runtime.hasProperty(target, key);
 }
 
