@@ -229,6 +229,8 @@ test.each([
   ["import * as fs from 'fs'; fs.readFile('x', () => {});", 'fs.readFile は、この採点環境では使えません。'],
   ['console.log(process.cwd());', 'process.cwd は、この採点環境では使えません。'],
   ['console.log(process.stdout.columns);', 'process.stdout.columns は、この採点環境では使えません。'],
+  ['const out: any = process.stdout; console.log(out.isTTY);', 'process.stdout.isTTY は、この採点環境では使えません。'],
+  ['const err: any = process.stderr; err.end("x");', 'process.stderr.end は、この採点環境では使えません。'],
 ])('rejects a Node.js feature the interpreter lacks before running %s', (source, message) => {
   expect(executeProgram('typescript', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
 });

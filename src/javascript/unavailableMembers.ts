@@ -2,6 +2,11 @@ import { CompileError } from '../interpreter/diagnostics';
 import { orderBuiltinMembers } from './builtinOrder';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
+import {
+  UNAVAILABLE_FS_MEMBERS,
+  UNAVAILABLE_PROCESS_MEMBERS,
+  UNAVAILABLE_STREAM_MEMBERS,
+} from './unavailableNodeMembers';
 import { JsObject, type Key, type NativeCall, type Value } from './values';
 
 /** Names an unavailable library member on a receiver, or gives undefined for any other. */
@@ -70,26 +75,29 @@ export function unavailableMemberCheck(runtime: Runtime): UnavailableMemberCheck
   defineUnavailableRegExpStatics(runtime);
   orderBuiltinMembers(realm);
   const process = realm.globals.lookup('process')?.value;
-  const nodeObjects = new Map<Value, string>();
-  if (process instanceof JsObject) nodeObjects.set(process, 'process');
-  if (realm.fsModule) nodeObjects.set(realm.fsModule, 'fs');
+  const nodeObjects = new Map<Value, { owner: string; members: ReadonlySet<string> }>();
+  if (process instanceof JsObject) {
+    nodeObjects.set(process, { owner: 'process', members: UNAVAILABLE_PROCESS_MEMBERS });
+    for (const streamName of ['stdout', 'stderr'] as const) {
+      const stream = runtime.get(process, streamName);
+      if (stream instanceof JsObject) {
+        nodeObjects.set(stream, { owner: `process.${streamName}`, members: UNAVAILABLE_STREAM_MEMBERS });
+      }
+    }
+  }
+  if (realm.fsModule) nodeObjects.set(realm.fsModule, { owner: 'fs', members: UNAVAILABLE_FS_MEMBERS });
   return (value, key) => {
-    const owner = nodeObjects.get(value);
+    const target = nodeObjects.get(value);
     const isUnavailableNodeMember =
-      owner !== undefined && value instanceof JsObject && isUndefinedMember(runtime, value, key);
+      target !== undefined &&
+      typeof key === 'string' &&
+      value instanceof JsObject &&
+      !value.properties.has(key) &&
+      target.members.has(key);
     return (
-      unavailableSymbolFeature(value, key, symbol) ?? (isUnavailableNodeMember ? `${owner}.${String(key)}` : undefined)
+      unavailableSymbolFeature(value, key, symbol) ?? (isUnavailableNodeMember ? `${target.owner}.${key}` : undefined)
     );
   };
-}
-
-/**
- * Whether a name of `process` or `fs` is one this interpreter does not run: every name but those it defines and those
- * every object inherits, as the type checker rejects every member of `process` but its standard streams. A program
- * reaches the others through `any`, or through `require`, which types the module as `any`.
- */
-function isUndefinedMember(runtime: Runtime, object: JsObject, key: Key | undefined): boolean {
-  return typeof key === 'string' && !object.properties.has(key) && !runtime.realm.objectPrototype.properties.has(key);
 }
 
 function unavailableSymbolFeature(value: Value, key: Key | undefined, constructor: Value): string | undefined {
