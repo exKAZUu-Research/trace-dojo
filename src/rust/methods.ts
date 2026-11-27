@@ -52,9 +52,12 @@ export function derefOnce(program: Program, type: Type): { type: Type; kind: Der
   if (t.kind === 'ref') return { type: t.target, kind: t.mutable ? 'mutRef' : 'ref' };
   if (t.kind !== 'adt') return undefined;
   switch (t.def.builtin) {
-    case 'Box':
-    case 'Pin': {
+    case 'Box': {
       return { type: t.args[0], kind: 'own' };
+    }
+    case 'Pin': {
+      // `Pin<P>` derefs to what `P` points to, and holds `P` itself.
+      return derefOnce(program, t.args[0]);
     }
     case 'String': {
       return { type: { kind: 'str' }, kind: 'own' };

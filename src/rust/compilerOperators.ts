@@ -2,15 +2,14 @@ import type { Expr, Span } from './ast';
 import { concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { derefAll, evaluateValues, isStringType, stringish, stripRefs, withEvaluatedValues } from './compilerCommon';
-import { pointee, userDerefCall } from './compilerPlaces';
+import { pointee, userDerefCall, withoutPin } from './compilerPlaces';
 import { floatNumber, negateFloat } from './floatBits';
-import { normalize } from './infer';
 import { derefOnce } from './methods';
 import { btreeSetOp, hashSetMembers, type SetOp } from './natives/setOps';
 import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, valuesUnequal, wrap } from './ops';
 import type { Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { type IntName, resolve, shallow, type Type } from './types';
+import { type IntName, resolve, type Type } from './types';
 import { DONE, type Place, type RawPtr, SetValue, textOf, UNIT_VALUE } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
@@ -52,7 +51,7 @@ export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
   if (overloaded) return overloaded;
   const operand = expr.op === '*' ? c.read(expr.operand) : c.value(expr.operand);
   if (expr.op === '*') {
-    const operandType = normalize(shallow(expr.operand.ty!));
+    const operandType = withoutPin(expr.operand.ty!);
     if (
       operandType.kind === 'adt' &&
       (operandType.def.builtin === 'ConstPtr' || operandType.def.builtin === 'MutPtr')

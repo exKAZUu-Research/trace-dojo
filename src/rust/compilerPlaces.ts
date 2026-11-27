@@ -126,7 +126,7 @@ function rangeEndpoint(name: string): 'start' | 'end' {
 }
 
 function derefPlace(c: Compiler, expr: ExprOf<'unary'>): PlaceEval {
-  const operandType = normalize(shallow(expr.operand.ty!));
+  const operandType = withoutPin(expr.operand.ty!);
   if (operandType.kind === 'adt' && (operandType.def.builtin === 'ConstPtr' || operandType.def.builtin === 'MutPtr')) {
     const operand = c.value(expr.operand);
     return (frame) => pointee(derefAll(operand(frame)) as RawPtr, expr.span);
@@ -195,6 +195,12 @@ function strRangePlace(c: Compiler, base: PlaceEval, index: Eval, span: Span): P
       }
     );
   };
+}
+
+/** A type, or for a `Pin<P>` the pointer `P`, which the `Pin` is at run time. */
+export function withoutPin(type: Type): Type {
+  const t = normalize(shallow(type));
+  return t.kind === 'adt' && t.def.builtin === 'Pin' ? normalize(shallow(t.args[0])) : t;
 }
 
 function temporaryOwner(place: Place): CellPlace | ElementPlace | undefined {
