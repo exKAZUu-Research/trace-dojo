@@ -371,3 +371,34 @@ export function jumpLabel(jump: TreeNode): string | undefined {
 }
 
 export const loopStatementTypes = new Set(['while_statement', 'do_statement', 'for_statement', 'for_in_statement']);
+
+export function isGlobalAugmentationNamespace(node: TreeNode): boolean {
+  const name = node.childForFieldName('name');
+  return (
+    node.type === 'internal_module' &&
+    !hasToken(node, 'namespace') &&
+    name?.type === 'identifier' &&
+    name.text === 'global'
+  );
+}
+
+export function isAmbientModuleBody(node: TreeNode | null | undefined): boolean {
+  const owner = node?.type === 'statement_block' ? node.parent : undefined;
+  return (
+    (owner?.type === 'module' || owner?.type === 'internal_module') &&
+    owner.childForFieldName('name')?.type === 'string'
+  );
+}
+
+export function isNamespaceBody(node: TreeNode | null | undefined): boolean {
+  const owner = node?.type === 'statement_block' ? node.parent : undefined;
+  return (
+    (owner?.type === 'internal_module' || owner?.type === 'module') &&
+    owner.childForFieldName('name')?.type !== 'string' &&
+    !isGlobalAugmentationNamespace(owner)
+  );
+}
+
+export function isDirectGlobalAugmentationContainer(node: TreeNode, isExternalModule: boolean): boolean {
+  return (node.parent?.type === 'program' && isExternalModule) || isAmbientModuleBody(node.parent);
+}

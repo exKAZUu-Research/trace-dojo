@@ -46,8 +46,11 @@ export function isAmbient(node: TreeNode): boolean {
 }
 
 const checkedAmbientDeclarationTypes = new Set([
+  'ambient_declaration',
   'internal_module',
   'module',
+  'import_statement',
+  'import_alias',
   'lexical_declaration',
   'variable_declaration',
   'enum_declaration',
@@ -62,9 +65,13 @@ const checkedAmbientDeclarationTypes = new Set([
 
 /**
  * Whether the checker checks a declaration under `declare`: namespaces, variables, enums, functions, classes,
- * interfaces, and type aliases, including invalid ambient implementations and initializers.
+ * interfaces, type aliases, and placement-validated module/global forms.
  */
 export function isCheckedAmbientDeclaration(node: TreeNode): boolean {
-  const declaration = ['export_statement', 'expression_statement'].includes(node.type) ? node.namedChildren[0] : node;
+  if (node.type === 'export_statement') {
+    const declaration = node.childForFieldName('declaration');
+    return !declaration || checkedAmbientDeclarationTypes.has(declaration.type);
+  }
+  const declaration = node.type === 'expression_statement' ? node.namedChildren[0] : node;
   return checkedAmbientDeclarationTypes.has(declaration?.type ?? '');
 }

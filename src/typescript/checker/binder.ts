@@ -5,7 +5,15 @@ import type { ExecutionBudget } from '../../interpreter/limits';
 import { memberNameOf } from './enums';
 import { fsImportMeanings } from './nodeLibrary';
 import { canonicalIdentifier, Scope, Sym, type ValueKind } from './scopes';
-import { assignmentKind, isWithin, named, patternIdentifiers, stringValue } from './syntax';
+import {
+  assignmentKind,
+  isDirectGlobalAugmentationContainer,
+  isGlobalAugmentationNamespace,
+  isWithin,
+  named,
+  patternIdentifiers,
+  stringValue,
+} from './syntax';
 
 export const functionLikeTypes = new Set([
   'function_declaration',
@@ -212,6 +220,11 @@ export class Binder {
     const body = node.childForFieldName('body');
     if (name?.type === 'string') {
       this.bindAmbientModule(node, stringValue(name), scope);
+      return;
+    }
+    if (isGlobalAugmentationNamespace(node)) {
+      const augments = this.globalAugmentationTarget(node, isAmbient);
+      if (body) this.bindAmbient(body, this.newScope(body, 'block', scope, augments));
       return;
     }
     if (!name) return;
@@ -477,12 +490,7 @@ export class Binder {
         break;
       }
       case 'statement_block': {
-        // `declare global { ... }` augments the globals from a module (the library's own included), but not from a script.
-        const augments = this.options?.deferLibraryTypes
-          ? this.moduleScope
-          : this.options?.rootScope
-            ? undefined
-            : this.globalScope;
+        const augments = child.parent ? this.globalAugmentationTarget(child.parent, true) : undefined;
         this.bindAmbient(child, this.newScope(child, 'block', scope, augments));
         break;
       }
@@ -509,6 +517,13 @@ export class Binder {
   private bindLibraryType(node: TreeNode, scope: Scope): void {
     if (this.options?.deferLibraryTypes) this.deferredTypes.set(node.id, scope);
     else this.bind(node, scope);
+  }
+
+  private globalAugmentationTarget(node: TreeNode, isAmbient: boolean): Scope | undefined {
+    if (this.options?.deferLibraryTypes) return this.moduleScope;
+    return isAmbient && isDirectGlobalAugmentationContainer(node, !this.options?.rootScope)
+      ? (this.options?.rootScope ?? this.globalScope)
+      : undefined;
   }
 
   private declareTypeParameters(node: TreeNode, scope: Scope): void {
@@ -564,21 +579,17 @@ function importedNames(clause: TreeNode): { local: TreeNode; name: string; typeO
       return named(part)
         .slice(0, 1)
         .map((local) => ({ local, name: '*', typeOnly: false }));
-    if (part.type !== 'named_imports') return [];
-    return named(part).flatMap((specifier): { local: TreeNode; name: string; typeOnly: boolean }[] => {
-      const imported = specifier.childForFieldName('name');
-      const local = specifier.childForFieldName('alias') ?? imported;
-      const typeOnly = specifier.children.some((child) => !child.isNamed && child.type === 'type');
-      const importedName = imported
-        ? imported.type === 'string'
-          ? stringValue(imported)
-          : canonicalIdentifier(imported.text, imported)
-        : undefined;
-      return imported && local && importedName !== undefined && local.type !== 'string'
-        ? [{ local, name: importedName, typeOnly }]
-        : [];
-    });
+    return part.type === 'named_imports' ? named(part).flatMap(importedSpecifier) : [];
   });
+}
+
+function importedSpecifier(specifier: TreeNode): { local: TreeNode; name: string; typeOnly: boolean }[] {
+  const imported = specifier.childForFieldName('name');
+  const local = specifier.childForFieldName('alias') ?? imported;
+  if (!imported || !local || local.type === 'string') return [];
+  const typeOnly = specifier.children.some((child) => !child.isNamed && child.type === 'type');
+  const name = imported.type === 'string' ? stringValue(imported) : canonicalIdentifier(imported.text, imported);
+  return [{ local, name, typeOnly }];
 }
 
 /** The names of a namespace's path, as `A`, `B`, and `C` of `A.B.C`. */

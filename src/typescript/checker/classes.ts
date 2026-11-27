@@ -776,20 +776,25 @@ export class ClassChecker {
     return ownerThis?.id ?? this.thisStack.at(-1)?.id ?? 0;
   }
 
-  /** The node that decides what `this` is at `node`: a class member, a function, or the program. */
+  /** The node that decides what `this` is at `node`: a class member, a function, a namespace, or the program. */
   private thisOwner(node: TreeNode): TreeNode | undefined {
-    for (let current = node.parent; current; current = current.parent) {
+    let child = node;
+    for (let current = node.parent; current; child = current, current = current.parent) {
+      if (child.type === 'decorator') continue;
       switch (current.type) {
         case 'function_declaration':
         case 'function_expression':
         case 'generator_function_declaration':
         case 'generator_function':
-        case 'method_definition':
-        case 'class_static_block': {
+        case 'class_static_block':
+        case 'internal_module':
+        case 'module': {
           return current;
         }
+        case 'method_definition':
         case 'field_definition': {
-          return current;
+          if (current.childForFieldName('name')?.id !== child.id) return current;
+          break;
         }
         case 'class_heritage': {
           // The heritage is evaluated outside the class.
@@ -821,6 +826,10 @@ export class ClassChecker {
   thisTypeOfExpression(node: TreeNode): Type {
     const owner = this.thisOwner(node);
     if (!owner) return this.globalThisType(node);
+    if (owner.type === 'internal_module' || owner.type === 'module') {
+      this.c.error(node, "'this' はモジュール本体内または名前空間本体内では参照できません。");
+      return errorType;
+    }
     const thisParameter = this.thisParameterType(owner);
     if (thisParameter) return thisParameter;
     const parent = owner.parent;

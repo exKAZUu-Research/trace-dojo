@@ -7,7 +7,15 @@ import { FlowState } from './flow';
 import { unavailableNodeMember } from './nodeLibrary';
 import { canonicalIdentifier, type Scope, type Sym } from './scopes';
 import { nameSuggestionHint, spellingSuggestion } from './spelling';
-import { named, stringValue } from './syntax';
+import { globalAugmentationPlacementMessage } from './statements';
+import {
+  isAmbientModuleBody,
+  isDirectGlobalAugmentationContainer,
+  isGlobalAugmentationNamespace,
+  isNamespaceBody,
+  named,
+  stringValue,
+} from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -329,14 +337,23 @@ export class Namespaces {
 
   /** Reports a default import of a module without a default export, and a name a module does not export. */
   checkImport(node: TreeNode): void {
+    const source = node.childForFieldName('source');
+    const clause = node.childForFieldName('import_clause');
+    const specifier = source ?? clause?.childForFieldName('source');
+    if (isNamespaceBody(node.parent)) {
+      this.c.error(specifier ?? node, '名前空間内のインポート宣言は、モジュールを参照できません。');
+      return;
+    }
+    if (node.parent?.type !== 'program' && !isAmbientModuleBody(node.parent)) {
+      this.c.error(node, 'インポート宣言は、名前空間またはモジュールの最上位レベルでのみ使用できます。');
+      return;
+    }
     const attributes = named(node).find((child) => child.type === 'import_attribute');
     if (attributes)
       this.c.error(
         attributes,
         "インポート属性は、'--module' オプションが 'esnext'、'node18'、'node20'、'nodenext'、'preserve' のどれかのときしか使えません。"
       );
-    const source = node.childForFieldName('source');
-    const clause = node.childForFieldName('import_clause');
     // tsc without `--module` compiles to ECMAScript modules, which have no `import x = require("m")`.
     if (clause?.type === 'import_require_clause')
       this.c.error(
@@ -398,6 +415,10 @@ export class Namespaces {
 
   /** Checks a namespace's body, whose code runs once where the namespace is declared, from a flow of its own. */
   checkDeclaration(node: TreeNode): void {
+    if (isGlobalAugmentationNamespace(node)) {
+      this.checkGlobalAugmentationNamespace(node);
+      return;
+    }
     const name = node.childForFieldName('name');
     if (node.type === 'module' && name?.type !== 'string')
       this.c.error(
@@ -418,6 +439,23 @@ export class Namespaces {
     } finally {
       this.c.flow.current = outer;
     }
+  }
+
+  private checkGlobalAugmentationNamespace(node: TreeNode): void {
+    if (this.c.isLibrary(node)) return;
+    if (!isAmbient(node)) {
+      this.c.error(
+        node,
+        "グローバル スコープを拡張するには、モジュールがアンビエントでない限り 'declare' 修飾子が必要です。"
+      );
+      return;
+    }
+    if (!isDirectGlobalAugmentationContainer(node, this.c.isModule)) {
+      this.c.error(node, globalAugmentationPlacementMessage(node));
+      return;
+    }
+    const body = node.childForFieldName('body');
+    if (body) this.c.statements.checkBlockStatements(named(body).filter(isCheckedAmbientDeclaration));
   }
 }
 

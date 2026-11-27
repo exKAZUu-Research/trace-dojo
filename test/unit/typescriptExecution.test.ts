@@ -870,3 +870,77 @@ new C();`;
     uncaughtException: undefined,
   });
 });
+
+test('validates namespace and module-top-level placement of this, return, exports, imports, and global augmentations', () => {
+  expect(diagnosticsOf('namespace N { console.log(this); }')).toEqual([
+    "1: 'this' はモジュール本体内または名前空間本体内では参照できません。",
+  ]);
+  expect(diagnosticsOf('namespace N { if (true) console.log(this); }')).toEqual([
+    "1: 'this' はモジュール本体内または名前空間本体内では参照できません。",
+  ]);
+  expect(
+    executeProgram(
+      'typescript',
+      'namespace N { export function f(this: number) { return this + 1; } } console.log(N.f.call(2));'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '3\n',
+  });
+
+  expect(diagnosticsOf('namespace N { return 5; } console.log(N);')).toEqual([
+    "1: 'return' ステートメントは、関数本体でのみ使用できます。",
+  ]);
+  expect(diagnosticsOf('namespace N { if (true) { return; } }')).toEqual([
+    "1: 'return' ステートメントは、関数本体でのみ使用できます。",
+  ]);
+
+  expect(diagnosticsOf('namespace N { const a = 1; export { a }; }')).toEqual([
+    '1: エクスポート宣言は名前空間でサポートされません。',
+  ]);
+  expect(diagnosticsOf('namespace N { type T = number; export type { T }; }')).toEqual([
+    '1: エクスポート宣言は名前空間でサポートされません。',
+  ]);
+  expect(diagnosticsOf('namespace N { export default 1; }')).toEqual([
+    '1: 既定のエクスポートは、ECMAScript スタイルのモジュールでのみ使用できます。',
+  ]);
+  expect(
+    executeProgram('typescript', 'declare namespace N { const a: number; export { a }; } console.log(1);')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+  });
+
+  expect(diagnosticsOf('namespace N { import fs from "fs"; console.log(fs.existsSync("x")); }')).toEqual([
+    '1: 名前空間内のインポート宣言は、モジュールを参照できません。',
+  ]);
+  expect(diagnosticsOf('if (true) { import { existsSync } from "fs"; console.log(existsSync("x")); }')).toEqual([
+    '1: インポート宣言は、名前空間またはモジュールの最上位レベルでのみ使用できます。',
+  ]);
+
+  expect(
+    diagnosticsOf(
+      'export {};\nnamespace N { declare global { interface Array<T> { extra: number } } }\nconsole.log([1].extra);'
+    )
+  ).toEqual([
+    '2: グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。',
+    "3: プロパティ 'extra' は型 'number[]' にありません。",
+  ]);
+  expect(
+    diagnosticsOf(
+      'export {};\nif (true) { declare global { interface Array<T> { extra: number } } }\nconsole.log([1].extra);'
+    )
+  ).toEqual([
+    '2: アンビエント モジュール宣言は、ファイルの最上位にのみ使用できます。',
+    "3: プロパティ 'extra' は型 'number[]' にありません。",
+  ]);
+  expect(
+    executeProgram(
+      'typescript',
+      'declare module "custom-aug" { global { interface Array<T> { extra?: number } } }\nconst n: number | undefined = [1].extra;\nconsole.log(n);'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'undefined\n',
+  });
+});

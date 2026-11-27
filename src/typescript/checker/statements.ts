@@ -19,7 +19,10 @@ import { baseIndexMismatch, checkDuplicateIndexSignatures, checkIndexConformance
 import type { Scope, Sym } from './scopes';
 import {
   hasToken,
+  isAmbientModuleBody,
   isDirectEmptyArray,
+  isDirectGlobalAugmentationContainer,
+  isNamespaceBody,
   jumpLabel,
   labeledBody,
   loopStatementTypes,
@@ -191,21 +194,55 @@ export class StatementChecker {
     if (declaration) this.check(declaration);
     const value = node.childForFieldName('value');
     if (value) this.c.expressions.check(value);
-    const assigned = named(node).find((child) => child.type !== 'export_clause' && child.type !== 'comment');
-    if (!declaration && !value && assigned && !node.childForFieldName('source'))
-      this.c.error(
-        node,
-        "ECMAScript モジュールを対象にするときは、エクスポートの代入は使えません。'export default' か別のモジュール形式を使ってください。"
-      );
-    this.checkDuplicateExports(node);
     const clause = named(node).find((child) => child.type === 'export_clause');
-    if (!clause || node.childForFieldName('source')) return;
+    const source = node.childForFieldName('source');
+    const assigned = named(node).find((child) => child.type !== 'export_clause' && child.type !== 'comment');
+    this.checkExportPlacement(node, { declaration, value, clause, source, assigned });
+    this.checkDuplicateExports(node);
+    if (!clause || source) return;
     for (const specifier of named(clause)) {
       const name = specifier.childForFieldName('name');
       const scope = name && this.c.scopeOf(name);
       if (name && !scope?.lookupValue(name.text) && !scope?.lookupType(name.text))
         this.c.error(name, `名前 ${name.text} が見つかりません。`);
     }
+  }
+
+  private checkExportPlacement(
+    node: TreeNode,
+    {
+      declaration,
+      value,
+      clause,
+      source,
+      assigned,
+    }: {
+      declaration: TreeNode | null;
+      value: TreeNode | null;
+      clause: TreeNode | undefined;
+      source: TreeNode | null;
+      assigned: TreeNode | undefined;
+    }
+  ): void {
+    const inNamespace = isNamespaceBody(node.parent);
+    if (node.parent?.type !== 'program' && !isAmbientModuleBody(node.parent) && !inNamespace) {
+      this.c.error(node, 'エクスポート宣言は、名前空間またはモジュールの最上位レベルでのみ使用できます。');
+      return;
+    }
+    if (!declaration && !value && assigned && !source) {
+      this.c.error(
+        node,
+        inNamespace
+          ? 'エクスポートの代入は、名前空間では使用できません。'
+          : "ECMAScript モジュールを対象にするときは、エクスポートの代入は使えません。'export default' か別のモジュール形式を使ってください。"
+      );
+      return;
+    }
+    if (!inNamespace) return;
+    if (hasToken(node, 'default'))
+      this.c.error(node, '既定のエクスポートは、ECMAScript スタイルのモジュールでのみ使用できます。');
+    else if ((clause && (!isAmbient(node) || source !== null)) || (!clause && source !== null))
+      this.c.error(node, 'エクスポート宣言は名前空間でサポートされません。');
   }
 
   /**
@@ -220,27 +257,17 @@ export class StatementChecker {
       .flatMap(exportedNames);
     for (const own of exportedNames(node)) {
       const others = all.filter((other) => other.name === own.name && other.site.id !== own.site.id);
-      if (others.length === 0 || (own.declaration && others.every((other) => other.declaration))) continue;
-      if (own.declaration && !valueDeclarationTypes.has(own.declaration.type)) continue;
-      const message =
-        own.name === 'default'
-          ? 'モジュールに複数の既定のエクスポートを含めることはできません。'
-          : own.declaration || others.some((other) => other.declaration)
-            ? `エクスポートされた変数 '${own.name}' を再宣言することはできません。`
-            : `識別子 '${own.name}' が重複しています。`;
-      this.c.error(own.site, message);
+      const message = duplicateExportMessage(own, others);
+      if (message) this.c.error(own.site, message);
     }
   }
 
-  /** `declare global` augments the globals only from a module. */
+  /** `declare global` augments the globals only directly inside an external or ambient module. */
   private ambientDeclaration(node: TreeNode): void {
     for (const child of named(node)) {
       if (child.type === 'statement_block') {
-        if (!this.c.isModule)
-          this.c.error(
-            node,
-            'グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。'
-          );
+        if (!isDirectGlobalAugmentationContainer(node, this.c.isModule))
+          this.c.error(node, globalAugmentationPlacementMessage(node));
         else this.checkBlockStatements(named(child).filter(isCheckedAmbientDeclaration));
       } else if (isCheckedAmbientDeclaration(child)) {
         this.check(child);
@@ -1030,6 +1057,7 @@ export class StatementChecker {
     const context = this.c.functions.contexts.at(-1);
     const expression = named(node)[0];
     if (!context) {
+      this.c.error(node, "'return' ステートメントは、関数本体でのみ使用できます。");
       if (expression) this.c.expressions.check(expression);
       this.c.flow.current = undefined;
       return;
@@ -1153,6 +1181,24 @@ const valueDeclarationTypes = new Set([
   'class_declaration',
   'abstract_class_declaration',
 ]);
+
+function duplicateExportMessage(
+  own: { name: string; site: TreeNode; declaration?: TreeNode },
+  others: { name: string; site: TreeNode; declaration?: TreeNode }[]
+): string | undefined {
+  if (others.length === 0 || (own.declaration && others.every((other) => other.declaration))) return undefined;
+  if (own.declaration && !valueDeclarationTypes.has(own.declaration.type)) return undefined;
+  if (own.name === 'default') return 'モジュールに複数の既定のエクスポートを含めることはできません。';
+  return own.declaration || others.some((other) => other.declaration)
+    ? `エクスポートされた変数 '${own.name}' を再宣言することはできません。`
+    : `識別子 '${own.name}' が重複しています。`;
+}
+
+export function globalAugmentationPlacementMessage(node: TreeNode): string {
+  return node.parent?.type === 'program' || isNamespaceBody(node.parent)
+    ? 'グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。'
+    : 'アンビエント モジュール宣言は、ファイルの最上位にのみ使用できます。';
+}
 
 /**
  * The names an export statement exports, with the node naming each and the declaration declaring it, if any. An
