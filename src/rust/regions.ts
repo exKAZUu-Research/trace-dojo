@@ -111,22 +111,27 @@ export function dropSlots(type: Type, proj: string[] = []): string[][] {
   return t.args.some((arg) => dropSlots(arg).length > 0) ? [proj] : [];
 }
 
-export function regionsOf(layout: Layout): RVar[] {
+/**
+ * The regions of a layout; with `borrowedOnly`, not a trait object's own lifetime that no reference ties
+ * (`Arc<dyn Job>` inside `&Arc<dyn Job>`), which may be `'static` itself, so a parameter does not borrow it.
+ */
+export function regionsOf(layout: Layout, borrowedOnly = false): RVar[] {
+  const inner = (part: Layout): RVar[] => regionsOf(part, borrowedOnly);
   switch (layout.kind) {
     case 'ref': {
-      return [layout.region, ...regionsOf(layout.target)];
+      return [layout.region, ...inner(layout.target)];
     }
     case 'adt': {
-      return [...layout.own, ...layout.args.flatMap(regionsOf)];
+      return [...layout.own, ...layout.args.flatMap(inner)];
     }
     case 'tuple': {
-      return layout.elems.flatMap(regionsOf);
+      return layout.elems.flatMap(inner);
     }
     case 'seq': {
-      return regionsOf(layout.elem);
+      return inner(layout.elem);
     }
     case 'opaque': {
-      return [layout.region];
+      return borrowedOnly && layout.object && !layout.referenceObject ? [] : [layout.region];
     }
     case 'none': {
       return [];

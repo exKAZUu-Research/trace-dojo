@@ -168,6 +168,9 @@ function deadlock(ctx: NativeContext, message: string): never {
 }
 
 /** `thread::scope`: waits for the threads it spawned, and panics if one that no thread joined panicked. */
+/** The threads a scope's `spawn` started, which the scope waits for, unlike those `std::thread::spawn` detaches. */
+const scopedThreads = new WeakSet<ThreadHandle>();
+
 function threadScope(ctx: NativeContext, f: Value): Value {
   const threads = scheduler(ctx);
   const count = threads.spawnedCount;
@@ -178,7 +181,8 @@ function threadScope(ctx: NativeContext, f: Value): Value {
     // The scope waits for its threads however its body ends, a panic included, before the panic goes on.
     threads.runAll(ctx);
   }
-  if (threads.spawnedSince(count).some((thread) => thread.state === 'panicked' && !thread.joined)) {
+  const scoped = threads.spawnedSince(count).filter((thread) => scopedThreads.has(thread));
+  if (scoped.some((thread) => thread.state === 'panicked' && !thread.joined)) {
     panic(ctx, 'a scoped thread panicked');
   }
   return result;
@@ -323,7 +327,11 @@ define({
   'JoinHandle<_>::thread': ([handle]) => (deref(handle) as ThreadHandle).id,
   'ScopedJoinHandle<_>::join': ([handle], ctx) => join(ctx, handle),
   'ScopedJoinHandle<_>::is_finished': ([handle], ctx) => isFinished(ctx, handle),
-  'Scope::spawn': ([, f], ctx) => spawn(ctx, f),
+  'Scope::spawn': ([, f], ctx) => {
+    const thread = spawn(ctx, f);
+    scopedThreads.add(thread);
+    return thread;
+  },
   'std::thread::scope': ([f], ctx) => threadScope(ctx, f),
   'std::thread::sleep': (_args, ctx) => {
     scheduler(ctx).runAll(ctx);

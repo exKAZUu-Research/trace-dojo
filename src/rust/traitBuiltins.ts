@@ -262,11 +262,18 @@ const RULES: Record<string, Rule> = {
  */
 function indexes({ solver, t, ref }: Goal, mutable: boolean): Answer {
   const index = ref.args[0] && normalize(shallow(ref.args[0]));
-  if (t.kind === 'array' || t.kind === 'slice' || isBuiltin(t, 'Vec') || isBuiltin(t, 'VecDeque')) {
-    return indexesByUsize(solver, index);
-  }
+  // A range of `usize` indexes a slice of what a slice-like type holds, and of a string's text.
+  const sliceLike = t.kind === 'array' || t.kind === 'slice' || isBuiltin(t, 'Vec');
+  if (index && isUsizeRange(solver, index) && (sliceLike || t.kind === 'str' || isBuiltin(t, 'String'))) return 'yes';
+  if (sliceLike || isBuiltin(t, 'VecDeque')) return indexesByUsize(solver, index);
   const map = isBuiltin(t, 'HashMap') || isBuiltin(t, 'BTreeMap');
   return map && !mutable && (!index || index.kind === 'ref' || index.kind === 'var') ? 'yes' : 'no';
+}
+
+function isUsizeRange(solver: TraitSolver, index: Type): boolean {
+  if (index.kind !== 'adt' || !(RANGE_TYPES.has(index.def.builtin ?? '') || index.def.builtin === 'RangeFull'))
+    return false;
+  return index.args.every((arg) => solver.unifier.tryUnify(arg, USIZE));
 }
 
 function indexesByUsize(solver: TraitSolver, index: Type | undefined): Answer {
@@ -338,7 +345,8 @@ function untypedRight(solver: TraitSolver, left: Type, rhs: Type | undefined, na
   if (!rhs) return 'yes';
   const target = rhs.kind === 'ref' && !rhs.mutable ? normalize(shallow(rhs.target)) : rhs;
   if (target.kind !== 'var') return undefined;
-  if (shift || !target.v.literal) return rhs.kind === 'var' || !shift ? 'unknown' : undefined;
+  // A shift takes any integer on the right, so its untyped right side (`a.shl(&3)`) waits for its own type.
+  if (shift || !target.v.literal) return 'unknown';
   return solver.unifier.tryUnify(target, left) ? 'yes' : 'no';
 }
 
@@ -430,8 +438,24 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
   if (t.kind === 'adt' && name === 'Sync' && t.def.builtin === 'Receiver') return 'no';
   if (t.kind === 'adt' && name === 'Sync' && ['Cell', 'RefCell', 'Ref', 'RefMut'].includes(t.def.builtin ?? ''))
     return 'no';
+  if (t.kind === 'adt' && !t.def.builtin) return programAdtAutoTrait(t, all);
   if (t.kind === 'adt') return all(t.args);
   return 'yes';
+}
+
+/** The program's types whose auto traits are being decided, which a recursive type assumes of itself, as rustc does. */
+const autoTraitGoals = new Set<AdtType['def']>();
+
+/** A program's struct or enum is `Send` or `Sync` when every field of every variant is. */
+function programAdtAutoTrait(t: AdtType, all: (types: Type[]) => Answer): Answer {
+  if (autoTraitGoals.has(t.def)) return 'yes';
+  autoTraitGoals.add(t.def);
+  try {
+    const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+    return all(t.def.variants.flatMap((variant) => variant.fields.map((field) => substitute(field.type, subst))));
+  } finally {
+    autoTraitGoals.delete(t.def);
+  }
 }
 
 /** Every type may move after it is pinned, except the futures of `async` blocks and what holds one. */

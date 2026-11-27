@@ -16,7 +16,7 @@ import {
   readsThroughUserImpl,
   takesWhole,
 } from './compilerPatterns';
-import { compileField, compileIndex, compilePlace, readPlace, userDerefCall } from './compilerPlaces';
+import { compileField, compileIndex, compilePlace, readPlace, unionFields, userDerefCall } from './compilerPlaces';
 import { dropsBorrowedTemporary, holdTemporary } from './compilerTemporaries';
 import type { Dropper } from './drops';
 import type { Formatter } from './fmt';
@@ -747,7 +747,10 @@ export class Compiler {
       };
     }
     const value = this.value(expr.value);
-    const dropped = this.droppedType(expr.target.ty);
+    // A union's field holds no value that drops (std allows only `Copy` and `ManuallyDrop` ones), so writing it
+    // reads nothing, whichever field the union holds.
+    const unionField = expr.target.kind === 'field' && unionFields(expr.target) !== undefined;
+    const dropped = unionField ? undefined : this.droppedType(expr.target.ty);
     if (res?.kind === 'discard') {
       const discarded = this.droppedType(expr.value.ty);
       return (frame) => {

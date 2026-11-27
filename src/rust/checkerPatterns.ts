@@ -5,9 +5,9 @@ import type { Checker } from './checker';
 import { resolveStructPath, resolveValuePath } from './checkerPaths';
 import { checkFieldVisible, isPlaceExpr, requireMutablePlace } from './checkerPlaces';
 import type { Known } from './constLint';
-import { endValue } from './exhaustiveness';
 import { normalize } from './infer';
 import { compileError, lookupValue } from './items';
+import { checkRangeOrder } from './rangePatterns';
 import { adt, freshVar, integerConst, ref, resolve, shallow, substitute, type Type, typeToString } from './types';
 
 export function checkPattern(c: Checker, pattern: Pattern, type: Type, mode: LocalVar['mode']): void {
@@ -176,29 +176,6 @@ function rangePattern(c: Checker, pattern: Extract<Pattern, { kind: 'range' }>, 
     compileError(pattern.span, '範囲のパターンの書き方に誤りがあります。');
   }
   checkRangeOrder(c, pattern);
-}
-
-/** A range pattern runs forwards: `a..=b` with `a <= b` (E0030), and `a..b` with `a < b` (E0579). */
-function checkRangeOrder(c: Checker, pattern: Extract<Pattern, { kind: 'range' }>): void {
-  if (!pattern.start || !pattern.end) return;
-  const lo = rangeEnd(c, pattern.start);
-  const hi = rangeEnd(c, pattern.end);
-  if (lo === undefined || hi === undefined || (pattern.inclusive ? lo <= hi : lo < hi)) return;
-  compileError(
-    pattern.span,
-    pattern.inclusive
-      ? '範囲のパターンの始まりは、終わり以下にしてください（E0030）。'
-      : '終わりを含まない範囲のパターンの始まりは、終わりより小さくしてください（E0579）。'
-  );
-}
-
-/** The value an end of a range pattern stands for: an integer, a code point, or a float. */
-function rangeEnd(c: Checker, end: Pattern): bigint | number | undefined {
-  if (end.kind === 'lit' && end.expr.kind === 'float') return end.expr.value;
-  if (end.kind === 'lit' && end.expr.kind === 'unary' && end.expr.op === '-' && end.expr.operand.kind === 'float') {
-    return -end.expr.operand.value;
-  }
-  return endValue(end, c.annotations);
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Follows rustc checks for slice and array patterns with a rest element.

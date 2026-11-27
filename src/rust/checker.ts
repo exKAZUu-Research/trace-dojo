@@ -94,12 +94,16 @@ export interface BodyContext {
   coverage: CoverageCheck[];
   /** The trait the body's impl implements or its trait declares, which is in scope in it as rustc puts it. */
   currentTrait?: TraitDef;
+  /** The trait an impl's body implements, with its arguments, whose associated types `Self::Name` names there. */
+  implTrait?: TraitRef;
   /** How many `unsafe` blocks (or an `unsafe fn`'s body) the code being checked is in. */
   unsafeDepth: number;
   /** While checking the left side of an assignment, whose union field the assignment writes without reading it. */
   writingUnionField?: boolean;
   /** Whether the path being checked is the place of `&raw const` or `&raw mut`, which reads nothing. */
   rawBorrowing?: boolean;
+  /** The `*p` that is the whole place of `&raw const *p`, a deref of a raw pointer that reads nothing. */
+  rawDeref?: Expr;
 }
 
 interface CoverageCheck {
@@ -527,6 +531,7 @@ export class Checker {
         typeParams: new Map((impl?.params ?? def.trait?.params ?? []).map((param) => [param.name, param])),
         selfType: def.trait ? { kind: 'param', param: def.trait.self } : impl?.selfType,
         currentTrait: def.trait ?? impl?.trait?.trait,
+        implTrait: impl?.trait,
       });
       this.fnContexts.set(def, this.body.fn);
       this.coverageChecks.set(def, this.body.coverage);
@@ -570,6 +575,7 @@ export class Checker {
     typeParams?: Map<string, TypeParam>;
     selfType?: Type;
     currentTrait?: TraitDef;
+    implTrait?: TraitRef;
   }): BodyContext {
     const fn: FnContext = {
       name: options.name,
@@ -593,6 +599,7 @@ export class Checker {
       selfType: options.selfType,
       coverage: [],
       currentTrait: options.currentTrait,
+      implTrait: options.implTrait,
       unsafeDepth: 0,
     };
   }
@@ -640,6 +647,7 @@ export class Checker {
       typeParams,
       selfType,
       currentTrait: def.trait ?? def.impl?.trait?.trait,
+      implTrait: def.impl?.trait,
     });
     this.fnContexts.set(def, this.body.fn);
     this.coverageChecks.set(def, this.body.coverage);
@@ -982,6 +990,7 @@ export class Checker {
       module: this.body.module,
       params: this.body.typeParams,
       selfType: this.body.selfType,
+      implTrait: this.body.implTrait,
       allowInfer: true,
     };
   }

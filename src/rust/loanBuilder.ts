@@ -186,7 +186,7 @@ export class LoanBuilder {
     this.join(this.exits);
     this.endLocals(parameterLocals, end);
     const inputs = [...defs, ...paramVars];
-    const regions = inputs.map((v) => this.graph.varRegions[v]);
+    const regions = inputs.map((v) => regionsOf(this.layouts[v], true));
     const relationError =
       signature &&
       signatureLifetimeError(signature, {

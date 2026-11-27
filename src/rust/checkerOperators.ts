@@ -131,8 +131,7 @@ export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, e
   if (expr.op === '*') {
     const type = normalize(shallow(c.settled(c.expr(expr.operand, undefined))));
     if (type.kind === 'adt' && (type.def.builtin === 'ConstPtr' || type.def.builtin === 'MutPtr')) {
-      c.requireUnsafe(expr.span, '生ポインタの参照外し（*p）');
-      return type.args[0];
+      return rawPointee(c, expr, type);
     }
     const deref = derefOnce(c.program, type);
     if (deref) return deref.type;
@@ -344,60 +343,86 @@ export function checkAssign(c: Checker, expr: Extract<Expr, { kind: 'assign' }>)
   return UNIT;
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
-// code-gauge-allow functionNcss -- Builtin and overloaded compound assignment share the checks.
+function overloadedCompound(
+  c: Checker,
+  expr: Extract<Expr, { kind: 'compoundAssign' }>,
+  targetType: Type,
+  valueType: Type
+): void {
+  const [trait, method] = BINARY_TRAITS[expr.op];
+  overloadedOperator(c, expr, `${trait}Assign`, `${method}_assign`, targetType, [valueType], expr.span, `${expr.op}=`);
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Follows rustc's compound assignment rules case by case.
 export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'compoundAssign' }>): Type {
   const targetType = c.expr(expr.target, undefined);
   if (!isPlaceExpr(c, expr.target))
     compileError(expr.target.span, '代入の左辺には、変数やフィールドなどを書いてください。');
   const t = normalize(shallow(targetType));
-  if (expr.op === '+' && t.kind === 'adt' && t.def.builtin === 'String') {
+  // A target not known yet (a closure's parameter) with a value a program's impl may take picks the operator once
+  // the target's type is known, as `a + b` does.
+  const unknown = t.kind === 'var' && !t.v.literal;
+  const early = unknown ? c.expr(expr.value, undefined) : undefined;
+  if (early && (isOverloadable(numericOperand(early)) || isStrLike(numericOperand(early)))) {
+    c.deferredChecks.push(() => {
+      const known = normalize(shallow(targetType));
+      // `String += &str` needs no impl of the program.
+      if (!(expr.op === '+' && known.kind === 'adt' && known.def.builtin === 'String')) {
+        overloadedCompound(c, expr, targetType, early);
+      }
+    });
+  } else if (expr.op === '+' && t.kind === 'adt' && t.def.builtin === 'String') {
     c.coerceExpr(expr.value, REF_STR);
   } else if (isOverloadable(t)) {
-    const [trait, method] = BINARY_TRAITS[expr.op];
-    const valueType = c.expr(expr.value, undefined);
-    overloadedOperator(
-      c,
-      expr,
-      `${trait}Assign`,
-      `${method}_assign`,
-      targetType,
-      [valueType],
-      expr.span,
-      `${expr.op}=`
-    );
+    overloadedCompound(c, expr, targetType, c.expr(expr.value, undefined));
   } else if (expr.op === '<<' || expr.op === '>>') {
-    const r = numericOperand(c.expr(expr.value, undefined));
+    const r = numericOperand(early ?? c.expr(expr.value, undefined));
     if (!isIntegral(t) || !isIntegral(r))
       compileError(expr.span, `${typeToString(resolve(targetType))} に ${expr.op}= は使えません。`);
   } else {
-    const valueType = c.expr(expr.value, t.kind === 'var' && !t.v.literal ? undefined : t);
-    const v = numericOperand(valueType);
-    const numeric = t.kind === 'int' || t.kind === 'float' || t.kind === 'var';
-    const bitwise = ['&', '|', '^'].includes(expr.op);
-    const boolOp = t.kind === 'bool' && bitwise;
-    if ((!numeric && !boolOp) || !c.unifier.tryUnify(t, v)) {
-      if (t.kind === 'adt' || t.kind === 'param') {
-        compileError(
-          expr.span,
-          `${typeToString(resolve(targetType))} に演算子 ${expr.op}= は使えません（演算子の多重定義は、この採点環境では使えません）。`
-        );
-      }
-      compileError(
-        expr.span,
-        `${typeToString(resolve(targetType))} に ${typeToString(resolve(valueType))} を ${expr.op}= で計算できません（型をそろえてください）。`
-      );
-    }
-    if (bitwise) {
-      c.deferredChecks.push(() => {
-        if (normalize(shallow(resolve(targetType, true))).kind === 'float') {
-          compileError(expr.span, `${typeToString(resolve(targetType))} に ${expr.op}= は使えません。`);
-        }
-      });
-    }
+    numericCompound(c, expr, targetType, early ?? c.expr(expr.value, t));
   }
   requireMutablePlace(c, expr.target, '書き換える');
   return UNIT;
+}
+
+/** `a += b` and the like on numbers and `bool`: both sides of one type, bitwise operators for integers and `bool` only. */
+function numericCompound(
+  c: Checker,
+  expr: Extract<Expr, { kind: 'compoundAssign' }>,
+  targetType: Type,
+  valueType: Type
+): void {
+  const t = normalize(shallow(targetType));
+  const v = numericOperand(valueType);
+  const numeric = t.kind === 'int' || t.kind === 'float' || t.kind === 'var';
+  const bitwise = ['&', '|', '^'].includes(expr.op);
+  const boolOp = t.kind === 'bool' && bitwise;
+  if ((!numeric && !boolOp) || !c.unifier.tryUnify(t, v)) {
+    if (t.kind === 'adt' || t.kind === 'param') {
+      compileError(
+        expr.span,
+        `${typeToString(resolve(targetType))} に演算子 ${expr.op}= は使えません（演算子の多重定義は、この採点環境では使えません）。`
+      );
+    }
+    compileError(
+      expr.span,
+      `${typeToString(resolve(targetType))} に ${typeToString(resolve(valueType))} を ${expr.op}= で計算できません（型をそろえてください）。`
+    );
+  }
+  if (bitwise) {
+    c.deferredChecks.push(() => {
+      if (normalize(shallow(resolve(targetType, true))).kind === 'float') {
+        compileError(expr.span, `${typeToString(resolve(targetType))} に ${expr.op}= は使えません。`);
+      }
+    });
+  }
+}
+
+/** What `*p` of a raw pointer reaches, which only unsafe code reads; `&raw const *p` names the place unread. */
+function rawPointee(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, pointer: Type & { kind: 'adt' }): Type {
+  if (c.body.rawDeref !== expr) c.requireUnsafe(expr.span, '生ポインタの参照外し（*p）');
+  return pointer.args[0];
 }
 
 // code-gauge-allow functionCognitiveComplexity -- References, raw references and constant promotion follow rustc case by case.
@@ -413,11 +438,13 @@ export function refExpr(c: Checker, expr: Extract<Expr, { kind: 'ref' }>, expect
     if (target.kind === 'dyn' && !target.trait.fnSig) inner = undefined;
   }
   c.body.rawBorrowing = expr.raw === true && expr.operand.kind === 'path';
+  c.body.rawDeref = expr.raw && expr.operand.kind === 'unary' && expr.operand.op === '*' ? expr.operand : undefined;
   let type: Type;
   try {
     type = c.expr(expr.operand, inner);
   } finally {
     c.body.rawBorrowing = false;
+    c.body.rawDeref = undefined;
   }
   if (expr.mutable) requireMutablePlace(c, expr.operand, '&mut で借りる');
   if (!expr.raw) rejectStaticMutBorrow(c, expr.operand, expr.span);

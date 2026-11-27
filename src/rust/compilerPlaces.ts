@@ -301,7 +301,7 @@ export function compileField(c: Compiler, expr: ExprOf<'field'>): Eval {
 }
 
 /** The types of the fields of the union a field expression reads, or undefined for a field of another type. */
-function unionFields(expr: ExprOf<'field'>): Type[] | undefined {
+export function unionFields(expr: ExprOf<'field'>): Type[] | undefined {
   let t = normalize(shallow(expr.operand.ty!));
   while (t.kind === 'ref') t = normalize(shallow(t.target));
   if (t.kind !== 'adt' || !t.def.isUnion) return undefined;

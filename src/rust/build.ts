@@ -13,10 +13,12 @@ import { turtleImplSource } from './natives/core';
 import { parseRust, parseWith } from './parse';
 import { STD_SOURCE } from './stdSource';
 import { arrayTryFrom, intoConversion } from './traitConversions';
-import { TraitSolver } from './traits';
+import { RANGE_TYPES, TraitSolver } from './traits';
 import {
   allSupertraits,
+  F64,
   hasVars,
+  intType,
   resolve,
   shallow,
   substitute,
@@ -178,6 +180,12 @@ function operatorOutput(builtin: string, self: Type, args: Type[]): Type | undef
   // An untyped number on the left takes the type of the number on the right (`Add::add(2, x)`), but a shift does not.
   const right = args[0] && primitiveOperand(args[0]);
   if (right && untypedNumber(self, right) && builtin !== 'Shl' && builtin !== 'Shr') return right;
+  // Two untyped numbers of one kind (`Add::add(4, 1)`) select no impl, so they fall back to `i32` or `f64` before the
+  // result meets the type expected of it, as rustc's fallback does.
+  const lhs = normalize(shallow(self));
+  if (lhs.kind === 'var' && lhs.v.literal && args[0] && literalKind(args[0]) === lhs.v.literal) {
+    return lhs.v.literal === 'int' ? intType('i32') : F64;
+  }
   if (builtin === 'Add' && self.kind === 'adt' && self.def.builtin === 'String') return self;
   return undefined;
 }
@@ -225,8 +233,19 @@ function indexOutput(self: Type, args: Type[]): Type | undefined {
   const sequence = self.kind === 'adt' && (self.def.builtin === 'Vec' || self.def.builtin === 'VecDeque');
   const elem = self.kind === 'array' || self.kind === 'slice' ? self.elem : sequence ? self.args[0] : undefined;
   if (elem && index?.kind === 'int') return elem;
+  if (index && isRange(index)) return rangeIndexOutput(self, elem);
   const map = self.kind === 'adt' && (self.def.builtin === 'HashMap' || self.def.builtin === 'BTreeMap');
   return map ? self.args[1] : undefined;
+}
+
+function isRange(index: Type): boolean {
+  return index.kind === 'adt' && (RANGE_TYPES.has(index.def.builtin ?? '') || index.def.builtin === 'RangeFull');
+}
+
+/** A range index gives a slice of the elements (not of a `VecDeque`'s), or of a string's text. */
+function rangeIndexOutput(self: Type, elem: Type | undefined): Type | undefined {
+  if (elem) return self.kind === 'adt' && self.def.builtin === 'VecDeque' ? undefined : { kind: 'slice', elem };
+  return self.kind === 'str' || (self.kind === 'adt' && self.def.builtin === 'String') ? { kind: 'str' } : undefined;
 }
 
 const OPERATOR_OUTPUTS = new Set([

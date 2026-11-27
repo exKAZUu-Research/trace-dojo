@@ -1,13 +1,17 @@
 import { concatStrings } from '../capacity';
+import { sliceRange } from '../compiler';
 import { floatNumber, negateFloat } from '../floatBits';
 import { normalize } from '../infer';
+import { strSliceBytes } from '../interpreter';
 import { floatArith, intArith, overflow, wrap } from '../ops';
 import { type IntName, shallow, type Type, typeToString } from '../types';
 import {
+  CellPlace,
   ElementPlace,
   isPlace,
   MapValue,
   type Place,
+  RangeValue,
   sliceBase,
   sliceLength,
   SliceView,
@@ -94,6 +98,14 @@ function indexedPlace(self: Value, index: Value, ctx: NativeContext): Place {
     if (!entry) panic(ctx, 'no entry found for key');
     return new ElementPlace(entry, 1);
   }
+  const position = deref(index);
+  // A range gives a slice of the elements, or of a string's text, as `&v[a..b]` does.
+  if (position instanceof RangeValue) {
+    if (Array.isArray(container) || container instanceof SliceView) {
+      return new CellPlace(sliceRange(container, position, ctx.span));
+    }
+    return new CellPlace(strSliceBytes(textOf(container), position.sliceStart(), position.sliceEnd(), ctx.span));
+  }
   if (!Array.isArray(container) && !(container instanceof SliceView)) {
     return panic(
       ctx,
@@ -101,10 +113,10 @@ function indexedPlace(self: Value, index: Value, ctx: NativeContext): Place {
     );
   }
   const length = sliceLength(container);
-  const position = deref(index) as bigint;
-  if (position >= length) panic(ctx, `index out of bounds: the len is ${length} but the index is ${position}`);
+  if ((position as bigint) >= length)
+    panic(ctx, `index out of bounds: the len is ${length} but the index is ${position}`);
   const { base, start } = sliceBase(container);
-  return new ElementPlace(base, start + Number(position));
+  return new ElementPlace(base, start + Number(position as bigint));
 }
 
 define({

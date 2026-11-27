@@ -303,14 +303,16 @@ define({
   'std::io::Read::read': ([self, buf], ctx) => ok(ctx, BigInt(readInto(readerOf(ctx, self), buf))),
   'std::io::Read::read_to_string': ([self, buf], ctx) =>
     reading(ctx, self, (reader) => BigInt(appendText(ctx, buf, reader.readRest()))),
-  'std::io::Read::read_to_end': ([self, buf], ctx) =>
-    reading(ctx, self, (reader) => {
-      const bytes = new TextEncoder().encode(reader.readRest());
-      const items = placeOf(buf).get() as Value[];
-      ctx.runtime.allocate(bytes.length);
-      for (const byte of bytes) items.push(BigInt(byte));
-      return BigInt(bytes.length);
-    }),
+  'std::io::Read::read_to_end': ([self, buf], ctx) => {
+    // It reads bytes, so the rest of a character a `read` split comes first.
+    const reader = readerOf(ctx, self);
+    const bytes = [...(splitBytes.get(reader) ?? []), ...new TextEncoder().encode(reader.readRest())];
+    splitBytes.delete(reader);
+    const items = placeOf(buf).get() as Value[];
+    ctx.runtime.allocate(bytes.length);
+    for (const byte of bytes) items.push(BigInt(byte));
+    return ok(ctx, BigInt(bytes.length));
+  },
   'std::io::BufRead::read_line': ([self, buf], ctx) => reading(ctx, self, (reader) => readLineInto(ctx, reader, buf)),
   'std::io::BufRead::lines': ([self], ctx) => linesOf(ctx, self),
   'std::io::read_to_string': ([reader], ctx) => reading(ctx, reader, (source) => source.readRest()),

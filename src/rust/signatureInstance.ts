@@ -136,7 +136,13 @@ export class SignatureInstance {
         : this.inputNames.size === 1
           ? [...this.inputNames][0]
           : undefined;
-    this.bindOutputPart(fn.ret, result, false, elided, inputs.flatMap(regionsOf));
+    this.bindOutputPart(
+      fn.ret,
+      result,
+      false,
+      elided,
+      inputs.flatMap((input) => regionsOf(input))
+    );
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Applies the lifetime elision rules.
