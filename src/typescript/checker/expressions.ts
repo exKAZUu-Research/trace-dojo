@@ -19,6 +19,7 @@ import { nameSuggestionHint } from './spelling';
 import {
   assignmentKind,
   hasToken,
+  isClassConstructor,
   isDirectEmptyArray,
   isFunctionWithOwnThis,
   isImmediatelyInvoked,
@@ -262,9 +263,19 @@ export class ExpressionChecker {
    * `getNewTargetContainer` finds through arrow functions; elsewhere it is an error.
    */
   private newTarget(node: TreeNode): Type {
+    let child = node;
     let container = node.parent;
-    while (container && !newTargetBoundaries.has(container.type)) container = container.parent;
-    if (container?.type === 'method_definition' && container.childForFieldName('name')?.text === 'constructor') {
+    while (container && !isNewTargetBoundary(container, child)) {
+      child = container;
+      container = container.parent;
+    }
+    if (
+      container &&
+      isClassConstructor(container) &&
+      !hasToken(container, 'static') &&
+      !hasToken(container, 'get') &&
+      !hasToken(container, 'set')
+    ) {
       const classNode = container.parent?.parent;
       if (classNode) return this.c.classes.valueTypeOf(this.c.classes.classInfoOfNode(classNode));
     }
@@ -1273,4 +1284,10 @@ function isWithinDecorator(node: TreeNode, declaration: TreeNode): boolean {
   for (let current = node.parent; current && current.id !== declaration.id; current = current.parent)
     if (current.type === 'decorator') return true;
   return false;
+}
+
+function isNewTargetBoundary(container: TreeNode, child: TreeNode): boolean {
+  if (!newTargetBoundaries.has(container.type)) return false;
+  if (child.type === 'decorator') return false;
+  return container.childForFieldName('name')?.id !== child.id;
 }
