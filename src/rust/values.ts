@@ -448,6 +448,8 @@ export class ChannelEnd {
 export class ThreadHandle {
   state: 'pending' | 'running' | 'done' | 'panicked' = 'pending';
   result: Value;
+  /** Whether a thread joined it, which `thread::scope` leaves to report its panic. */
+  joined = false;
   constructor(
     readonly id: number,
     readonly run: () => Value

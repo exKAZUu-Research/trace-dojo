@@ -1,4 +1,4 @@
-import { RustPanic } from '../runtime';
+import { RustPanic, UnsupportedAtRun } from '../runtime';
 import {
   BorrowGuard,
   CellBox,
@@ -27,7 +27,37 @@ export class Scheduler {
   private nextId = 2;
   /** The ids of the threads running, the innermost last; `main` is thread 1. */
   readonly running: number[] = [1];
+  /**
+   * For each running thread that waits on another below it, whether what it waits for has come: a thread running
+   * above one that could go on would, in Rust, let it go on, which threads that run to their ends cannot.
+   */
+  private readonly waits = new Map<number, () => boolean>();
   private panicked = false;
+
+  /** Runs `body` as the current thread waiting until `ready`, which the threads it runs meanwhile may make true. */
+  waiting<T>(ready: () => boolean, body: () => T): T {
+    const id = this.running.at(-1) ?? 1;
+    this.waits.set(id, ready);
+    try {
+      return body();
+    } finally {
+      this.waits.delete(id);
+    }
+  }
+
+  /** Whether a thread below the current one waits for something that has come, and so could go on. */
+  belowCouldGoOn(): boolean {
+    return this.running.slice(0, -1).some((id) => this.waits.get(id)?.() === true);
+  }
+
+  /** The threads spawned since `count` threads had been. */
+  spawnedSince(count: number): readonly ThreadHandle[] {
+    return this.threads.slice(count);
+  }
+
+  get spawnedCount(): number {
+    return this.threads.length;
+  }
 
   spawn(run: () => Value): ThreadHandle {
     const thread = new ThreadHandle(this.nextId++, run);
@@ -45,7 +75,7 @@ export class Scheduler {
       thread.result = thread.run();
       thread.state = 'done';
     } catch (error) {
-      if (!(error instanceof RustPanic)) throw error;
+      if (!(error instanceof RustPanic) || error instanceof UnsupportedAtRun) throw error;
       ctx.runtime.unwinding = false;
       thread.state = 'panicked';
       thread.result = error.message;
@@ -65,9 +95,19 @@ export class Scheduler {
 
   /** Runs every thread waiting, as a thread that sleeps or yields lets them, telling whether one ran. */
   runAll(ctx: NativeContext): boolean {
-    let ran = false;
-    while (this.runNext(ctx)) ran = true;
-    return ran;
+    return this.waiting(
+      () => true,
+      () => {
+        let ran = false;
+        while (this.runNext(ctx)) ran = true;
+        return ran;
+      }
+    );
+  }
+
+  /** Runs the threads waiting, the one spawned first first, until `thread` has run. */
+  runUntilStarted(ctx: NativeContext, thread: ThreadHandle): void {
+    while (thread.state === 'pending' && this.runNext(ctx));
   }
 
   private panicText(error: RustPanic, id: number): string {
@@ -96,8 +136,32 @@ function spawn(ctx: NativeContext, f: Value): ThreadHandle {
 /** `JoinHandle::join`: the thread's result, or `Err` of what its panic carried. */
 function join(ctx: NativeContext, handle: Value): Value {
   const thread = deref(handle) as ThreadHandle;
-  scheduler(ctx).run(ctx, thread);
+  thread.joined = true;
+  const threads = scheduler(ctx);
+  threads.waiting(
+    () => thread.state === 'done' || thread.state === 'panicked',
+    () => threads.run(ctx, thread)
+  );
   return thread.state === 'panicked' ? err(ctx, thread.result) : ok(ctx, thread.result);
+}
+
+/** `is_finished`: whether the thread has ended, after letting it run, as it would meanwhile in Rust. */
+function isFinished(ctx: NativeContext, handle: Value): boolean {
+  const thread = deref(handle) as ThreadHandle;
+  scheduler(ctx).runUntilStarted(ctx, thread);
+  return thread.state !== 'pending';
+}
+
+/** `thread::scope`: waits for the threads it spawned, and panics if one that no thread joined panicked. */
+function threadScope(ctx: NativeContext, f: Value): Value {
+  const threads = scheduler(ctx);
+  const count = threads.spawnedCount;
+  const result = call(ctx, f, [UNIT_VALUE]);
+  threads.runAll(ctx);
+  if (threads.spawnedSince(count).some((thread) => thread.state === 'panicked' && !thread.joined)) {
+    panic(ctx, 'a scoped thread panicked');
+  }
+  return result;
 }
 
 function lock(ctx: NativeContext, target: CellBox, mutable: boolean): Value {
@@ -148,13 +212,24 @@ function waitOnCondvar(ctx: NativeContext, held: Value, waiting: (place: Value) 
  */
 function receive(ctx: NativeContext, receiver: Value): Value | undefined {
   const channel = deref(receiver) as ChannelEnd;
-  while (channel.queue.length === 0) {
-    if (scheduler(ctx).runNext(ctx)) continue;
-    if (channel.senders > 0)
-      panic(ctx, 'デッドロックしました（送信側が残ったまま、送るスレッドがないチャンネルを待っています）。');
-    return undefined;
-  }
-  return channel.queue.shift();
+  const threads = scheduler(ctx);
+  return threads.waiting(
+    () => channel.queue.length > 0 || channel.senders === 0,
+    () => {
+      while (channel.queue.length === 0) {
+        if (threads.runNext(ctx)) continue;
+        if (channel.senders === 0) return;
+        if (threads.belowCouldGoOn()) {
+          throw new UnsupportedAtRun(
+            '途中で待っているスレッドが送るのを待つ受信は、この採点環境では使えません。',
+            ctx.span
+          );
+        }
+        panic(ctx, 'デッドロックしました（送信側が残ったまま、送るスレッドがないチャンネルを待っています）。');
+      }
+      return channel.queue.shift();
+    }
+  );
 }
 
 export function receiverIter(ctx: NativeContext, receiver: Value, waits: boolean): IterValue {
@@ -205,17 +280,12 @@ function threadIdDef(ctx: NativeContext): StructValue['def'] {
 define({
   'std::thread::spawn': ([f], ctx) => spawn(ctx, f),
   'JoinHandle<_>::join': ([handle], ctx) => join(ctx, handle),
-  'JoinHandle<_>::is_finished': ([handle]) => (deref(handle) as ThreadHandle).state !== 'pending',
+  'JoinHandle<_>::is_finished': ([handle], ctx) => isFinished(ctx, handle),
   'JoinHandle<_>::thread': ([handle]) => (deref(handle) as ThreadHandle).id,
   'ScopedJoinHandle<_>::join': ([handle], ctx) => join(ctx, handle),
-  'ScopedJoinHandle<_>::is_finished': ([handle]) => (deref(handle) as ThreadHandle).state !== 'pending',
+  'ScopedJoinHandle<_>::is_finished': ([handle], ctx) => isFinished(ctx, handle),
   'Scope::spawn': ([, f], ctx) => spawn(ctx, f),
-  'std::thread::scope': ([f], ctx) => {
-    const result = call(ctx, f, [UNIT_VALUE]);
-    // The scope waits for the threads it spawned, which have not run yet.
-    scheduler(ctx).runAll(ctx);
-    return result;
-  },
+  'std::thread::scope': ([f], ctx) => threadScope(ctx, f),
   'std::thread::sleep': (_args, ctx) => {
     scheduler(ctx).runAll(ctx);
     return UNIT_VALUE;

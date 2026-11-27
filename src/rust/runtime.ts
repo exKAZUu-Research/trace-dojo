@@ -120,6 +120,9 @@ export class RustPanic {
   ) {}
 }
 
+/** A use of what the interpreter does not support, found while running, which ends the whole program, not a thread. */
+export class UnsupportedAtRun extends RustPanic {}
+
 /** A `Display` or `Debug` impl returned `Err`, after the formatting wrote `written`; each caller reacts as std does. */
 export class FmtFailure {
   constructor(readonly written: string) {}
