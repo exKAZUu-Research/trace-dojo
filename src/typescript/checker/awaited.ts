@@ -84,11 +84,34 @@ function mayBeThenableConstraint(c: Checker, member: Type, depth: number): boole
 }
 
 function fulfilledValueOf(c: Checker, type: Type): Type | undefined {
+  const callback = thenableCallback(c, type);
+  return callback?.parameters[0]?.type;
+}
+
+function thenableCallback(c: Checker, type: Type): ReturnType<Checker['signaturesOf']>[number] | undefined {
   const then = c.propertyOf(type, 'then');
   const onfulfilled = then && c.signaturesOf(then.type(), 'call')[0]?.parameters[0]?.type;
-  if (!onfulfilled) return undefined;
-  const callback = c.signaturesOf(c.relations.removeNullish(onfulfilled), 'call')[0];
-  return callback?.parameters[0]?.type;
+  return onfulfilled ? c.signaturesOf(c.relations.removeNullish(onfulfilled), 'call')[0] : undefined;
+}
+
+/** Whether every value of `type` is a non-nullish Promise or thenable, which TS2801 flags when tested as a condition. */
+export function isAlwaysAwaitableType(c: Checker, type: Type, depth = 0): boolean {
+  if (isAnyLike(type) || depth > MAX_AWAITED_DEPTH || c.relations.isNullable(type)) return false;
+  const members = typeMembers(type);
+  return members.length > 0 && members.every((member) => isAwaitableMember(c, member, depth));
+}
+
+function isAwaitableMember(c: Checker, member: Type, depth: number): boolean {
+  if (isGenericAwaitedOperand(member)) {
+    const constraint = member.kind === 'typeParameter' ? c.constraintOf(member) : c.baseConstraint(member);
+    return constraint !== undefined && constraint !== member && isAlwaysAwaitableType(c, constraint, depth + 1);
+  }
+  if (member.kind !== 'object' && member.kind !== 'intersection') return false;
+  return (
+    c.isLibraryType(member, 'Promise') ||
+    c.isLibraryType(member, 'PromiseLike') ||
+    thenableCallback(c, member) !== undefined
+  );
 }
 
 /**

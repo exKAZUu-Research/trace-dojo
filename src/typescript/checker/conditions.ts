@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- Builds and checks conditional flow for each expression form.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { isAlwaysAwaitableType } from './awaited';
 import type { Checker } from './checker';
 import type { State } from './flow';
 import { InlinedConditions } from './inlinedConditions';
@@ -57,6 +58,7 @@ export class ConditionChecker {
   private readonly inlined: InlinedConditions;
   private readonly logicalRightTypes = new Map<number, Type>();
   private readonly propertyDeclarations = new Map<number, number>();
+  private readonly reportedKnownTruthy = new Set<number>();
 
   constructor(private readonly c: Checker) {
     this.inlined = new InlinedConditions(c);
@@ -332,9 +334,18 @@ export class ConditionChecker {
     body: TreeNode | null | undefined,
     chainNode: TreeNode = tested
   ): void {
-    if (!this.isAlwaysDefinedFunction(tested, type)) return;
+    if (this.reportedKnownTruthy.has(tested.id)) return;
+    const isCallable = this.isAlwaysDefinedFunction(tested, type);
+    const isAwaitable = !isCallable && isAlwaysAwaitableType(this.c, type);
+    if (!isCallable && !isAwaitable) return;
     if (this.usedInConjunction(chainNode, tested) || (body && this.refersTo(named(body), tested))) return;
-    this.c.error(tested, 'この関数は常に定義されているので、この条件は常に真になります。呼び出すつもりでしたか？');
+    this.reportedKnownTruthy.add(tested.id);
+    this.c.error(
+      tested,
+      isCallable
+        ? 'この関数は常に定義されているので、この条件は常に真になります。呼び出すつもりでしたか？'
+        : `'${this.c.print(type)}' が常に定義されているため、この条件は常に true を返します。'await' を使用することを忘れていませんか?`
+    );
   }
 
   private usedInConjunction(node: TreeNode, reference: TreeNode): boolean {
