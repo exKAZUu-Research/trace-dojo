@@ -708,16 +708,21 @@ export class Flow {
     const reduced = filterType(declared, (member) => parts.some((part) => this.c.relations.isAssignable(part, member)));
     if (isIntrinsic(reduced, 'never') || !this.c.relations.isAssignable(regular, reduced)) return declared;
     // A literal assigned to a union keeps its literal when the union lists literals, as `"a" | "b"` does.
-    if (
-      assigned.kind === 'literal' &&
-      reduced.kind === 'union' &&
-      reduced.types.some((member) => member.kind === 'literal')
-    ) {
-      return filterType(reduced, (member) => member.kind !== 'literal' || member.value === assigned.value);
-    }
+    const exact = this.narrowAssignedLiteral(reduced, assigned, regular);
+    if (exact) return exact;
     return reduced === regular && assigned.kind === 'literal' && typeof assigned.value === 'boolean'
       ? assigned
       : reduced;
+  }
+
+  private narrowAssignedLiteral(reduced: Type, assigned: Type, regular: Type): Type | undefined {
+    if (assigned.kind !== 'literal' || assigned.enumMember?.computed || reduced.kind !== 'union') return undefined;
+    if (!reduced.types.some(isKnownValueLiteral)) return undefined;
+    const exact = filterType(
+      reduced,
+      (member) => member.kind !== 'literal' || (!member.enumMember?.computed && member.value === assigned.value)
+    );
+    return !isIntrinsic(exact, 'never') && this.c.relations.isAssignable(regular, exact) ? exact : undefined;
   }
 
   objectTypeOf(type: Type): ObjectType | undefined {
@@ -733,6 +738,10 @@ const typeofTypes = new Map<string, Type>([
   ['symbol', symbolType],
   ['undefined', undefinedType],
 ]);
+
+function isKnownValueLiteral(type: Type): boolean {
+  return type.kind === 'literal' && !type.enumMember?.computed;
+}
 
 export function isUnit(type: Type): boolean {
   return type.kind === 'literal' || isUnitIntrinsic(type);
