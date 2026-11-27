@@ -194,11 +194,7 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
   const rest = pattern.restIndex;
   const elems = pattern.elems.map((elem, index) => (index === rest ? undefined : compileProbe(c, elem)));
   const fixed = pattern.elems.length - (rest === undefined ? 0 : 1);
-  const restBinding = rest === undefined ? undefined : pattern.elems[rest];
-  const restLocal = restBinding && c.annotations.bindings.get(restBinding);
-  const restType = restLocal && normalize(shallow(restLocal.type));
-  const restMode = restType?.kind !== 'ref' ? 'value' : restType.mutable ? 'mut' : 'ref';
-  const restMovesOut = restLocal !== undefined && restMode === 'value' && !c.isCopy(restLocal.type);
+  const restBinder = rest === undefined ? undefined : compileRestBinder(c, pattern.elems[rest]);
   // An element after the `..` counts from the end.
   const offsetOf = (index: number, after: number): number =>
     rest !== undefined && index > rest ? index - 1 + after : index;
@@ -213,12 +209,32 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
       const elemPlace = place || isPlace(value) ? () => new ElementPlace(base, position) : undefined;
       if (elem && !elem(frame, base[position], elemPlace, bindings)) return false;
     }
-    if (restLocal) {
-      const from = start + (rest as number);
-      bindings.push(() => (frame.locals[restLocal.slot] = sliceRest(target, base, from, from + after, restMode)));
-      if (restMovesOut && (place || isPlace(value))) bindings.push(movingOut(base, from, from + after));
-    }
+    const from = start + (rest ?? 0);
+    restBinder?.(frame, target, base, from, from + after, place !== undefined || isPlace(value), bindings);
     return true;
+  };
+}
+
+type RestBinder = (
+  frame: Frame,
+  target: Value,
+  base: Value[],
+  from: number,
+  to: number,
+  hasPlace: boolean,
+  bindings: Binding[]
+) => void;
+
+/** Binds `rest @ ..` to the elements from `from` to `to`, moving them out of an array it takes by value. */
+function compileRestBinder(c: Compiler, restBinding: Pattern): RestBinder | undefined {
+  const restLocal = c.annotations.bindings.get(restBinding);
+  if (!restLocal) return undefined;
+  const restType = normalize(shallow(restLocal.type));
+  const restMode = restType.kind !== 'ref' ? 'value' : restType.mutable ? 'mut' : 'ref';
+  const movesOut = restMode === 'value' && !c.isCopy(restLocal.type);
+  return (frame, target, base, from, to, hasPlace, bindings) => {
+    bindings.push(() => (frame.locals[restLocal.slot] = sliceRest(target, base, from, to, restMode)));
+    if (movesOut && hasPlace) bindings.push(movingOut(base, from, to));
   };
 }
 
