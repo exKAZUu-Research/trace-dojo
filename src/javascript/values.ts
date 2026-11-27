@@ -275,6 +275,9 @@ export class Scope {
   }
 }
 
+/** Ends the program as `process.exit` does, skipping finally blocks, catch clauses, and remaining queued jobs. */
+export class ProgramExit {}
+
 /** Thrown through the host stack to carry a JavaScript exception. */
 export class JsThrow {
   constructor(readonly value: Value) {}

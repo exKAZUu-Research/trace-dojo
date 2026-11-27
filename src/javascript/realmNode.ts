@@ -3,17 +3,22 @@ import { inspect } from './inspect';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
 import { rejectUnavailableMember } from './unavailableMembers';
-import { isObject, JsObject, JsThrow, type Value } from './values';
+import { isObject, JsObject, JsThrow, ProgramExit, type Value } from './values';
+
+type NodeErrorCode = FileSystemErrorCode | 'EBADF';
 
 /** Node.js's descriptions and Linux's numbers of the errors that file system calls report. */
-const ERRORS: Record<FileSystemErrorCode, { description: string; errno: number }> = {
+const ERRORS: Record<NodeErrorCode, { description: string; errno: number }> = {
   ENOENT: { description: 'no such file or directory', errno: -2 },
   EEXIST: { description: 'file already exists', errno: -17 },
   EISDIR: { description: 'illegal operation on a directory', errno: -21 },
   ENOTDIR: { description: 'not a directory', errno: -20 },
   ENOTEMPTY: { description: 'directory not empty', errno: -39 },
   EINVAL: { description: 'invalid argument', errno: -22 },
+  EBADF: { description: 'bad file descriptor', errno: -9 },
 };
+
+const STDIN_PATHS = new Set(['/dev/stdin', '/dev/fd/0']);
 
 /** The paths that name the run's standard output streams, by the stream each names. */
 const STANDARD_STREAMS = {
@@ -47,6 +52,51 @@ export function defineNodeBuiltins(builder: RealmBuilder): void {
     });
     builder.constant(process, name, stream);
   }
+  defineProcessExit(builder, process);
+}
+
+function defineProcessExit(builder: RealmBuilder, process: JsObject): void {
+  let exitCode: number | undefined;
+  process.properties.set('exitCode', {
+    get: builder.function('get exitCode', 0, () => exitCode),
+    set: builder.function('set exitCode', 1, ({ runtime, args }) => {
+      exitCode = parseExitCode(runtime, args[0]);
+      return;
+    }),
+    enumerable: true,
+    configurable: true,
+  });
+  builder.method(process, 'exit', 1, ({ runtime, args }) => {
+    if (args[0] !== undefined && args[0] !== null) exitCode = parseExitCode(runtime, args[0]);
+    throw new ProgramExit();
+  });
+}
+
+function parseExitCode(runtime: Runtime, code: Value): number | undefined {
+  if (code === undefined || code === null) return undefined;
+  if (typeof code === 'string') {
+    if (/^-?\d+$/.test(code)) {
+      const parsed = Number(code);
+      if (Number.isSafeInteger(parsed)) return parsed;
+    }
+    return runtime.throwError(
+      'TypeError',
+      `The "code" argument must be of type number. Received type string (${inspect(runtime, code)})`
+    );
+  }
+  if (typeof code === 'number') {
+    if (!Number.isInteger(code)) {
+      return runtime.throwError(
+        'RangeError',
+        `The value of "code" is out of range. It must be an integer. Received ${code}`
+      );
+    }
+    return code;
+  }
+  return runtime.throwError(
+    'TypeError',
+    `The "code" argument must be of type number. Received ${inspect(runtime, code)}`
+  );
 }
 
 /** Loads a built-in Node.js module by specifier, for `require` and lowered ECMAScript `import` declarations. */
@@ -117,18 +167,31 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
 }
 
 function readFileSync(runtime: Runtime, args: Value[]): Value {
-  const encoding = encodingOption(runtime, args[1]);
+  const options = args[1];
+  const encoding = encodingOption(runtime, options);
   // Node.js reads into a Buffer without an encoding, which a TypeScript program sees as unavailable.
   if (runtime.unavailableMember && (encoding === undefined || encoding === null))
     rejectUnavailableMember('エンコーディングを指定しない readFileSync（Buffer）', runtime.currentRow);
   if (runtime.unavailableMember && !isUtf8(encoding))
     rejectUnavailableMember(`readFileSync の encoding: ${encodingLabel(runtime, encoding)}`, runtime.currentRow);
+  const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
+  const parsed = parseOpenFlag(runtime, flag === undefined ? 'r' : runtime.toString(flag));
   // File descriptor 0 is standard input.
-  if (args[0] === 0) return runtime.io.openReader('/dev/stdin').readRest();
+  if (args[0] === 0) {
+    if (!parsed.readable) throwNodeError(runtime, 'EBADF', 'read');
+    return runtime.io.openReader('/dev/stdin').readRest();
+  }
   const path = requirePath(runtime, args[0]);
-  // Node.js names no path when reading a directory fails, since it reads from a file descriptor it opened.
-  if (path !== '' && runtime.io.files.kindOf(path) === 'directory') throwNodeError(runtime, 'EISDIR', 'read');
-  return withErrors(runtime, 'open', path, () => runtime.io.openReader(path).readRest());
+  if (STDIN_PATHS.has(resolvePath(path))) {
+    if (!parsed.readable) throwNodeError(runtime, 'EBADF', 'read');
+    return runtime.io.openReader('/dev/stdin').readRest();
+  }
+  // Node.js names no path when reading a directory opened read-only fails, since it fails on `read(fd)` rather than `open`.
+  if (!parsed.writable && path !== '' && runtime.io.files.kindOf(path) === 'directory')
+    throwNodeError(runtime, 'EISDIR', 'read');
+  const handle = withErrors(runtime, 'open', path, () => runtime.io.files.open(path, parsed.mode));
+  if (!parsed.readable) throwNodeError(runtime, 'EBADF', 'read');
+  return handle.read();
 }
 
 /**
@@ -197,8 +260,10 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
     return;
   }
   const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
-  const mode = openModeOf(runtime, flag === undefined ? defaultFlag : runtime.toString(flag));
-  withErrors(runtime, 'open', path, () => runtime.io.files.open(path, mode).write(data));
+  const parsed = parseOpenFlag(runtime, flag === undefined ? defaultFlag : runtime.toString(flag));
+  const handle = withErrors(runtime, 'open', path, () => runtime.io.files.open(path, parsed.mode));
+  if (!parsed.writable) throwNodeError(runtime, 'EBADF', 'write');
+  handle.write(data);
 }
 
 /** Runs a file system call, throwing the error Node.js throws for its failure. */
@@ -215,7 +280,7 @@ function withErrors<T>(runtime: Runtime, syscall: string, path: string, run: () 
 
 function throwNodeError(
   runtime: Runtime,
-  code: FileSystemErrorCode,
+  code: NodeErrorCode,
   syscall: string,
   path?: string,
   destination?: string
@@ -231,15 +296,26 @@ function throwNodeError(
   throw new JsThrow(error);
 }
 
-/** How Node.js opens a file to write with a file system flag such as `w`, `wx`, `a`, or `r+`. */
-function openModeOf(runtime: Runtime, flag: string): OpenMode {
-  const match = /^(?:(?<append>a|as|ax|xa)|(?<write>w|wx|xw)|(?<update>r|rs))\+?$/.exec(flag);
-  if (!match?.groups || (match.groups.update && !flag.endsWith('+'))) {
+interface ParsedOpenFlag {
+  mode: OpenMode;
+  readable: boolean;
+  writable: boolean;
+}
+
+/** Parses any of Node.js's file system opening flags (`r`, `rs+`, `w`, `wx+`, `a+`, etc.). */
+function parseOpenFlag(runtime: Runtime, flag: string): ParsedOpenFlag {
+  const match = /^(?:(?<read>r|rs|sr)|(?<write>w|wx|xw)|(?<append>a|as|sa|ax|xa))(?<plus>\+)?$/.exec(flag);
+  if (!match?.groups) {
     return runtime.throwError('TypeError', `The argument 'flags' is invalid. Received '${flag}'`);
   }
-  const { append, write } = match.groups;
+  const { read, write, append, plus } = match.groups;
+  const hasPlus = plus === '+';
   const create = flag.includes('x') ? 'exclusive' : append || write ? 'always' : 'never';
-  return { create, truncate: write !== undefined, append: append !== undefined };
+  return {
+    mode: { create, truncate: write !== undefined, append: append !== undefined },
+    readable: read !== undefined || hasPlus,
+    writable: write !== undefined || append !== undefined || hasPlus,
+  };
 }
 
 function requirePath(runtime: Runtime, value: Value): string {

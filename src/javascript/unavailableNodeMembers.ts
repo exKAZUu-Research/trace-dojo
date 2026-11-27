@@ -80,12 +80,10 @@ export const UNAVAILABLE_UNTYPED_PROCESS_MEMBERS = [
   'versions',
 ];
 
-/** Every member of Node.js's `process` other than `stdout` and `stderr`, which this interpreter runs. */
+/** Every member of Node.js's `process` other than `stdout`, `stderr`, `exit`, and `exitCode`, which this interpreter runs. */
 export const UNAVAILABLE_PROCESS_MEMBERS = new Set([
   'argv',
   'env',
-  'exit',
-  'exitCode',
   'on',
   'stdin',
   ...UNAVAILABLE_UNTYPED_PROCESS_MEMBERS,

@@ -179,7 +179,7 @@ test.each([
 
 test.each([
   ["const path = require('path');", "モジュール 'path' の require は、この採点環境では使えません。"],
-  ['const p: any = process; p.exit(0);', 'process.exit は、この採点環境では使えません。'],
+  ['const p: any = process; p.cwd();', 'process.cwd は、この採点環境では使えません。'],
   ["const fs = require('fs'); fs.readFile('a', () => {});", 'fs.readFile は、この採点環境では使えません。'],
   [
     "const fs = require('fs'); fs.writeFileSync('a.txt', 'aGk=', 'base64');",

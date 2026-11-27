@@ -9,16 +9,18 @@ import {
 // `process`, its streams, and `fs` are declared too, only so that a program using one is told it is unavailable. Data
 // written is a string only, as typed arrays are unavailable here.
 
+const AVAILABLE_PROCESS_MEMBERS = new Set(['stdout', 'stderr', 'exit', 'exitCode']);
+
 /**
  * The feature a member of a Node.js object names when this interpreter does not run it, by the name of the interface or
- * module declaring it: of `process`, it provides only the standard output and error streams, which only write.
+ * module declaring it: of `process`, it provides `stdout`, `stderr`, `exit`, and `exitCode`.
  */
 export function unavailableNodeMember(
   owner: string | undefined,
   name: string,
   stream: 'stdout' | 'stderr' = 'stdout'
 ): string | undefined {
-  if (owner === 'Process' && name !== 'stdout' && name !== 'stderr') return `process.${name}`;
+  if (owner === 'Process' && !AVAILABLE_PROCESS_MEMBERS.has(name)) return `process.${name}`;
   if (owner === 'WriteStream') return `process.${stream}.${name}`;
   if ((owner === '"fs"' || owner === '"node:fs"') && UNAVAILABLE_FS_MEMBERS.has(name)) return `fs.${name}`;
   return undefined;

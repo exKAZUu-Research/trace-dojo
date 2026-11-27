@@ -224,6 +224,10 @@ export class FileHandle {
     this.position = append ? undefined : 0;
   }
 
+  read(): string {
+    return this.files.readNode(this.node);
+  }
+
   write(text: string): void {
     this.writeAt(this.position ?? this.node.content.length, text);
     if (this.position !== undefined) this.position += text.length;
@@ -278,7 +282,11 @@ export class VirtualFileSystem {
   }
 
   readFile(path: string): string {
-    const content = this.fileNodeOf(path).content;
+    return this.readNode(this.fileNodeOf(path));
+  }
+
+  readNode(node: FileNode): string {
+    const { content } = node;
     this.budget.spend(Math.ceil((content.length + 1) / 64));
     return content;
   }
