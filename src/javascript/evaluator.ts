@@ -658,6 +658,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
       const staticInitializers = this.inScope(classScope, () =>
         this.defineMembers(cls, fn, prototype, behavior, { definitions, isDecorated: classDecorators !== undefined })
       );
+      // As tsx compiles a decorated class, its own name inside its body stays the class the decorators were given.
+      if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
       const name = decoratorClassName(cls, inferredName);
       const decorated =
         classDecorators &&
@@ -675,8 +677,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
         if (decorated.staticInitializers.length > 0)
           staticInitializers.unshift(() => runInitializers(runtime, decorated.staticInitializers, fn, true));
       }
-      // As tsx compiles a decorated class, its own name inside its body stays the class the decorators were given.
-      if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
       withTemporaryStaticDefaultName(cls, fn, inferredName, () =>
         this.initializeStaticMembers(classScope, fn, staticInitializers, binding)
       );

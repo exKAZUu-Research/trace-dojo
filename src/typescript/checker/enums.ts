@@ -498,7 +498,10 @@ function enumObjectType(name: string, members: Map<string, EnumMember>): ObjectT
       const structure = emptyStructure();
       for (const member of members.values()) {
         const type = member.type.kind === 'literal' ? member.type.counterpart : member.type;
-        structure.properties.set(member.name, simpleProperty(member.name, type, { readonly: true }));
+        structure.properties.set(
+          member.name,
+          simpleProperty(member.name, type, { readonly: true, declaration: member.node })
+        );
       }
       if (hasNumericMember) structure.numberIndex = { type: stringType, readonly: true, isEnumReverseMapping: true };
       return structure;

@@ -43,6 +43,8 @@ function readQueryTarget(c: Checker, node: TreeNode, identifier: QueryTarget, ex
     const receiver = c.namespaces.importTypeQuery(object);
     if (receiver === errorType) return errorType;
     if (!module.exportEquals && receiver.kind === 'object' && !c.propertyOf(receiver, property.text)) {
+      const nsExport = module.namespaceExports?.namespaces.get(property.text);
+      if (nsExport && c.namespaces.isInstantiated(nsExport)) return c.namespaces.objectType(nsExport);
       c.error(property, `名前空間 '"${module.name}"' にエクスポートされたメンバー '${property.text}' がありません。`);
       return errorType;
     }

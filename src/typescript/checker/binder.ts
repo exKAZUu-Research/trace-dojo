@@ -8,6 +8,7 @@ import {
   bindAnonymousDefaultDeclaration,
   exportEqualsTargetOf,
 } from './ambientModuleExports';
+import { resolveAmbientModuleReExports } from './ambientModuleReExports';
 import { memberNameOf } from './enums';
 import { fsImportMeanings } from './nodeLibrary';
 import { canonicalIdentifier, Scope, Sym, type ValueKind } from './scopes';
@@ -118,6 +119,12 @@ export class Binder {
     for (const { node, scope, exports } of this.pendingAmbientDefaults) {
       bindAmbientDefaultValueExport(node, scope, exports, (site) => this.scopeOf(site), this.options?.budget);
     }
+    resolveAmbientModuleReExports(
+      this.ambientModules,
+      this.options?.existingModules,
+      this.scopes,
+      this.options?.budget
+    );
     this.markAssignments();
   }
 

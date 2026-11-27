@@ -59,7 +59,10 @@ export class Namespaces {
           // Only a `const` export is read-only: tsc lets a program reassign an exported function, class, or enum.
           const readonly = member.valueEntries.every((entry) => entry.kind === 'const');
           structure.properties.set(name, {
-            ...simpleProperty(name, anyType, { readonly, declaration: member.valueDeclaration }),
+            ...simpleProperty(name, anyType, {
+              readonly,
+              declaration: resolved.valueDeclaration ?? member.valueDeclaration,
+            }),
             enumSymbol: resolved.valueKind === 'enum' ? resolved : undefined,
             type: () => this.c.expressions.valueTypeOf(member),
           });
@@ -80,7 +83,10 @@ export class Namespaces {
 
   /** Whether a namespace has values, which give it an object; one that only declares types has none. */
   isInstantiated(symbol: Sym): boolean {
-    return isInstantiatedNamespace(symbol);
+    return (
+      symbol.valueDeclarations.some((decl) => decl.childForFieldName('name')?.type === 'string') ||
+      isInstantiatedNamespace(symbol)
+    );
   }
 
   /** Whether a namespace has an object to use as a value, reporting one that only declares types. */
@@ -383,7 +389,10 @@ export class Namespaces {
     if (!this.checkImportPlacementAndSyntax(node, source, clause)) return;
     if (!source || !clause || clause.type === 'import_require_clause') return;
     const module = this.moduleNamed(stringValue(source));
-    if (!module) return;
+    if (!module) {
+      this.c.error(source, `モジュール '${stringValue(source)}' またはそれに対応する型宣言が見つかりません。`);
+      return;
+    }
     const moduleName = `'"${stringValue(source)}"'`;
     for (const part of named(clause)) {
       if (part.type === 'identifier' && !this.hasDefaultExport(module))
@@ -437,7 +446,11 @@ export class Namespaces {
 
   checkReExport(clause: TreeNode | undefined, source: TreeNode): void {
     const module = this.moduleNamed(stringValue(source));
-    if (!module || !clause) return;
+    if (!module) {
+      this.c.error(source, `モジュール '${stringValue(source)}' またはそれに対応する型宣言が見つかりません。`);
+      return;
+    }
+    if (!clause) return;
     this.checkNamedImports(clause, module, `'"${stringValue(source)}"'`);
   }
 

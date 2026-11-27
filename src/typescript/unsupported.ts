@@ -67,10 +67,18 @@ function isTypePositionImport(node: TreeNode): boolean {
 function unsupportedForm(node: TreeNode): string | undefined {
   if (node.type === 'meta_property' && node.text.replaceAll(/\s/g, '') === 'import.meta') return 'import.meta';
   if (node.type !== 'import_statement' && node.type !== 'export_statement') return undefined;
+  if (isInAmbientDeclaration(node)) return undefined;
   const source = node.childForFieldName('source') ?? node.namedChildren.at(-1)?.childForFieldName('source');
   // An export without `from` loads no other module.
   if (node.type === 'export_statement' && !source) return undefined;
   const module = source?.text.slice(1, -1) ?? '';
   if (importableModules.has(module)) return undefined;
   return `モジュール '${module}' の ${node.type === 'import_statement' ? 'import' : 'export'}`;
+}
+
+function isInAmbientDeclaration(node: TreeNode): boolean {
+  for (let current = node.parent; current; current = current.parent) {
+    if (current.type === 'ambient_declaration') return true;
+  }
+  return false;
 }

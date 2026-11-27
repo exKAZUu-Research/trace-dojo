@@ -362,12 +362,12 @@ function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode 
   if (node.parent?.childForFieldName('name')?.id === node.id) return undefined;
   const symbol = binder.lookupValue(node, nameOf(node));
   const namespace = namespaceOfReference(node, symbol, binder);
-  if (namespace) return memberReference(node, namespace, nameOf(node));
+  if (namespace) return unboundMemberReference(node, namespace, nameOf(node));
   if (symbol?.valueKind === 'import' && symbol.importTarget && !symbol.importTarget.typeOnly) {
     const declaration = symbol.valueDeclarations[0];
     if (declaration?.type === 'import_statement' && symbol.importTarget.name !== '*') {
       const receiver = contextOf(binder).importReceiverFor(declaration, symbol.importTarget.module);
-      return liveImportReference(node, receiver, symbol.importTarget.name);
+      return unboundMemberReference(node, receiver, symbol.importTarget.name);
     }
   }
   // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
@@ -383,7 +383,7 @@ function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode 
   return undefined;
 }
 
-function liveImportReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
+function unboundMemberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
   const reference = memberReference(position, objectName, memberName);
   reference.isUnboundCall = true;
   return reference;

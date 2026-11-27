@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { memberName } from './declarations';
-import { hasToken, named } from './syntax';
+import { hasToken, isConstructorName, named } from './syntax';
 import { errorType, permissiveAnyType } from './types';
 
 const invalidTypeMemberModifiers = new Set(['override_modifier', 'accessibility_modifier', 'static']);
@@ -35,7 +35,10 @@ export function checkOverrideModifiers(c: Checker, node: TreeNode, members: Tree
   for (const member of [...members, ...parameters]) {
     const modifier = named(member).find((child) => child.type === 'override_modifier');
     if (!modifier) continue;
-    if (member.id === ctor?.id) {
+    if (
+      (member.type === 'method_definition' || member.type === 'method_signature') &&
+      isConstructorName(member.childForFieldName('name'))
+    ) {
       c.error(modifier, "'override' 修飾子は、コンストラクターの宣言には付けられません。");
       continue;
     }
@@ -47,6 +50,11 @@ export function checkOverrideModifiers(c: Checker, node: TreeNode, members: Tree
       continue;
     }
     const name = memberName(c, member);
+    const nameNode = member.childForFieldName('name') ?? member.childForFieldName('pattern');
+    if (name === undefined && nameNode?.type === 'computed_property_name') {
+      c.error(member, "名前が動的であるため、このメンバーに 'override' 修飾子を指定することはできません。");
+      continue;
+    }
     const isStatic = hasToken(member, 'static');
     const base = isStatic ? c.classes.baseStaticType(node) : c.classes.baseInstanceType(node);
     if (name === undefined || !base || base === errorType || base === permissiveAnyType || c.propertyOf(base, name))

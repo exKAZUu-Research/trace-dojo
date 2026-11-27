@@ -72,6 +72,7 @@ const explicitlyTypedKinds = new Set(['class', 'function', 'namespace', 'enum'])
 /** The declarations of a namespace's exports whose type tsc takes as declared explicitly. */
 const explicitlyTypedDeclarations = new Set([
   'function_declaration',
+  'function_signature',
   'generator_function_declaration',
   'class_declaration',
   'abstract_class_declaration',
@@ -648,7 +649,11 @@ export class Calls {
     const expression = skipParentheses(node);
     switch (expression.type) {
       case 'identifier': {
-        const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
+        const raw = this.c.scopeOf(expression).lookupValue(expression.text);
+        const symbol =
+          raw && (raw.valueKind === 'import' || raw.valueKind === 'importAlias')
+            ? this.c.namespaces.imported(raw, 'value')
+            : raw;
         if (!symbol) return undefined;
         const declaration = symbol.valueDeclaration;
         if (explicitlyTypedKinds.has(symbol.valueKind ?? '') || declaration?.childForFieldName('type'))

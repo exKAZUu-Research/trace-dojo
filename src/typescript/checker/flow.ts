@@ -257,14 +257,16 @@ export class Flow {
         const object = expression.childForFieldName('object');
         const property = expression.childForFieldName('property');
         if (!object || !property) return undefined;
+        const memberName = this.c.classes.propertyKey(expression, property);
+        if (this.isEnumMemberAccess(object, memberName)) return undefined;
         const base = this.referenceKey(object);
-        return base ? propertyReferenceKey(base, this.c.classes.propertyKey(expression, property)) : undefined;
+        return base ? propertyReferenceKey(base, memberName) : undefined;
       }
       case 'subscript_expression': {
         const object = expression.childForFieldName('object');
         const index = expression.childForFieldName('index');
         const base = object && index ? this.referenceKey(object) : undefined;
-        return base && index ? this.elementReferenceKey(base, index) : undefined;
+        return object && base && index ? this.elementReferenceKey(object, base, index) : undefined;
       }
       default: {
         return undefined;
@@ -274,7 +276,8 @@ export class Flow {
 
   private variableReferenceKey(expression: TreeNode): string | undefined {
     const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
-    return symbol && !this.c.isGlobalUndefined(expression) ? `s${symbol.id}` : undefined;
+    if (!symbol || symbol.valueKind === 'enumMember' || this.c.isGlobalUndefined(expression)) return undefined;
+    return `s${symbol.id}`;
   }
 
   /**
@@ -282,12 +285,20 @@ export class Flow {
    * TypeScript's `isMatchingReference` lets narrow while the variable cannot change. `%` sets it apart from a property
    * name, which `propertyReferenceKey` escapes it in.
    */
-  private elementReferenceKey(base: string, index: TreeNode): string | undefined {
+  private elementReferenceKey(object: TreeNode, base: string, index: TreeNode): string | undefined {
     const name = this.constantIndexName(index);
-    if (name !== undefined) return propertyReferenceKey(base, name);
+    if (name !== undefined) return this.isEnumMemberAccess(object, name) ? undefined : propertyReferenceKey(base, name);
     if (index.type !== 'identifier' || !isUnchangedVariable(this.c, index)) return undefined;
     const indexKey = this.referenceKey(index);
     return indexKey ? `${base}.%${indexKey}` : undefined;
+  }
+
+  private isEnumMemberAccess(object: TreeNode, memberName: string): boolean {
+    const symbol = this.c.namespaces.qualifiedValueSymbol(object);
+    if (symbol) return symbol.valueKind === 'enum' && Boolean(symbol.enumMembers?.values.has(memberName));
+    const objectType = this.c.silently(() => this.c.expressions.check(object));
+    const property = this.c.propertyOf(this.c.relations.removeNullish(objectType), memberName);
+    return property?.declaration?.parent?.type === 'enum_body';
   }
 
   /** Narrows the reference `node` to `narrow` of its current type. */

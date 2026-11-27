@@ -18,7 +18,7 @@ import {
 import { FlowState, isUnit, type State } from './flow';
 import type { FunctionContext } from './functions';
 import { baseIndexMismatch, checkDuplicateIndexSignatures, checkIndexConformance } from './indexConformance';
-import type { Scope, Sym } from './scopes';
+import { canonicalIdentifier, type Scope, type Sym } from './scopes';
 import {
   hasToken,
   isAmbientModuleBody,
@@ -230,8 +230,9 @@ export class StatementChecker {
     for (const specifier of named(clause)) {
       const name = specifier.childForFieldName('name');
       const scope = name && this.c.scopeOf(name);
-      if (name && !scope?.lookupValue(name.text) && !scope?.lookupType(name.text))
-        this.c.error(name, `名前 ${name.text} が見つかりません。`);
+      const localName = name && decodedExportSpecifier(name);
+      if (name && localName && !scope?.lookupValue(localName) && !scope?.lookupType(localName))
+        this.c.error(name, `名前 ${localName} が見つかりません。`);
     }
   }
 
@@ -1244,16 +1245,38 @@ const valueDeclarationTypes = new Set([
   'abstract_class_declaration',
 ]);
 
+const defaultMergeableTypes = new Set([
+  'interface_declaration',
+  'class_declaration',
+  'abstract_class_declaration',
+  'function_declaration',
+  'generator_function_declaration',
+]);
+
 function duplicateExportMessage(
   own: { name: string; site: TreeNode; declaration?: TreeNode },
   others: { name: string; site: TreeNode; declaration?: TreeNode }[]
 ): string | undefined {
-  if (others.length === 0 || (own.declaration && others.every((other) => other.declaration))) return undefined;
+  if (others.length === 0) return undefined;
+  if (own.name === 'default') {
+    return canMergeDefaultExports([own, ...others])
+      ? undefined
+      : 'モジュールに複数の既定のエクスポートを含めることはできません。';
+  }
+  if (own.declaration && others.every((other) => other.declaration)) return undefined;
   if (own.declaration && !valueDeclarationTypes.has(own.declaration.type)) return undefined;
-  if (own.name === 'default') return 'モジュールに複数の既定のエクスポートを含めることはできません。';
   return own.declaration || others.some((other) => other.declaration)
     ? `エクスポートされた変数 '${own.name}' を再宣言することはできません。`
     : `識別子 '${own.name}' が重複しています。`;
+}
+
+function canMergeDefaultExports(entries: { declaration?: TreeNode }[]): boolean {
+  let valueCount = 0;
+  for (const { declaration } of entries) {
+    if (!declaration || !defaultMergeableTypes.has(declaration.type)) return false;
+    if (declaration.type !== 'interface_declaration') valueCount++;
+  }
+  return valueCount <= 1;
 }
 
 export function globalAugmentationPlacementMessage(node: TreeNode): string {
@@ -1296,14 +1319,23 @@ function isInAmbientContext(node: TreeNode): boolean {
  * overload signature exports nothing of its own: its implementation exports the name.
  */
 function exportedNames(node: TreeNode): { name: string; site: TreeNode; declaration?: TreeNode }[] {
-  const declaration = node.childForFieldName('declaration');
+  const declaration = node.childForFieldName('declaration') ?? undefined;
   if (node.childForFieldName('source') || declaration?.type === 'function_signature') return [];
   if (node.children.some((child) => child?.type === 'default'))
-    return [{ name: 'default', site: node.childForFieldName('value') ?? declaration ?? node }];
-  if (declaration) return declaredNames(declaration).map((name) => ({ name: name.text, site: name, declaration }));
+    return [{ name: 'default', site: node.childForFieldName('value') ?? declaration ?? node, declaration }];
+  if (declaration)
+    return declaredNames(declaration).map((name) => ({
+      name: canonicalIdentifier(name.text, name),
+      site: name,
+      declaration,
+    }));
   const clause = named(node).find((child) => child.type === 'export_clause');
   return (clause ? named(clause) : []).flatMap((specifier) => {
     const exported = specifier.childForFieldName('alias') ?? specifier.childForFieldName('name');
-    return exported ? [{ name: exported.text, site: exported }] : [];
+    return exported ? [{ name: decodedExportSpecifier(exported), site: exported }] : [];
   });
+}
+
+function decodedExportSpecifier(node: TreeNode): string {
+  return node.type === 'string' ? stringValue(node) : canonicalIdentifier(node.text, node);
 }
