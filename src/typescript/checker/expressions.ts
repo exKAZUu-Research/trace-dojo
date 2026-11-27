@@ -268,7 +268,12 @@ export class ExpressionChecker {
       const classNode = container.parent?.parent;
       if (classNode) return this.c.classes.valueTypeOf(this.c.classes.classInfoOfNode(classNode));
     }
-    if (container && isFunctionWithOwnThis(container) && container.type !== 'method_definition') {
+    if (
+      container &&
+      isFunctionWithOwnThis(container) &&
+      container.type !== 'method_definition' &&
+      container.type !== 'class_static_block'
+    ) {
       const name = container.childForFieldName('name');
       return name && container.type.endsWith('function_declaration')
         ? this.checkReferenceSilently(name)
