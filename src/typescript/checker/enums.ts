@@ -96,6 +96,12 @@ export class Enums {
     return (symbol && memberName !== undefined && this.infoOf(symbol)?.members.get(memberName)?.type) || numberType;
   }
 
+  /** Resolves an identifier or import/import-alias symbol to its target enum symbol when it names an enum. */
+  resolvedEnumSymbol(symbol: Sym | undefined): Sym | undefined {
+    const resolved = this.unaliasedValue(symbol);
+    return resolved?.valueKind === 'enum' ? resolved : undefined;
+  }
+
   /** A `const enum` has no object to use as a value, only members to read, which TypeScript compiles to their values. */
   checkConstEnumUse(node: TreeNode, symbol: Sym): void {
     if (!isConstEnum(symbol)) return;

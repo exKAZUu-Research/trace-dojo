@@ -479,7 +479,8 @@ export class ExpressionChecker {
   private queryIdentifier(node: TreeNode): Type {
     const symbol = this.c.scopeOf(node).lookupValue(node.text);
     if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, node.text);
-    if (symbol.valueKind === 'enum') this.c.enums.checkConstEnumUse(node, symbol);
+    const enumSymbol = this.c.enums.resolvedEnumSymbol(symbol);
+    if (enumSymbol) this.c.enums.checkConstEnumUse(node, enumSymbol);
     return this.reportUnavailableValue(node, symbol)
       ? errorType
       : this.variableReferenceType(node, symbol, undefined, true);
@@ -499,7 +500,8 @@ export class ExpressionChecker {
     if (symbol === this.c.libraryBinder.moduleScope.lookupValue('require') && !isDirectOrWrappedRequireCallee(node))
       return this.reportRequireValue(node);
     this.checkUsedBeforeDeclaration(node, symbol);
-    if (symbol.valueKind === 'enum') this.c.enums.checkConstEnumUse(node, symbol);
+    const enumSymbol = this.c.enums.resolvedEnumSymbol(symbol);
+    if (enumSymbol) this.c.enums.checkConstEnumUse(node, enumSymbol);
     if (symbol.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, symbol)) return errorType;
     const aliased = symbol.valueKind === 'importAlias' ? this.c.namespaces.imported(symbol, 'value') : undefined;
     if (aliased?.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, aliased, name)) return errorType;

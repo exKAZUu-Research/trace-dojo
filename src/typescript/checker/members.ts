@@ -321,6 +321,7 @@ export class MemberChecker {
     if (!isWrite || assignmentKind(node) === 'compound')
       this.c.classDeclarations.checkFieldRead(node, objectNode, propertyNode, property);
     this.c.expressions.expandos.checkAssignedBefore(node, propertyNode, property);
+    if (property.enumSymbol) this.c.enums.checkConstEnumUse(node, property.enumSymbol);
     return this.checkPropertyAvailability(propertyNode, objectType, property);
   }
 
@@ -590,6 +591,7 @@ export class MemberChecker {
     }
     if (!this.checkPropertyAvailability(access.indexNode, objectType, property)) return errorType;
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
+    if (property.enumSymbol) this.c.enums.checkConstEnumUse(access.node, property.enumSymbol);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
     return propertyAccessType(property, access.write ? 'write' : 'read');
   }

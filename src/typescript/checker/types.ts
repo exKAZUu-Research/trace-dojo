@@ -3,6 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
 import type { Checker } from './checker';
+import type { Sym } from './scopes';
 
 /** A TypeScript type, as the checker represents it. */
 export type Type = (
@@ -116,6 +117,8 @@ export interface Property {
   getterOnly?: boolean;
   setterOnly?: boolean;
   isAbstract?: boolean;
+  /** The enum symbol a namespace or module export stands for, so member and index reads enforce const-enum rules. */
+  enumSymbol?: Sym;
 }
 
 export interface Parameter {

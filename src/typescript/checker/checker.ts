@@ -1150,6 +1150,7 @@ export class Checker {
       exactOptionalType: true,
       readonly: existing.readonly && property.readonly,
       getterOnly: existing.getterOnly === true && property.getterOnly === true,
+      enumSymbol: existing.enumSymbol ?? property.enumSymbol,
       type: () => intersectionOf([propertyAccessType(existing), propertyAccessType(property)], this),
       writeType: hasWriteType
         ? () => intersectionOf([propertyAccessType(existing, 'write'), propertyAccessType(property, 'write')], this)
