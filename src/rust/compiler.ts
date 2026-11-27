@@ -251,24 +251,7 @@ export class Compiler {
       return tail ? tail(frame) : UNIT_VALUE;
     };
     if (!clearsLocals || declared.length === 0) return run;
-    return (frame) => {
-      const mark = frame.runtime.liveGuards.length;
-      let result: Value | undefined;
-      try {
-        result = run(frame);
-        return result;
-      } catch (error) {
-        // The block's variables go as the panic unwinds, which poisons a lock one of them holds.
-        if (error instanceof RustPanic) frame.runtime.unwinding = true;
-        // A `break` value's temporaries go before the variables, as a tail's do.
-        if (error instanceof ControlSignal) result = error.value;
-        throw error;
-      } finally {
-        // The temporaries of the block's tail go before its variables (edition 2024).
-        frame.runtime.releaseGuards(frame, mark, result);
-        frame.endScope(declared);
-      }
-    };
+    return scoped(run, declared);
   }
 
   /** The slots of a block's variables, and of the temporaries a `let` that binds none extends, in order. */
@@ -1029,6 +1012,27 @@ function readRef(c: Compiler, expr: ExprOf<'ref'>): Eval {
  * A raw pointer made of a reference: to the place a borrow written there borrows (so it reads what the place holds
  * later), or else to the place a `&mut` is, or to the value a shared reference refers to.
  */
+/** Runs a block whose variables go when it ends, after the temporaries of its tail (edition 2024). */
+function scoped(run: Eval, declared: number[]): Eval {
+  return (frame) => {
+    const mark = frame.runtime.liveGuards.length;
+    let result: Value | undefined;
+    try {
+      result = run(frame);
+      return result;
+    } catch (error) {
+      // The block's variables go as the panic unwinds, which poisons a lock one of them holds.
+      if (error instanceof RustPanic) frame.runtime.unwinding = true;
+      // A `break` value's temporaries go before the variables, as a tail's do.
+      if (error instanceof ControlSignal) result = error.value;
+      throw error;
+    } finally {
+      frame.runtime.releaseGuards(frame, mark, result);
+      frame.endScope(declared);
+    }
+  };
+}
+
 function rawPointer(c: Compiler, expr: Expr, read: Eval): Eval {
   if (expr.kind === 'ref' && !expr.raw) {
     const place = c.place(expr.operand);
