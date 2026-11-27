@@ -1822,8 +1822,6 @@ pub mod path {
         pub fn to_str(&self) -> Option<&str>;
         pub fn display(&self) -> &str;
         pub fn join<P: AsPath>(&self, path: P) -> PathBuf;
-        pub fn file_name(&self) -> Option<&str>;
-        pub fn extension(&self) -> Option<&str>;
         pub fn to_path_buf(&self) -> PathBuf;
     }
     impl PathBuf {

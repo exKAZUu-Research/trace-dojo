@@ -245,12 +245,6 @@ function joinPath(base: string, part: string): string {
   return base.endsWith('/') ? `${base}${part}` : `${base}/${part}`;
 }
 
-/** The last component of a path, skipping `.` components after the first as `Path::components` does. */
-function fileName(path: string): string | undefined {
-  const name = path.split('/').findLast((part, index) => part !== '' && (part !== '.' || index === 0));
-  return name === undefined || name === '..' || name === '.' ? undefined : name;
-}
-
 function options(value: Value): OpenOptionsValue {
   return deref(value) as unknown as OpenOptionsValue;
 }
@@ -370,12 +364,6 @@ define({
   'Path::to_str': ([self], ctx) => some(ctx, pathOf(self)),
   'Path::display': ([self]) => pathOf(self),
   'Path::join': ([self, part]) => joinPath(pathOf(self), pathOf(part)),
-  'Path::file_name': ([self], ctx) => option(ctx, fileName(pathOf(self))),
-  'Path::extension': ([self], ctx) => {
-    const name = fileName(pathOf(self));
-    const dot = name?.lastIndexOf('.') ?? -1;
-    return option(ctx, name && dot > 0 ? name.slice(dot + 1) : undefined);
-  },
   'Path::to_path_buf': ([self]) => pathOf(self),
   'PathBuf::new': () => '',
   'PathBuf::from': ([s]) => pathOf(s),
@@ -409,12 +397,6 @@ function invalidOptions(options: OpenOptionsValue): string | undefined {
     return 'creating or truncating a file requires write or append access';
   }
   return undefined;
-}
-
-function option(ctx: NativeContext, value: Value | undefined): Value {
-  return value === undefined
-    ? new EnumValue(ctx.interp.program.adtDef('Option'), 0, [])
-    : new EnumValue(ctx.interp.program.adtDef('Option'), 1, [value]);
 }
 
 /** Writes text to the file a stream writes to, for `write!` and `Write::write_all` on a file. */
