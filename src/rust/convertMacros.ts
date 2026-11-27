@@ -106,13 +106,23 @@ export abstract class MacroConverter extends PatternConverter {
       (root) =>
         root.namedChildren.flatMap((child) => {
           if (isComment(child)) return [];
-          if (child.type === 'expression_statement' || child.type === 'let_declaration') {
+          if (
+            (child.type === 'expression_statement' && macroInvocationOf(child) === undefined) ||
+            child.type === 'let_declaration'
+          ) {
             syntaxError(this.span(node), 'このマクロは項目になりません（関数の外では、項目に展開してください）。');
           }
-          const item = this.item(child);
-          return item ? [item] : [];
+          return this.itemsOf(child);
         })
     );
+  }
+
+  /** The items a node declares: one, none, or the items a macro invocation expands to. */
+  protected itemsOf(node: Node): Item[] {
+    const invocation = node.type === 'expression_statement' ? macroInvocationOf(node) : node;
+    if (invocation?.type === 'macro_invocation' && this.isUserMacro(invocation)) return this.userMacroItems(invocation);
+    const item = this.item(node);
+    return item ? [item] : [];
   }
 
   /** A user macro in a type's place. */
@@ -551,4 +561,10 @@ function tokenText(tokens: Node[]): string {
   };
   for (const token of tokens) visit(token);
   return text;
+}
+
+/** The macro invocation an expression statement consists of, if it does. */
+function macroInvocationOf(statement: Node): Node | undefined {
+  const inner = statement.namedChildren.find((child) => !isComment(child));
+  return inner?.type === 'macro_invocation' ? inner : undefined;
 }

@@ -53,15 +53,6 @@ export class Converter extends ExpressionConverter {
     return { items };
   }
 
-  /** The items a node declares: one, none, or the items a macro invocation expands to. */
-  private itemsOf(node: Node): Item[] {
-    const invocation =
-      node.type === 'expression_statement' ? node.namedChildren.find((child) => !isComment(child)) : node;
-    if (invocation?.type === 'macro_invocation' && this.isUserMacro(invocation)) return this.userMacroItems(invocation);
-    const item = this.item(node);
-    return item ? [item] : [];
-  }
-
   // -------------------------------------------------------------------------------------------------------------------
   // Items
 
