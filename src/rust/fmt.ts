@@ -398,11 +398,8 @@ export class Formatter {
       case 'Mutex':
       case 'RwLock': {
         const cell = v as CellBox;
-        // A lock held where std's `Debug` cannot take it shows no data (std quotes it for `Mutex` alone).
-        const locked = def.builtin === 'Mutex' ? cell.borrows !== 0 : cell.borrows < 0;
-        const data: DebugPart = locked
-          ? (_inner, sink) => emit(def.builtin === 'Mutex' ? '"<locked>"' : '<locked>', sink)
-          : (inner, sink) => this.debug(cell.value, t.args[0], spec, inner, sink);
+        const data: DebugPart =
+          lockedText(def.builtin, cell) ?? ((inner, sink) => this.debug(cell.value, t.args[0], spec, inner, sink));
         return structText(
           def.builtin,
           [
@@ -735,6 +732,12 @@ function escapeChar(char: string, isChar: boolean): string {
 }
 
 /** The `Display` of the standard library's error types, or undefined for another type. */
+/** What a lock's `Debug` shows for its data while held where std cannot take it (quoted for `Mutex` alone). */
+function lockedText(builtin: string, cell: CellBox): DebugPart | undefined {
+  if (builtin === 'Mutex') return cell.borrows === 0 ? undefined : textPart('"<locked>"');
+  return cell.borrows < 0 ? textPart('<locked>') : undefined;
+}
+
 /** A part of a `Debug` text that is fixed text. */
 function textPart(text: string): DebugPart {
   return (_inner, sink) => emit(text, sink);

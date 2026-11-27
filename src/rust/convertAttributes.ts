@@ -202,21 +202,23 @@ export class AttributeReader {
     if (head?.type !== 'identifier') syntaxError(span, '#[cfg] の条件の書き方に誤りがあります。');
     const name = head.text;
     if (TARGET_OPTIONS.has(name)) unavailable(span, `OS や CPU によって変わる条件（cfg(${name})）`);
-    if (second?.type === 'token_tree') {
-      const parts = splitTopLevel(cfgTokens(second));
-      if (name === 'not') {
-        if (parts.length !== 1) syntaxError(span, 'cfg の not には、条件を1つ書いてください。');
-        return !this.condition(parts[0], span);
-      }
-      if (name === 'all') return parts.every((part) => this.condition(part, span));
-      if (name === 'any') return parts.some((part) => this.condition(part, span));
-      return syntaxError(span, `cfg の条件 ${name}(...) はありません。`);
-    }
+    if (second?.type === 'token_tree') return this.combined(name, splitTopLevel(cfgTokens(second)), span);
     if (second?.type === '=') {
       if (third?.type !== 'string_literal') syntaxError(span, 'cfg の条件の値は文字列で書いてください。');
       return false;
     }
     return name === 'debug_assertions';
+  }
+
+  /** `not(...)`, `all(...)`, or `any(...)` of predicates. */
+  private combined(name: string, parts: Node[][], span: Span): boolean {
+    if (name === 'not') {
+      if (parts.length !== 1) syntaxError(span, 'cfg の not には、条件を1つ書いてください。');
+      return !this.condition(parts[0], span);
+    }
+    if (name === 'all') return parts.every((part) => this.condition(part, span));
+    if (name === 'any') return parts.some((part) => this.condition(part, span));
+    return syntaxError(span, `cfg の条件 ${name}(...) はありません。`);
   }
 }
 
