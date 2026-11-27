@@ -32,6 +32,7 @@ import { trackCollectionStorage } from './turtleTypes';
 import { constArgValue, type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
   AccessorPlace,
+  type CellBox,
   CellPlace,
   DynValue,
   EnumValue,
@@ -606,6 +607,11 @@ export class Compiler {
         };
       }
       case 'dyn': {
+        if (coercion.throughCell) {
+          const type = runtimeType(coercion.type);
+          const shared = coercion.shared === true;
+          return (frame) => cellDyn(derefAll(read(frame)), type(frame), shared);
+        }
         return dynCoercion(read, runtimeType(coercion.type), coercion.mutable, coercion.shared === true);
       }
       case 'intoIter': {
@@ -985,7 +991,21 @@ function readLiteral(_c: Compiler, expr: ExprOf<'bool' | 'char' | 'str'>): Eval 
  * shows as the trait object.
  */
 function sharedDyn(box: SharedBox, type: Type): SharedBox {
-  return new Proxy(box, {
+  return dynView(box, type);
+}
+
+/** A `Box`, `Rc` or `Arc` of a cell (a `RefCell`, a lock) made one of a cell of a trait object: the same cell. */
+function cellDyn(pointer: Value, type: Type, shared: boolean): Value {
+  const view = (cell: CellBox): CellBox => dynView(cell, type);
+  if (!shared) return view(pointer as CellBox);
+  return new Proxy(pointer as SharedBox, {
+    get: (target, key) => (key === 'value' ? view(target.value as CellBox) : Reflect.get(target, key)),
+  });
+}
+
+/** An object whose `value` shows as a trait object of `type`, the object itself holding the concrete value. */
+function dynView<T extends { value: Value }>(object: T, type: Type): T {
+  return new Proxy(object, {
     get: (target, key) => (key === 'value' ? new DynValue(type, target.value) : Reflect.get(target, key)),
     set: (target, key, value) =>
       Reflect.set(target, key, key === 'value' && value instanceof DynValue ? value.value : value),

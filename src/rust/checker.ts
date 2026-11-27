@@ -107,6 +107,9 @@ interface CoverageCheck {
 }
 
 /** Checks the types of every function body, recording what the compiler needs in {@link Annotations}. */
+/** The cells an `Rc`, `Arc` or `Box` of a trait object may hold it in. */
+const CELLS = new Set(['RefCell', 'Mutex', 'RwLock']);
+
 export class Checker {
   private readonly adtStorage: AdtStorage;
   readonly annotations = new Annotations();
@@ -1122,14 +1125,29 @@ export class Checker {
     }
     const shared = a.def.builtin === 'Rc' || a.def.builtin === 'Arc';
     if (a.def.builtin !== 'Box' && !shared) return false;
-    const target = shallow(t.args[0]);
-    const array = normalize(shallow(a.args[0]));
+    let target = shallow(t.args[0]);
+    let array = normalize(shallow(a.args[0]));
     if (!shared && target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem))
       return true;
+    // A `RefCell` or `Mutex` in between unsizes too (`Rc<RefCell<dyn Trait>>`).
+    const cell =
+      target.kind === 'adt' && array.kind === 'adt' && target.def === array.def && CELLS.has(target.def.builtin ?? '');
+    if (cell) {
+      target = shallow((target as Type & { kind: 'adt' }).args[0]);
+      array = normalize(shallow((array as Type & { kind: 'adt' }).args[0]));
+    }
     if (target.kind !== 'dyn') return false;
-    this.requireDyn(a.args[0], target, expr.span);
-    if (array.kind !== 'dyn')
-      this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false, trait: target.trait, shared });
+    this.requireDyn(array, target, expr.span);
+    if (array.kind !== 'dyn') {
+      this.setCoercion(expr, {
+        kind: 'dyn',
+        type: array,
+        mutable: false,
+        trait: target.trait,
+        shared,
+        throughCell: cell,
+      });
+    }
     return true;
   }
 
@@ -1226,7 +1244,20 @@ export class Checker {
         compileError(span, `${typeToString(arg)} にトレイト ${bound.trait.name} が実装されていません。`);
       }
     }
-    const unsizedArgs = ['Box', 'Rc', 'Arc', 'Weak', 'RefCell', 'Ref', 'RefMut', 'Cell', 'ConstPtr', 'MutPtr'];
+    const unsizedArgs = [
+      'Box',
+      'Rc',
+      'Arc',
+      'Weak',
+      'Mutex',
+      'RwLock',
+      'RefCell',
+      'Ref',
+      'RefMut',
+      'Cell',
+      'ConstPtr',
+      'MutPtr',
+    ];
     if (!unsizedArgs.includes(t.def.builtin ?? '')) {
       for (const [index, arg] of t.args.entries()) {
         if (t.def.params[index]?.maybeUnsized) continue;
