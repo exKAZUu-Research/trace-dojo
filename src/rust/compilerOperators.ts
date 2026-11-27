@@ -95,13 +95,14 @@ export function compileBinary(c: Compiler, expr: ExprOf<'binary'>): Eval {
   }
   const overloaded = compileOverloaded(c, expr, () => [c.value(expr.left), c.value(expr.right)]);
   if (overloaded) return overloaded;
-  const left = c.read(expr.left);
-  const right = c.read(expr.right);
-  const leftCoerced = c.annotations.coercions.get(expr.left) ? c.value(expr.left) : left;
-  const rightCoerced = c.annotations.coercions.get(expr.right) ? c.value(expr.right) : right;
-  if (['==', '!=', '<', '<=', '>', '>='].includes(op)) return comparison(expr, leftCoerced, rightCoerced);
-  const arithmeticLeft = op === '+' && isStringType(expr.left.ty!) ? c.value(expr.left) : left;
-  return arithmetic(expr, arithmeticLeft, right, rightCoerced);
+  // Each operand compiles once: as its value where a coercion applies or `String +` takes it, otherwise as it is.
+  const comparing = ['==', '!=', '<', '<=', '>', '>='].includes(op);
+  const leftAsValue =
+    c.annotations.coercions.has(expr.left) || (!comparing && op === '+' && isStringType(expr.left.ty!));
+  const left = leftAsValue ? c.value(expr.left) : c.read(expr.left);
+  const right = c.annotations.coercions.has(expr.right) ? c.value(expr.right) : c.read(expr.right);
+  if (comparing) return comparison(expr, left, right);
+  return arithmetic(expr, left, right);
 }
 
 function comparison(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
@@ -121,7 +122,7 @@ function comparison(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
     });
 }
 
-function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerced: Eval): Eval {
+function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
   const { op } = expr;
   const type = numericType(expr.ty!);
   const span = expr.span;
@@ -139,7 +140,7 @@ function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerce
     return (frame) => {
       const target = left(frame);
       const text = textOf(target);
-      const addition = textOf(rightCoerced(frame));
+      const addition = textOf(right(frame));
       frame.runtime.allocateString(text.length + addition.length, addition.length);
       return concatStrings(target, addition);
     };
