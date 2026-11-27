@@ -261,6 +261,7 @@ export interface MemberExpression extends Span {
   object: Expression | SuperReference;
   property: PropertyName;
   optional: boolean;
+  inferredName?: string;
 }
 
 /** How V8 names what a pattern takes apart, in the TypeError a value it cannot take apart throws. */

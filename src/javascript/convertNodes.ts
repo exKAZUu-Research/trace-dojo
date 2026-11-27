@@ -150,8 +150,10 @@ function printedCallee(node: Node): string | undefined {
 
 /** Gives an anonymous function or class the name it is assigned to, as `name` shows. */
 export function nameAnonymous(value: Expression, name: string): void {
-  if (value.kind === 'functionExpression' && value.fn.name === '') value.fn.name = name;
-  if (value.kind === 'classExpression' && value.cls.name === '') value.cls.name = name;
+  let inner = value;
+  while (inner.kind === 'parenthesized') inner = inner.expression;
+  if (inner.kind === 'functionExpression' && inner.fn.name === '') inner.fn.name = name;
+  if (inner.kind === 'classExpression' && inner.cls.name === '') inner.cls.name = name;
 }
 
 export function keyName(key: PropertyName): string {

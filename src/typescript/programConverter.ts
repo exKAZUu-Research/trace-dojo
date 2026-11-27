@@ -14,7 +14,13 @@ import { nameOf, type Node, rowOf, unsupported, unwrapParentheses } from '../jav
 import { decodeStringLiteral } from '../javascript/literals';
 import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
 import { countedEnumValue, type EnumsInScope, type FoldedValue, foldEnumValue, memberKeyName } from './enumFolding';
-import { IMPORTED_MODULE, isHiddenCallFunction, isUnsteppedStatement, PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
+import {
+  IMPORTED_MODULE,
+  inferredTargetNameOf,
+  isHiddenCallFunction,
+  isUnsteppedStatement,
+  PARAMETER_PROPERTY_ASSIGNMENT,
+} from './jsView';
 
 const functionScopeTypes = new Set([
   'function_declaration',
@@ -66,7 +72,14 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     this.statementConverters.enum_declaration = (node) => this.enumDeclaration(node);
     for (const type of ['member_expression', 'subscript_expression'] as const) {
       const convertMember = this.expressionConverters[type];
-      this.expressionConverters[type] = (node) => this.inlinedConstEnumMember(node) ?? convertMember(node);
+      this.expressionConverters[type] = (node) => {
+        const inlined = this.inlinedConstEnumMember(node);
+        if (inlined) return inlined;
+        const member = convertMember(node);
+        const inferredName = inferredTargetNameOf(node);
+        if (member.kind === 'member' && inferredName !== undefined) member.inferredName = inferredName;
+        return member;
+      };
     }
     this.expressionConverters[IMPORTED_MODULE] = (node) => ({
       kind: 'importedModule',

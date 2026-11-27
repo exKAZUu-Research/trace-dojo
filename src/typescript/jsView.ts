@@ -30,6 +30,8 @@ class ViewNode implements Node {
   isUnstepped = false;
   /** Whether a synthesized function (such as a namespace body wrapper) hides its call frame from trace `callLines`. */
   hidesCallRow = false;
+  /** The variable name a synthesized namespace-export member target stands for, for anonymous function/class naming. */
+  inferredName?: string;
   readonly startIndex: number;
   readonly endIndex: number;
   readonly startPosition: { row: number; column: number };
@@ -289,6 +291,12 @@ function leaf(node: TreeNode, type: string, text = node.text, isNamed = true): V
 /** `E.A` for a member `A` of the enum `E`, which the identifier `A` in an initializer of `E` stands for. */
 function enumMemberReference(node: TreeNode, member: TreeNode): ViewNode {
   return memberReference(node, member.parent?.parent?.childForFieldName('name')?.text ?? '', nameOf(node));
+}
+
+function exportedMemberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
+  const reference = memberReference(position, objectName, memberName);
+  reference.inferredName = memberName;
+  return reference;
 }
 
 function memberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
@@ -565,7 +573,7 @@ function exportedVariables(declaration: TreeNode, namespaceName: string, binder:
     if (!declarator || !name || !value) return [];
     const target =
       name.type === 'identifier'
-        ? memberReference(name, namespaceName, nameOf(name))
+        ? exportedMemberReference(name, namespaceName, nameOf(name))
         : exportedPattern(name, namespaceName, binder);
     return [assignment(declarator, target, view(value, binder))];
   });
@@ -589,15 +597,16 @@ function exportedPattern(node: TreeNode, namespaceName: string, binder: Binder):
       { node: token(node, ':'), fieldName: undefined },
       { node: value, fieldName: 'value' },
     ]);
+  if (node.type === 'identifier') return exportedMemberReference(node, namespaceName, nameOf(node));
   if (node.type === 'shorthand_property_identifier_pattern')
-    return property(node, memberReference(node, namespaceName, nameOf(node)));
+    return property(node, exportedMemberReference(node, namespaceName, nameOf(node)));
   const left = node.childForFieldName('left');
   const right = node.childForFieldName('right');
   if (node.type === 'object_assignment_pattern' && left?.type === 'shorthand_property_identifier_pattern' && right)
     return property(
       left,
       assemble(node, 'assignment_pattern', [
-        { node: memberReference(left, namespaceName, nameOf(left)), fieldName: 'left' },
+        { node: exportedMemberReference(left, namespaceName, nameOf(left)), fieldName: 'left' },
         { node: token(node, '='), fieldName: undefined },
         { node: view(right, binder), fieldName: 'right' },
       ])
@@ -747,6 +756,11 @@ export function isUnsteppedStatement(node: Node): boolean {
 /** Whether the view synthesized a wrapper function whose invocation is not a source-level call in traces. */
 export function isHiddenCallFunction(node: Node): boolean {
   return node instanceof ViewNode && node.hidesCallRow;
+}
+
+/** The declared variable name a synthesized namespace-export member target stands for, if any. */
+export function inferredTargetNameOf(node: Node): string | undefined {
+  return node instanceof ViewNode ? node.inferredName : undefined;
 }
 
 function namespacePathOf(name: TreeNode): TreeNode[] {
