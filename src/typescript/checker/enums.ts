@@ -199,7 +199,19 @@ export class Enums {
       });
       return member.type;
     });
-    const union = types.length > 0 ? unionOf(types) : numberType;
+    const union =
+      types.length > 0
+        ? unionOf(types)
+        : enumLiteralType(undefined, {
+            enumId: symbol.id,
+            enumName: symbol.name,
+            name: '',
+            computed: true,
+            isConst,
+            empty: true,
+            members: () => summary,
+            base: () => info.type,
+          });
     if (union.kind === 'union') union.enumName = symbol.name;
     info.type = union;
     info.members = members;

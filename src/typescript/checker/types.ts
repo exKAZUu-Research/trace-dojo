@@ -60,6 +60,7 @@ export interface EnumMemberInfo {
   name: string;
   computed: boolean;
   isConst?: boolean;
+  empty?: boolean;
   members: () => ReadonlyMap<string, { value: string | number | undefined; computed: boolean }>;
   base: () => Type;
 }

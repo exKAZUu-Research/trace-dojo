@@ -73,6 +73,13 @@ export function structurallyIdentical(c: Checker, source: Type, target: Type): b
 function literalsIdentical(source: LiteralType, target: LiteralType): boolean {
   if (!source.enumMember && !target.enumMember) return source.value === target.value;
   if (!source.enumMember || !target.enumMember) return false;
+  if (source.enumMember.empty || target.enumMember.empty) {
+    return (
+      Boolean(source.enumMember.empty && target.enumMember.empty) &&
+      enumDeclarationsRelated(source.enumMember, target.enumMember) &&
+      enumDeclarationsRelated(target.enumMember, source.enumMember)
+    );
+  }
   if (source.enumMember.computed || target.enumMember.computed) return regularOf(source) === regularOf(target);
   return (
     source.value === target.value &&

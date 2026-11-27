@@ -1503,6 +1503,7 @@ export function enumDeclarationsRelated(source: EnumMemberInfo, target: EnumMemb
   if (source.enumId === target.enumId) return true;
   if (source.isConst || target.isConst || source.enumName !== target.enumName) return false;
   const [sourceMembers, targetMembers] = [source.members(), target.members()];
+  if ((sourceMembers.size === 0) !== (targetMembers.size === 0)) return false;
   for (const [name, member] of sourceMembers) {
     const other = targetMembers.get(name);
     if (!other || !enumMemberSummariesCompatible(member, other)) return false;
@@ -1533,7 +1534,7 @@ function literalRelated(s: LiteralType, t: LiteralType, relation: Relation): boo
 
 function enumMembersRelated(s: LiteralType, t: LiteralType): boolean {
   const [from, to] = [s.enumMember as EnumMemberInfo, t.enumMember as EnumMemberInfo];
-  if (from.computed !== to.computed) return false;
+  if (Boolean(from.empty) !== Boolean(to.empty) || from.computed !== to.computed) return false;
   if (from.computed) return from.name === to.name && enumDeclarationsRelated(from, to);
   return s.value === t.value && enumDeclarationsRelated(from, to);
 }
