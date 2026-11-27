@@ -443,10 +443,13 @@ export class Compiler {
     const elseBlock = stmt.else && this.compileBlock(stmt.else, true);
     const run: Eval = (frame) => {
       frame.runtime.spend();
+      const mark = frame.runtime.liveGuards.length;
       const { value, place } = input(frame);
       const matched = frame.runtime.withRoots([place], () => matcher(frame, value, () => place));
       if (matched) takeAll?.(frame);
-      else elseBlock?.(frame);
+      // The temporaries the place is read through (a `RefCell`'s guard) go at the end of the statement, or before `else`.
+      frame.runtime.releaseGuards(frame, mark);
+      if (!matched) elseBlock?.(frame);
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, false);
