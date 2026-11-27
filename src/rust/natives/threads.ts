@@ -375,13 +375,13 @@ define({
     return message === undefined ? err(ctx, new StructValue(recvErrorDef(ctx), [])) : ok(ctx, message);
   },
   'Receiver<_>::try_recv': ([receiver], ctx) => {
-    const { queue } = deref(receiver) as ChannelEnd;
+    const channel = deref(receiver) as ChannelEnd;
+    const { queue } = channel;
     if (queue.length > 0) return ok(ctx, queue.shift());
-    // A message may come from a thread waiting to run; with none, nothing will send.
-    const def = tryRecvErrorDef(ctx);
-    const pending = scheduler(ctx).runNext(ctx);
-    if (pending && queue.length > 0) return ok(ctx, queue.shift());
-    return err(ctx, new EnumValue(def, pending ? 0 : 1, []));
+    // A message may come from a thread waiting to run.
+    if (scheduler(ctx).runNext(ctx) && queue.length > 0) return ok(ctx, queue.shift());
+    // `Empty` while a `Sender` is left, `Disconnected` once every one has gone.
+    return err(ctx, new EnumValue(tryRecvErrorDef(ctx), channel.senders > 0 ? 0 : 1, []));
   },
   'Receiver<_>::iter': ([receiver], ctx) => receiverIter(ctx, receiver, true),
   'Receiver<_>::try_iter': ([receiver], ctx) => receiverIter(ctx, receiver, false),
