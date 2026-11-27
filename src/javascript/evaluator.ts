@@ -597,6 +597,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       scope: classScope,
       homeObject: prototype,
       isDerived: cls.superClass !== undefined,
+      privateMembers: [],
       fields: [],
       traceBinding: binding,
     };
@@ -729,14 +730,14 @@ export class Evaluator extends SuspendableStatementEvaluator {
       const name = member.key.kind === 'private' ? member.key.name : key;
       if (member.kind === 'field') {
         const { field, property } = member.isAutoAccessor
-          ? this.autoAccessor(member, key, target, classScope, behavior.fields)
+          ? this.autoAccessor(member, key, target, classScope, behavior.privateMembers)
           : { field: this.classField(member, key, name, target, classScope), property: undefined };
         if (member.isStatic) staticInitializers.push(() => this.initializeField(fn, field, member.isTraceConstant));
         else behavior.fields.push(field);
         definitions.push({ member, key, name, isPrivate, field, property, decorators });
         continue;
       }
-      const property = this.defineMethod(member, key, target, classScope, behavior.fields);
+      const property = this.defineMethod(member, key, target, classScope, behavior.privateMembers);
       definitions.push({ member, key, name, isPrivate, property, decorators });
     }
     return staticInitializers;
@@ -768,7 +769,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     key: Key,
     target: JsObject,
     classScope: Scope,
-    instanceFields: ClassField[]
+    privateMembers: { key: string; property: Property }[]
   ): { field: ClassField; property: Property } {
     const { runtime } = this;
     const storage = `${String(key)}\0accessor\0${nextPrivateId++}\0field`;
@@ -797,7 +798,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       target.properties.set(key, property);
       return { field, property };
     }
-    return { field, property: this.installPrivateMember(key, property, member.isStatic, target, instanceFields) };
+    return { field, property: this.installPrivateMember(key, property, member.isStatic, target, privateMembers) };
   }
 
   private fieldInitializer(
@@ -830,7 +831,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     key: Key,
     target: JsObject,
     classScope: Scope,
-    instanceFields: ClassField[]
+    privateMembers: { key: string; property: Property }[]
   ): Property | undefined {
     const { runtime } = this;
     const method = this.createFunction(member.fn, classScope, target);
@@ -841,7 +842,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         privateMethodProperty(member.kind, method),
         member.isStatic,
         target,
-        instanceFields
+        privateMembers
       );
     if (member.kind === 'method')
       runtime.defineProperty(target, key, {
@@ -856,24 +857,17 @@ export class Evaluator extends SuspendableStatementEvaluator {
 
   /**
    * Installs a private method or accessor: a static one on the class, merged with its other half, and an instance one
-   * on each instance, before its fields. Returns the property the member's decorators replace or wrap.
+   * on each instance, before initializers and fields run. Returns the property the member's decorators replace or wrap.
    */
   private installPrivateMember(
     key: Key,
     property: Property,
     isStatic: boolean,
     target: JsObject,
-    instanceFields: ClassField[]
+    privateMembers: { key: string; property: Property }[]
   ): Property {
     if (!isStatic) {
-      instanceFields.unshift({
-        key,
-        isPrivate: true,
-        initialize: undefined,
-        stepRow: undefined,
-        onlyCalls: false,
-        property,
-      });
+      privateMembers.push({ key: privateIdentity(key), property });
       return property;
     }
     mergePrivate(this.runtime, target, privateIdentity(key), property);
@@ -888,32 +882,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
       newTarget: undefined,
       isStrict: true,
     });
-  }
-
-  private initializeField(target: JsObject, field: ClassField, traceConstant?: true): void {
-    const { runtime } = this;
-    if (field.property) {
-      mergePrivate(runtime, target, privateIdentity(field.key), field.property);
-      return;
-    }
-    this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
-      const value = initialValue(runtime, target, field);
-      const hiddenTraceConstant = value !== undefined && value !== null ? traceConstant : undefined;
-      if (field.isPrivate)
-        runtime.definePrivate(target, privateIdentity(field.key), {
-          value,
-          writable: true,
-          enumerable: false,
-          configurable: false,
-          hiddenTraceConstant,
-        });
-      else {
-        runtime.createDataProperty(target, field.key, value);
-        const property = hiddenTraceConstant && target.properties.get(field.key);
-        if (property && !isAccessor(property)) property.hiddenTraceConstant = true;
-      }
-    });
-    runInitializers(runtime, field.initializers ?? [], target);
   }
 
   // code-gauge-allow functionNcss -- Parameter binding, field initialization, and constructor returns share the constructing frame and its cleanup.
@@ -937,10 +905,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     this.constructorScopes.set(functionFrame, scope);
     runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false, fn);
     try {
-      if (thisValue !== UNINITIALIZED) {
-        runInitializers(runtime, behavior.initializers ?? [], thisValue);
-        for (const field of behavior.fields) this.initializeField(thisValue, field);
-      }
+      if (thisValue !== UNINITIALIZED) this.initializeInstance(thisValue, behavior);
       let result: Value;
       const { ctor } = behavior;
       if (ctor) {
@@ -1001,11 +966,39 @@ export class Evaluator extends SuspendableStatementEvaluator {
     frame.thisValue = constructed;
     const { behavior } = constructing;
     if (behavior.kind === 'class') {
-      runInitializers(runtime, behavior.initializers ?? [], constructed);
-      for (const field of behavior.fields) this.initializeField(constructed, field);
+      this.initializeInstance(constructed, behavior);
       if (!skipsAfterSuper) this.initializeAfterSuper(behavior.node.afterSuper, frame);
     }
     return constructed;
+  }
+
+  private initializeInstance(target: JsObject, behavior: ClassBehavior): void {
+    const { runtime } = this;
+    for (const member of behavior.privateMembers) mergePrivate(runtime, target, member.key, member.property);
+    runInitializers(runtime, behavior.initializers ?? [], target);
+    for (const field of behavior.fields) this.initializeField(target, field);
+  }
+
+  private initializeField(target: JsObject, field: ClassField, traceConstant?: true): void {
+    const { runtime } = this;
+    this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
+      const value = initialValue(runtime, target, field);
+      const hiddenTraceConstant = value !== undefined && value !== null ? traceConstant : undefined;
+      if (field.isPrivate)
+        runtime.definePrivate(target, privateIdentity(field.key), {
+          value,
+          writable: true,
+          enumerable: false,
+          configurable: false,
+          hiddenTraceConstant,
+        });
+      else {
+        runtime.createDataProperty(target, field.key, value);
+        const property = hiddenTraceConstant && target.properties.get(field.key);
+        if (property && !isAccessor(property)) property.hiddenTraceConstant = true;
+      }
+    });
+    runInitializers(runtime, field.initializers ?? [], target);
   }
 
   private initializeAfterSuper(statements: Statement[] | undefined, frame: FunctionFrame): void {

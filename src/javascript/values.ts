@@ -162,6 +162,8 @@ export type FunctionBehavior =
       scope: Scope;
       homeObject: JsObject;
       isDerived: boolean;
+      /** Private methods and accessors, installed on each instance before initializers and fields run. */
+      privateMembers: { key: string; property: Property }[];
       /** Instance fields, initialized when the constructor starts (or `super()` returns). */
       fields: ClassField[];
       traceBinding?: Binding;
@@ -176,8 +178,6 @@ export interface ClassField {
   stepRow: number | undefined;
   /** Whether the initializer only creates objects, so its step is left to their constructors' steps when they record. */
   onlyCalls: boolean;
-  /** A private method or accessor, which every instance gets before its fields. */
-  property?: Property;
   /** The functions decorators added that the initial value passes through, in the order they were added. */
   transforms?: Value[];
   /** The functions the field's decorators added with `addInitializer`, run once the field is defined. */

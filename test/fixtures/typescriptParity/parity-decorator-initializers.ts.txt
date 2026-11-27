@@ -24,3 +24,13 @@ class Service {
 }
 console.log(Service.self === Service, registry.join(','), (Service.instance as any).logged);
 console.log((Service.make() as any).logged, new Service().same(), (new Service() as any).logged);
+function callOnInit(_t: unknown, c: ClassMethodDecoratorContext) {
+  c.addInitializer(function (this: any) { this.check(); });
+}
+class Base {}
+class Guarded extends Base {
+  #label() { return 'ready'; }
+  get #code() { return 7; }
+  @callOnInit check() { console.log(this.#label(), this.#code); }
+}
+new Guarded();
