@@ -105,10 +105,19 @@ export function typeArgsFor(
   what: string
 ): Type[] {
   if (!written) return params.map(() => freshVar());
-  if (written.length !== params.length) {
+  // Parameters left out at the end take their defaults (`M::<3>` of `struct M<const N: usize, const B: bool = true>`).
+  const defaulted = written.length < params.length && params.slice(written.length).every((param) => param.defaultType);
+  if (written.length !== params.length && !defaulted) {
     compileError(span, `${what} の型引数の数が合いません（${params.length} 個です）。`);
   }
-  return written.map((arg, index) => c.lowerType(argumentFor(arg, params[index])));
+  const args = written.map((arg, index) => c.lowerType(argumentFor(arg, params[index])));
+  const subst = new Map(params.slice(0, args.length).map((param, index) => [param, args[index]]));
+  for (const param of params.slice(args.length)) {
+    const type = substitute(param.defaultType as Type, subst);
+    subst.set(param, type);
+    args.push(type);
+  }
+  return args;
 }
 
 export function applyWrittenFnArgs(

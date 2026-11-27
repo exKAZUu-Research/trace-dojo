@@ -888,6 +888,25 @@ export class Checker {
     return type;
   }
 
+  /**
+   * A variable that stands for an associated type a bound sets (`T::O` in `T: Tr<O = _>`), settled by that bound once
+   * its type is known, as rustc normalizes an argument's expected type before it coerces the argument.
+   */
+  settledAssoc(type: Type): Type {
+    const variable = shallow(type);
+    if (variable.kind !== 'var') return type;
+    const index = this.obligations.findIndex(
+      ({ type: owner, ref }) =>
+        [...(ref.assoc?.values() ?? [])].some((set) => shallow(set) === variable) && !hasVars(resolve(owner))
+    );
+    if (index === -1) return type;
+    const [obligation] = this.obligations.splice(index, 1);
+    const answer = this.solver.implements(obligation.type, obligation.ref);
+    if (answer === 'no') this.unsatisfied(obligation);
+    if (answer === 'unknown') this.obligations.push(obligation);
+    return type;
+  }
+
   require(type: Type, ref: TraitRef, span: Span): void {
     const answer = this.solver.implements(type, ref);
     if (answer === 'no') this.unsatisfied({ type, ref, span });

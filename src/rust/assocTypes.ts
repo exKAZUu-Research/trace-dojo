@@ -143,7 +143,8 @@ export function assocItem(param: TypeParam, scope: TypeScope): Type | undefined 
   const paramType: Type = { kind: 'param', param };
   const bound = iterationBound(paramType);
   if (!bound) return undefined;
-  if (!bound.item && scope.assocParams) {
+  // Only a bound the parameter itself has (not a supertrait's, made afresh) is checked at a call, which settles it.
+  if (!bound.item && scope.assocParams && param.bounds.includes(bound)) {
     const item = newTypeParam(`${param.name}::Item`);
     scope.assocParams.push(item);
     bound.item = { kind: 'param', param: item };

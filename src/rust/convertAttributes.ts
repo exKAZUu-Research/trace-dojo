@@ -2,6 +2,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { Attributes, Span } from './ast';
 import { isComment, syntaxError, unavailable } from './convertSyntax';
+import { INT_NAMES, type IntName } from './types';
 
 const DERIVABLE = new Set(['Debug', 'Clone', 'Copy', 'PartialEq', 'Eq', 'PartialOrd', 'Ord', 'Hash', 'Default']);
 
@@ -18,7 +19,6 @@ const INERT_ATTRIBUTES = new Set([
   'doc',
   'deprecated',
   'non_exhaustive',
-  'repr',
   'automatically_derived',
   'used',
   'macro_export',
@@ -145,6 +145,11 @@ export class AttributeReader {
       }
       case 'track_caller': {
         attrs.trackCaller = true;
+        return true;
+      }
+      case 'repr': {
+        const int = args?.namedChildren.find((child) => INT_NAMES.includes(child.text as IntName))?.text;
+        if (int) attrs.repr = int as IntName;
         return true;
       }
       case 'unsafe': {

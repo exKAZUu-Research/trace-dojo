@@ -30,8 +30,12 @@ export function checkVariantNames(item: EnumItem): void {
   }
 }
 
-/** The variants' discriminants: each written one a constant `isize` expression, the others one more than the last. */
+/**
+ * The variants' discriminants: each written one a constant expression of the enum's `#[repr]` integer type (`isize`
+ * without one), the others one more than the last.
+ */
 export function discriminants(item: EnumItem, scope: TypeScope): bigint[] {
+  const repr = item.attrs.repr ?? 'isize';
   let next = 0n;
   const seen = new Set<bigint>();
   const hasPayloadVariant = item.variants.some((variant) => variant.shape !== 'unit');
@@ -40,12 +44,12 @@ export function discriminants(item: EnumItem, scope: TypeScope): bigint[] {
       compileError(variant.discriminant.span, 'フィールドを持つ列挙型の列挙子には、値を書けません。');
     }
     const written = variant.discriminant;
-    const discriminant = written ? constInteger(written, scope, intType('isize')) : next;
+    const discriminant = written ? constInteger(written, scope, intType(repr)) : next;
     if (discriminant === undefined) {
-      return compileError(written!.span, '列挙子の値には、isize の定数の式を書いてください。');
+      return compileError(written!.span, `列挙子の値には、${repr} の定数の式を書いてください。`);
     }
-    if (discriminant < intMin('isize') || discriminant > intMax('isize')) {
-      compileError(variant.discriminant?.span ?? variant.span, `列挙子 ${variant.name} の値が isize の範囲外です。`);
+    if (discriminant < intMin(repr) || discriminant > intMax(repr)) {
+      compileError(variant.discriminant?.span ?? variant.span, `列挙子 ${variant.name} の値が ${repr} の範囲外です。`);
     }
     if (seen.has(discriminant)) {
       compileError(item.span, `列挙型 ${item.name} の判別値 ${discriminant} が2回使われています。`);

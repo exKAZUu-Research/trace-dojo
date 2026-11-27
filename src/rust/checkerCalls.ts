@@ -189,6 +189,9 @@ function checkArgs(
   const enclosing = c.iterableArgument;
   for (const index of order) {
     c.iterableArgument = iterable[index] ? args[index] : undefined;
+    // A parameter whose type is an associated type (`o: T::O`) learns it from the bounds that the arguments before
+    // it settled, so the argument coerces to it (`&String` to `&str`) as rustc normalizes it first.
+    if (inputTypes[index].kind === 'var') inputTypes[index] = shallow(c.settledAssoc(params[index]));
     checkArgument(c, args[index], params[index], inputTypes[index], expectations[index]);
   }
   c.iterableArgument = enclosing;

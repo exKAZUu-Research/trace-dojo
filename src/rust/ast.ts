@@ -1,4 +1,4 @@
-import type { SelfWrapper, Type } from './types';
+import type { IntName, SelfWrapper, Type } from './types';
 
 /** A 0-based source row and the 1-based scalar column used by `dbg!`. Panic locations use the display column. */
 export interface Span {
@@ -41,6 +41,8 @@ export interface Attributes {
   isDefault?: boolean;
   /** `#[track_caller]`, which reports a panic at the caller's location. */
   trackCaller?: boolean;
+  /** The integer type `#[repr(u8)]` and the like give an enum's discriminants. */
+  repr?: IntName;
 }
 
 export interface Generics {
