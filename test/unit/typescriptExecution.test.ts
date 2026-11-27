@@ -1024,8 +1024,10 @@ for (const fn of [
   () => fs.writeFileSync('/dev/stdout', 'bad', { flag: 'nonsense' }),
   () => fs.readFileSync('/missing/../dev/stdin', 'utf8'),
   () => fs.writeFileSync('part/../dev/stdout', 'bad'),
+  () => fs.writeFileSync(1, 'bad', { get flag(): string { throw new Error('stop1'); } }),
+  () => fs.appendFileSync(2, 'bad', { get flag(): string { throw new Error('stop2'); } }),
 ]) {
-  try { fn(); results.push('ok'); } catch (e: any) { results.push(e.code ?? e.name); }
+  try { fn(); results.push('ok'); } catch (e: any) { results.push(e.code ?? (e.name === 'Error' ? e.message : e.name)); }
 }
 fs.writeFileSync(1, 'fd1:', { flag: 'nonsense' });
 fs.appendFileSync(2, 'fd2', { flag: 'nonsense' });
@@ -1034,7 +1036,7 @@ console.log(fs.existsSync('/missing/../dev/stdin'), fs.existsSync('part/../dev/s
     )
   ).toMatchObject({
     kind: 'executed',
-    stdout: 'fd1:false false EEXIST,EEXIST,TypeError,ENOENT,ENOTDIR\n',
+    stdout: 'fd1:false false EEXIST,EEXIST,TypeError,ENOENT,ENOTDIR,stop1,stop2\n',
     stderr: 'fd2',
     uncaughtException: undefined,
   });

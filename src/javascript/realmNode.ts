@@ -292,6 +292,7 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
   const encoding = encodingOption(runtime, options);
   if (runtime.unavailableMember && encoding !== undefined && encoding !== null && !isUtf8(encoding))
     rejectUnavailableMember(`${method} の encoding: ${encodingLabel(runtime, encoding)}`, runtime.currentRow);
+  const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
   const isStreamDescriptor = file === 1 || file === 2;
   const path = isStreamDescriptor ? '' : requirePath(runtime, file);
   const bytes = UTF8_ENCODER.encode(requireText(runtime, content, 'data'));
@@ -299,7 +300,6 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
     runtime.io[file === 1 ? 'stdout' : 'stderr'].write(UTF8_DECODER.decode(bytes));
     return;
   }
-  const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
   const parsed = parseOpenFlag(runtime, flag === undefined ? defaultFlag : runtime.toString(flag));
   if (writeStandardStreamPath(runtime, path, bytes, parsed)) return;
   const handle = withErrors(runtime, 'open', path, () => runtime.io.files.open(path, parsed.mode));
