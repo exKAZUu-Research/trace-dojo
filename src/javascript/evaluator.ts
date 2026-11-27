@@ -644,32 +644,38 @@ export class Evaluator extends SuspendableStatementEvaluator {
     const { runtime } = this;
     const classScope = behavior.scope;
     const definitions: MemberDefinition[] = [];
-    const staticInitializers = this.inScope(classScope, () =>
-      this.defineMembers(cls, fn, prototype, behavior, { definitions, isDecorated: classDecorators !== undefined })
-    );
-    const name = cls.name || (typeof inferredName === 'string' ? inferredName : '');
-    const decorated =
-      classDecorators &&
-      decorateClassDefinition(runtime, {
-        cls: fn,
-        name,
-        members: definitions,
-        classDecorators,
-        classDecoratorRows: (cls.decorators ?? []).map((decorator) => decorator.row),
-      });
-    if (decorated) {
-      runtime.frame.temporaries.push(decorated.cls, ...decorated.staticInitializers, ...decorated.classInitializers);
-      if (decorated.instanceInitializers.length > 0) behavior.initializers = decorated.instanceInitializers;
-      if (decorated.staticInitializers.length > 0)
-        staticInitializers.unshift(() => runInitializers(runtime, decorated.staticInitializers, fn));
+    try {
+      const staticInitializers = this.inScope(classScope, () =>
+        this.defineMembers(cls, fn, prototype, behavior, { definitions, isDecorated: classDecorators !== undefined })
+      );
+      const name = cls.name || (typeof inferredName === 'string' ? inferredName : '');
+      const decorated =
+        classDecorators &&
+        decorateClassDefinition(runtime, {
+          cls: fn,
+          name,
+          members: definitions,
+          classDecorators,
+          classDecoratorRows: (cls.decorators ?? []).map((decorator) => decorator.row),
+        });
+      if (decorated) {
+        runtime.frame.temporaries.push(decorated.cls);
+        behavior.pendingInitializerQueues = [decorated.staticInitializers, decorated.classInitializers];
+        if (decorated.instanceInitializers.length > 0) behavior.initializers = decorated.instanceInitializers;
+        if (decorated.staticInitializers.length > 0)
+          staticInitializers.unshift(() => runInitializers(runtime, decorated.staticInitializers, fn, true));
+      }
+      // As tsx compiles a decorated class, its own name inside its body stays the class the decorators were given.
+      if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
+      this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
+      if (!decorated) return fn;
+      if (binding && decorated.cls !== fn) binding.declaredClass = fn;
+      runInitializers(runtime, decorated.classInitializers, decorated.cls, true);
+      return decorated.cls;
+    } finally {
+      behavior.pendingStaticFields = undefined;
+      behavior.pendingInitializerQueues = undefined;
     }
-    // As tsx compiles a decorated class, its own name inside its body stays the class the decorators were given.
-    if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
-    this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
-    if (!decorated) return fn;
-    if (binding && decorated.cls !== fn) binding.declaredClass = fn;
-    runInitializers(runtime, decorated.classInitializers, decorated.cls);
-    return decorated.cls;
   }
 
   private initializeStaticMembers(
@@ -756,13 +762,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
           : { field: this.classField(member, key, name, target, classScope), property: undefined };
         if (member.isStatic) {
           (behavior.pendingStaticFields ??= new Set()).add(field);
-          staticInitializers.push(() => {
-            try {
-              this.initializeField(fn, field, member.isTraceConstant);
-            } finally {
-              behavior.pendingStaticFields?.delete(field);
-            }
-          });
+          staticInitializers.push(() => this.initializeStaticField(fn, behavior, field, member.isTraceConstant));
         } else behavior.fields.push(field);
         definitions.push({ member, key, name, isPrivate, field, property, decorators });
         continue;
@@ -1009,10 +1009,23 @@ export class Evaluator extends SuspendableStatementEvaluator {
     for (const field of behavior.fields) this.initializeField(target, field);
   }
 
-  private initializeField(target: JsObject, field: ClassField, traceConstant?: true): void {
+  private initializeStaticField(
+    fn: JsFunction,
+    behavior: Extract<ClassBehavior, { kind: 'class' }>,
+    field: ClassField,
+    traceConstant?: true
+  ): void {
+    try {
+      this.initializeField(fn, field, traceConstant, true);
+    } finally {
+      behavior.pendingStaticFields?.delete(field);
+    }
+  }
+
+  private initializeField(target: JsObject, field: ClassField, traceConstant?: true, consume = false): void {
     const { runtime } = this;
     this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
-      const value = initialValue(runtime, target, field);
+      const value = initialValue(runtime, target, field, consume);
       const hiddenTraceConstant = value !== undefined && value !== null ? traceConstant : undefined;
       if (field.isPrivate)
         runtime.definePrivate(target, privateIdentity(field.key), {
@@ -1028,7 +1041,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         if (property && !isAccessor(property)) property.hiddenTraceConstant = true;
       }
     });
-    runInitializers(runtime, field.initializers ?? [], target);
+    runInitializers(runtime, field.initializers ?? [], target, consume);
   }
 
   private initializeAfterSuper(statements: Statement[] | undefined, frame: FunctionFrame): void {
@@ -1040,9 +1053,14 @@ export class Evaluator extends SuspendableStatementEvaluator {
 }
 
 /** A field's initial value: its initializer's, passed through the functions its decorators added. */
-function initialValue(runtime: Evaluator['runtime'], target: JsObject, field: ClassField): Value {
+function initialValue(runtime: Evaluator['runtime'], target: JsObject, field: ClassField, consume = false): Value {
   let value = field.initialize ? field.initialize(target) : undefined;
-  for (const transform of field.transforms ?? []) value = runtime.call(transform, target, [value]);
+  const { transforms } = field;
+  if (consume) {
+    while (transforms && transforms.length > 0) value = runtime.call(transforms.shift() as Value, target, [value]);
+    return value;
+  }
+  for (const transform of transforms ?? []) value = runtime.call(transform, target, [value]);
   return value;
 }
 

@@ -100,6 +100,7 @@ function pushObjectReferences(
 
 function pushClassReferences(pending: unknown[], behavior: Extract<FunctionBehavior, { kind: 'class' }>): void {
   for (const value of behavior.initializers ?? []) pending.push(value);
+  for (const queue of behavior.pendingInitializerQueues ?? []) for (const value of queue) pending.push(value);
   for (const { property } of behavior.privateMembers) pushProperty(pending, property);
   for (const field of [...behavior.fields, ...(behavior.pendingStaticFields ?? [])]) {
     for (const transform of field.transforms ?? []) pending.push(transform);

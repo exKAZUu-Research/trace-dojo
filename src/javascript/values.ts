@@ -168,6 +168,8 @@ export type FunctionBehavior =
       fields: ClassField[];
       /** Static fields not yet initialized, whose decorator callbacks stay reachable until their initializer finishes. */
       pendingStaticFields?: Set<ClassField>;
+      /** Static-member and class `addInitializer` queues drained during class initialization. */
+      pendingInitializerQueues?: Value[][];
       traceBinding?: Binding;
       /** The functions decorators of the instance members added, run on each instance before its fields. */
       initializers?: Value[];

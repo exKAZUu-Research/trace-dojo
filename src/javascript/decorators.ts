@@ -173,8 +173,12 @@ function defineMetadataProperty(runtime: Runtime, target: JsFunction, symbol: sy
   });
 }
 
-/** Runs the functions decorators added, with `thisValue` as `this`. */
-export function runInitializers(runtime: Runtime, initializers: Value[], thisValue: Value): void {
+/** Runs the functions decorators added, with `thisValue` as `this`, draining one-shot queues when `consume` is set. */
+export function runInitializers(runtime: Runtime, initializers: Value[], thisValue: Value, consume = false): void {
+  if (consume) {
+    while (initializers.length > 0) runtime.call(initializers.shift() as Value, thisValue, []);
+    return;
+  }
   for (const initializer of initializers) runtime.call(initializer, thisValue, []);
 }
 
