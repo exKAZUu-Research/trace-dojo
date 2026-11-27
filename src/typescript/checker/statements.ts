@@ -606,6 +606,10 @@ export class StatementChecker {
   /** The type of a variable from its declaration, computed ahead of its statement when used earlier. */
   declaredVariableType(symbol: Sym, declaration: TreeNode): Type {
     if (declaration.type === 'for_in_statement') return this.loopVariableType(declaration, symbol);
+    if (declaration.type === 'export_statement') {
+      const exportedValue = declaration.childForFieldName('value');
+      return exportedValue ? this.c.expressions.check(exportedValue) : anyType;
+    }
     if (declaration.type !== 'variable_declarator') return anyType;
     const nameNode = declaration.childForFieldName('name') as TreeNode;
     const annotation = this.c.typeNodes.annotationType(declaration.childForFieldName('type'));

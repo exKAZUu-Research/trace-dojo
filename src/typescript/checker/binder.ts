@@ -69,6 +69,7 @@ export class Binder {
   private readonly deferredTypes = new Map<number, Scope>();
   /** The identifiers that name what an assignment changes, to find the variables a program reassigns. */
   private readonly assignedIdentifiers: { identifier: TreeNode; scope: Scope }[] = [];
+  private readonly pendingAmbientDefaults: { node: TreeNode; scope: Scope; exports: Scope }[] = [];
   readonly moduleScope: Scope;
   /** The modules `declare module "m"` declares, by their names. */
   readonly ambientModules = new Map<string, Sym>();
@@ -114,6 +115,9 @@ export class Binder {
     this.moduleScope = options?.rootScope ?? new Scope('module', globalScope, root);
     this.scopes.set(root.id, this.moduleScope);
     this.bindChildren(root, this.moduleScope);
+    for (const { node, scope, exports } of this.pendingAmbientDefaults) {
+      bindAmbientDefaultValueExport(node, scope, exports, (site) => this.scopeOf(site), this.options?.budget);
+    }
     this.markAssignments();
   }
 
@@ -308,7 +312,7 @@ export class Binder {
     const exports = (scope.namespace as Sym).namespaceExports as Scope;
     for (const child of named(body)) {
       if (child.type !== 'export_statement' || child.childForFieldName('source')) continue;
-      if (scope.isAmbient) bindAmbientDefaultValueExport(child, scope, exports);
+      if (scope.isAmbient) this.pendingAmbientDefaults.push({ node: child, scope, exports });
       const stmtTypeOnly = child.children.some((part) => !part.isNamed && part.type === 'type');
       for (const part of named(child)) {
         if (part.type !== 'export_clause') continue;

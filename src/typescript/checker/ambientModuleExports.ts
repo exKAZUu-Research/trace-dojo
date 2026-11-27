@@ -1,11 +1,26 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import type { ExecutionBudget } from '../../interpreter/limits';
+import { isInstantiatedNamespace } from '../namespaceInstantiation';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import { unavailableNodeMember } from './nodeLibrary';
 import { canonicalIdentifier, type MeaningSpace, type Scope, Sym } from './scopes';
 import { named, stringValue } from './syntax';
 import { anyType, errorType, type Type } from './types';
+
+interface DefaultExportSymbols {
+  value?: Sym;
+  type?: Sym;
+  namespace?: Sym;
+}
+
+interface DefaultExportLookup {
+  scope: Scope;
+  exports: Scope;
+  scopeOf: (site: TreeNode) => Scope;
+  budget?: ExecutionBudget;
+}
 
 /** Binds an unnamed `export default class / abstract class / function` inside an ambient module under `'default'`. */
 export function bindAnonymousDefaultDeclaration(
@@ -39,25 +54,192 @@ export function bindAnonymousDefaultDeclaration(
   }
 }
 
-/** Binds `export default Local;` in an ambient body after all declarations in the body have been bound. */
-export function bindAmbientDefaultValueExport(node: TreeNode, scope: Scope, exports: Scope): void {
+/** Binds `export default Target;` in an ambient body after all declarations in the program have been bound. */
+export function bindAmbientDefaultValueExport(
+  node: TreeNode,
+  scope: Scope,
+  exports: Scope,
+  scopeOf: (site: TreeNode) => Scope,
+  budget?: ExecutionBudget
+): void {
   if (!node.children.some((part) => !part.isNamed && part.type === 'default')) return;
   const value = node.childForFieldName('value');
-  if (value?.type !== 'identifier') return;
-  const localName = canonicalIdentifier(value.text, value);
-  const valueSymbol = scope.values.get(localName);
-  if (valueSymbol) exports.exportViaClause('default', valueSymbol, 'value');
-  const typeSymbol = scope.types.get(localName);
-  if (typeSymbol) exports.exportViaClause('default', typeSymbol, 'type');
-  const namespaceSymbol = scope.namespaces.get(localName);
-  if (namespaceSymbol) exports.exportViaClause('default', namespaceSymbol, 'namespace');
-  if (valueSymbol || typeSymbol || namespaceSymbol) {
-    exports.recordClauseExport('default', value, {
-      value: valueSymbol,
-      type: typeSymbol,
-      namespace: namespaceSymbol,
-    });
+  const path = value ? entityNamePath(value) : undefined;
+  if (!value || !path) return;
+  const lookup: DefaultExportLookup = { scope, exports, scopeOf, budget };
+  const resolved =
+    path.length === 1
+      ? resolveSingleDefaultTarget(path[0], lookup)
+      : resolveQualifiedDefaultTarget(node, value, path, lookup);
+  if (resolved.value) exports.exportViaClause('default', resolved.value, 'value');
+  if (resolved.type) exports.exportViaClause('default', resolved.type, 'type');
+  if (resolved.namespace) exports.exportViaClause('default', resolved.namespace, 'namespace');
+  if (resolved.value || resolved.type || resolved.namespace) {
+    exports.recordClauseExport('default', value, resolved);
   }
+}
+
+function resolveSingleDefaultTarget(ident: TreeNode, lookup: DefaultExportLookup): DefaultExportSymbols {
+  const localName = canonicalIdentifier(ident.text, ident);
+  return {
+    value: unaliasInBinder(lookupInBodyOrExports(lookup, localName, 'value'), 'value', lookup),
+    type: unaliasInBinder(lookupInBodyOrExports(lookup, localName, 'type'), 'type', lookup),
+    namespace: unaliasInBinder(lookupInBodyOrExports(lookup, localName, 'namespace'), 'namespace', lookup),
+  };
+}
+
+function resolveQualifiedDefaultTarget(
+  node: TreeNode,
+  valueNode: TreeNode,
+  path: TreeNode[],
+  lookup: DefaultExportLookup
+): DefaultExportSymbols {
+  const container = walkQualifiedDefaultContainers(path, lookup);
+  if (container) return resolveQualifiedFinalMember(container, path.at(-1) as TreeNode, lookup);
+  const rootName = canonicalIdentifier(path[0].text, path[0]);
+  const rootValue = unaliasInBinder(lookupInBodyOrExports(lookup, rootName, 'value'), 'value', lookup);
+  if (!rootValue || rootValue.valueKind === 'namespace' || rootValue.valueKind === 'enum') return {};
+  return { value: syntheticDefaultValueSymbol(node, valueNode, lookup.scope) };
+}
+
+function walkQualifiedDefaultContainers(path: TreeNode[], lookup: DefaultExportLookup): Sym | undefined {
+  const rootName = canonicalIdentifier(path[0].text, path[0]);
+  let current = lookupContainerInBodyOrExports(lookup, rootName);
+  if (!current || !isAddressableContainer(current, path.length === 2)) return undefined;
+  for (let index = 1; index < path.length - 1; index++) {
+    lookup.budget?.spend();
+    if (!current.namespaceExports) return undefined;
+    const partName = canonicalIdentifier(path[index].text, path[index]);
+    current = lookupContainerInExports(current.namespaceExports, partName, lookup);
+    if (!current || !isAddressableContainer(current, index === path.length - 2)) return undefined;
+  }
+  return current;
+}
+
+function lookupContainerInBodyOrExports(lookup: DefaultExportLookup, name: string): Sym | undefined {
+  return (
+    unaliasInBinder(lookupInBodyOrExports(lookup, name, 'namespace'), 'namespace', lookup) ??
+    unaliasInBinder(lookupInBodyOrExports(lookup, name, 'value'), 'value', lookup)
+  );
+}
+
+function lookupContainerInExports(
+  exports: Scope,
+  name: string,
+  lookup: DefaultExportLookup,
+  seen?: Set<number>
+): Sym | undefined {
+  return (
+    unaliasInBinder(exports.namespaces.get(name), 'namespace', lookup, seen) ??
+    unaliasInBinder(exports.values.get(name), 'value', lookup, seen)
+  );
+}
+
+function isAddressableContainer(symbol: Sym, beforeLast: boolean): boolean {
+  if (symbol.valueKind === 'enum' && beforeLast) return true;
+  if (!symbol.namespaceExports) return false;
+  return symbol.valueEntries.some((entry) => entry.kind !== 'namespace') || isInstantiatedNamespace(symbol);
+}
+
+function resolveQualifiedFinalMember(
+  container: Sym,
+  lastNode: TreeNode,
+  lookup: DefaultExportLookup
+): DefaultExportSymbols {
+  const lastName = canonicalIdentifier(lastNode.text, lastNode);
+  if (!container.namespaceExports) {
+    const enumMember = container.valueKind === 'enum' ? container.enumMembers?.values.get(lastName) : undefined;
+    return enumMember ? { value: enumMember, type: enumMember } : {};
+  }
+  const value = unaliasInBinder(container.namespaceExports.values.get(lastName), 'value', lookup);
+  if (!value) {
+    const enumMember = container.valueKind === 'enum' ? container.enumMembers?.values.get(lastName) : undefined;
+    return enumMember ? { value: enumMember, type: enumMember } : {};
+  }
+  if (value.valueKind === 'namespace' && !isInstantiatedNamespace(value)) return {};
+  return {
+    value,
+    type: unaliasInBinder(container.namespaceExports.types.get(lastName), 'type', lookup),
+    namespace: unaliasInBinder(container.namespaceExports.namespaces.get(lastName), 'namespace', lookup),
+  };
+}
+
+function syntheticDefaultValueSymbol(node: TreeNode, valueNode: TreeNode, scope: Scope): Sym {
+  const symbol = new Sym('default', scope);
+  symbol.valueKind = 'const';
+  symbol.valueDeclarations.push(node);
+  symbol.valueEntries.push({ kind: 'const', name: valueNode });
+  return symbol;
+}
+
+function lookupInBodyOrExports(lookup: DefaultExportLookup, name: string, meaning: MeaningSpace): Sym | undefined {
+  return lookup.scope.tableOf(meaning).get(name) ?? lookup.exports.tableOf(meaning).get(name);
+}
+
+function unaliasInBinder(
+  symbol: Sym | undefined,
+  meaning: MeaningSpace,
+  lookup: DefaultExportLookup,
+  seen = new Set<number>()
+): Sym | undefined {
+  if (!symbol) return undefined;
+  const kind =
+    meaning === 'value' ? symbol.valueKind : meaning === 'namespace' ? symbol.namespaceKind : symbol.typeKind;
+  if (kind !== 'importAlias') return symbol;
+  const declaration =
+    symbol.valueDeclarations.find((decl) => decl.type === 'import_alias') ??
+    symbol.typeDeclarations.find((decl) => decl.type === 'import_alias') ??
+    symbol.namespaceDeclarations.find((decl) => decl.type === 'import_alias');
+  const target = declaration ? named(declaration)[1] : undefined;
+  const path = target ? entityNamePath(target) : undefined;
+  if (!declaration || !path || seen.has(declaration.id)) return undefined;
+  seen.add(declaration.id);
+  return resolveBinderEntityPath(path, meaning, lookup, seen);
+}
+
+function resolveBinderEntityPath(
+  path: TreeNode[],
+  meaning: MeaningSpace,
+  lookup: DefaultExportLookup,
+  seen: Set<number>
+): Sym | undefined {
+  const [root, ...rest] = path;
+  const scope = lookup.scopeOf(root);
+  if (rest.length === 0)
+    return unaliasInBinder(lookupScopeMeaning(scope, root.text, meaning, lookup.budget), meaning, lookup, seen);
+  let current =
+    unaliasInBinder(scope.lookupNamespace(root.text, lookup.budget), 'namespace', lookup, seen) ??
+    unaliasInBinder(scope.lookupValue(root.text, lookup.budget), 'value', lookup, seen);
+  for (let index = 0; index < rest.length - 1; index++) {
+    lookup.budget?.spend();
+    current = current?.namespaceExports
+      ? lookupContainerInExports(current.namespaceExports, rest[index].text, lookup, seen)
+      : undefined;
+  }
+  return current ? resolveBinderFinalMember(current, rest.at(-1) as TreeNode, meaning, lookup, seen) : undefined;
+}
+
+function lookupScopeMeaning(
+  scope: Scope,
+  name: string,
+  meaning: MeaningSpace,
+  budget?: ExecutionBudget
+): Sym | undefined {
+  if (meaning === 'value') return scope.lookupValue(name, budget);
+  return meaning === 'namespace' ? scope.lookupNamespace(name, budget) : scope.lookupType(name);
+}
+
+function resolveBinderFinalMember(
+  current: Sym,
+  part: TreeNode,
+  meaning: MeaningSpace,
+  lookup: DefaultExportLookup,
+  seen: Set<number>
+): Sym | undefined {
+  if (current.namespaceExports) {
+    return unaliasInBinder(current.namespaceExports.tableOf(meaning).get(part.text), meaning, lookup, seen);
+  }
+  return meaning === 'value' || meaning === 'type' ? current.enumMembers?.values.get(part.text) : undefined;
 }
 
 /** Checks the target of `export default X` or `export = X` in an ambient context, which may name a value, type, or namespace. */
@@ -74,8 +256,7 @@ export function checkAmbientExportTarget(c: Checker, target: TreeNode): void {
       c.error(ident, `名前 ${ident.text} が見つかりません。`);
     return;
   }
-  const resolved = c.namespaces.resolveEntityPath(path);
-  if (!resolved.symbol && resolved.error) c.error(target, resolved.error);
+  c.expressions.check(target);
 }
 
 function entityNamePath(node: TreeNode): TreeNode[] | undefined {

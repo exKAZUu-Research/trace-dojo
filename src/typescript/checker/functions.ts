@@ -656,21 +656,25 @@ export class FunctionChecker {
   }
 
   /** What a generator's return type says it yields, returns, and receives, or undefined when it is no iterator. */
-  iterationTypesOf(type: Type, isAsync = false): IterationTypes | undefined {
+  iterationTypesOf(type: Type, isAsync = false, directIterator = true): IterationTypes | undefined {
     if (isAnyLike(type)) return anyIterationTypes;
-    if (this.isLibraryGeneratorAnnotation(type, isAsync) && type.kind === 'object') {
+    if (directIterator && this.isLibraryGeneratorAnnotation(type, isAsync) && type.kind === 'object') {
       const [yieldType = unknownType, returnType = anyType, nextType = anyType] = type.typeArguments ?? [];
       return { yieldType, returnType, nextType };
     }
     if (type.kind === 'union') return this.unionIterationTypes(type.types, isAsync);
-    return this.structuralIterationTypes(type, isAsync);
+    return this.structuralIterationTypes(type, isAsync, directIterator);
   }
 
   private unionIterationTypes(members: Type[], isAsync: boolean): IterationTypes | undefined {
     const parts = members
-      .map((member) => this.iterationTypesOf(member, isAsync))
+      .map((member) => this.iterationTypesOf(member, isAsync, false))
       .filter((part): part is IterationTypes => part !== undefined);
     if (parts.length === 0) return undefined;
+    return this.combineIterationTypes(parts);
+  }
+
+  private combineIterationTypes(parts: IterationTypes[]): IterationTypes {
     return {
       yieldType: unionOf(parts.map((part) => part.yieldType)),
       returnType: unionOf(parts.map((part) => part.returnType)),
@@ -681,18 +685,35 @@ export class FunctionChecker {
     };
   }
 
-  private structuralIterationTypes(type: Type, isAsync: boolean): IterationTypes | undefined {
+  private structuralIterationTypes(type: Type, isAsync: boolean, directIterator = true): IterationTypes | undefined {
     if (type.kind !== 'object' && type.kind !== 'intersection') return undefined;
     const symbolKey = this.c.typeNodes.librarySymbolKey(isAsync ? 'asyncIterator' : 'iterator');
     const iteratorMethod = this.c.propertyOf(type, symbolKey);
-    const iterator = iteratorMethod
-      ? this.c.signaturesOf(propertyAccessType(iteratorMethod), 'call')[0]?.returnType()
-      : type;
-    if (!iterator) return undefined;
+    if (iteratorMethod) {
+      const iterator = this.c.signaturesOf(propertyAccessType(iteratorMethod), 'call')[0]?.returnType();
+      return iterator ? this.iteratorObjectIterationTypes(iterator, isAsync, true) : undefined;
+    }
+    return this.iteratorObjectIterationTypes(type, isAsync, directIterator);
+  }
+
+  private iteratorObjectIterationTypes(
+    rawIterator: Type,
+    isAsync: boolean,
+    directIterator: boolean
+  ): IterationTypes | undefined {
+    const iterator = this.c.apparentType(rawIterator);
+    if (isAnyLike(iterator)) return anyIterationTypes;
+    if (iterator.kind === 'union') {
+      const parts = iterator.types
+        .map((member) => this.iteratorObjectIterationTypes(member, isAsync, false))
+        .filter((part): part is IterationTypes => part !== undefined);
+      return parts.length === iterator.types.length ? this.combineIterationTypes(parts) : undefined;
+    }
+    if (iterator.kind !== 'object' && iterator.kind !== 'intersection') return undefined;
     const nextProperty = this.c.propertyOf(iterator, 'next');
     const nextSignature = nextProperty && this.c.signaturesOf(propertyAccessType(nextProperty), 'call')[0];
     if (!nextSignature) return undefined;
-    const nextType = this.iteratorNextParameterType(nextSignature);
+    const nextType = this.iteratorNextParameterType(nextSignature, directIterator);
     const rawResult = nextSignature.returnType();
     const settled = isAsync ? awaitedType(this.c, rawResult) : rawResult;
     if (isAnyLike(settled)) return { yieldType: anyType, returnType: anyType, nextType };
@@ -711,11 +732,12 @@ export class FunctionChecker {
     };
   }
 
-  iteratorNextParameterType(signature: Signature): Type {
+  iteratorNextParameterType(signature: Signature, directIterator = true): Type {
     const parameter = signature.parameters[0];
     if (!parameter) return unknownType;
     if (!parameter.rest) return parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
-    const isLibrarySignature = signature.declaration !== undefined && this.c.isLibrary(signature.declaration);
+    const isLibrarySignature =
+      directIterator && signature.declaration !== undefined && this.c.isLibrary(signature.declaration);
     const elements = typeMembers(parameter.type).flatMap((member) =>
       this.restFirstArgumentTypes(member, isLibrarySignature)
     );

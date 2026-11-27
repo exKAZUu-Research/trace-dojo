@@ -22,6 +22,7 @@ import {
   anyType,
   emptyStructure,
   errorType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
@@ -707,9 +708,11 @@ export class BindingPatterns {
       elements.push(this.awaitedLibraryAsyncElement(iteratorType, rawElement, method, node, consumer));
     }
     if (node && consumer !== 'yieldStar') {
-      for (const { nextType } of iterations) {
-        if (!this.checkIteratorNextInput(node, nextType, consumer)) break;
-      }
+      const nextType = intersectionOf(
+        iterations.map((iteration) => iteration.nextType),
+        this.c
+      );
+      this.checkIteratorNextInput(node, nextType, consumer);
     }
     return unionOf(elements, true);
   }
@@ -741,14 +744,13 @@ export class BindingPatterns {
     return values.length > 0 ? unionOf(values) : anyType;
   }
 
-  private checkIteratorNextInput(node: TreeNode, nextType: Type, consumer: 'loop' | 'spread' | 'destructure'): boolean {
-    if (isAnyLike(nextType) || this.c.relations.isAssignable(undefinedType, nextType)) return true;
+  private checkIteratorNextInput(node: TreeNode, nextType: Type, consumer: 'loop' | 'spread' | 'destructure'): void {
+    if (isAnyLike(nextType) || this.c.relations.isAssignable(undefinedType, nextType)) return;
     const sender = consumer === 'loop' ? 'for-of' : consumer === 'destructure' ? '配列の非構造化' : '配列展開';
     this.c.error(
       node,
       `反復子の 'next' メソッドは型 '${this.c.print(nextType)}' を予期するため、値を反復処理できませんが、${sender} は常に 'undefined' を送信します。`
     );
-    return false;
   }
 
   /**
@@ -788,20 +790,21 @@ export class BindingPatterns {
   private iteratorResultsList(
     rawIteratorType: Type,
     method: 'iterator' | 'asyncIterator',
-    node?: TreeNode
+    node?: TreeNode,
+    directIterator = true
   ): { iteratorType: Type; nextType: Type; settled: Type | undefined }[] | undefined {
     const iteratorType = this.c.apparentType(rawIteratorType);
     if (isAnyLike(iteratorType)) return [{ iteratorType: anyType, nextType: anyType, settled: anyType }];
     if (iteratorType.kind === 'union') {
       const results: { iteratorType: Type; nextType: Type; settled: Type | undefined }[] = [];
       for (const member of iteratorType.types) {
-        const nested = this.iteratorResultsList(member, method, node);
+        const nested = this.iteratorResultsList(member, method, node, false);
         if (!nested) return undefined;
         results.push(...nested);
       }
       return results;
     }
-    const single = this.singleIteratorResults(iteratorType, method, node);
+    const single = this.singleIteratorResults(iteratorType, method, node, directIterator);
     return single ? [single] : undefined;
   }
 
@@ -809,7 +812,8 @@ export class BindingPatterns {
   private singleIteratorResults(
     iteratorType: Type,
     method: 'iterator' | 'asyncIterator',
-    node?: TreeNode
+    node: TreeNode | undefined,
+    directIterator: boolean
   ): { iteratorType: Type; nextType: Type; settled: Type | undefined } | undefined {
     if (iteratorType.kind !== 'object' && iteratorType.kind !== 'intersection') return undefined;
     const next = this.c.propertyOf(iteratorType, 'next');
@@ -818,9 +822,12 @@ export class BindingPatterns {
       iteratorType.kind === 'object' && this.c.functions.isKnownLibraryIterator(iteratorType, method);
     if (!nextSignature && !isKnownLibrary) return undefined;
     const result = nextSignature?.returnType();
+    const libraryNext = (iteratorType as ObjectType).typeArguments?.[2] ?? unknownType;
     const nextType = nextSignature
-      ? this.c.functions.iteratorNextParameterType(nextSignature)
-      : ((iteratorType as ObjectType).typeArguments?.[2] ?? unknownType);
+      ? this.c.functions.iteratorNextParameterType(nextSignature, directIterator)
+      : directIterator
+        ? libraryNext
+        : unionOf([libraryNext, undefinedType]);
     const site = node ? { node, kind: 'await' as const } : undefined;
     return {
       iteratorType,

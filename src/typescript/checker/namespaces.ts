@@ -329,15 +329,6 @@ export class Namespaces {
     return this.exportEqualsSymbol(module, 'namespace') ?? this.exportEqualsSymbol(module, 'value');
   }
 
-  resolveEntityPath(path: TreeNode[]): { symbol?: Sym; error?: string } {
-    const value = this.resolvePath(path, 'value');
-    if (value.symbol) return value;
-    const namespace = this.resolvePath(path, 'namespace');
-    if (namespace.symbol) return namespace;
-    const type = this.resolvePath(path, 'type');
-    return type.symbol ? type : value;
-  }
-
   /**
    * Whether `import x from "m"` names the whole of a Node module, which has no default export of its own: tsc's default
    * `esModuleInterop` lets a default import stand for a CommonJS module.
