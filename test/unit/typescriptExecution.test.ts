@@ -1015,3 +1015,113 @@ console.log(fs.existsSync('/missing/../dev/stdin'), fs.existsSync('part/../dev/s
     uncaughtException: undefined,
   });
 });
+
+test('enforces variance, thenable, import-query, optional-assertion, ambient-module, namespace-import, enum-key, and computed-this checks', () => {
+  expect(diagnosticsOf('interface Box<in out T> {}\ninterface Outer<out T> { box: Box<T> }')).toEqual([
+    "2: 分散の注釈が示すとおりには、型 'Outer<sub-T>' を型 'Outer<super-T>' に代入できません。",
+  ]);
+  expect(
+    executeProgram(
+      'typescript',
+      'type Consumer<in T> = ((x: T) => void);\nconst f: Consumer<number> = (x) => console.log(x);\nf(1);'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '1\n' });
+
+  expect(diagnosticsOf('async function f(v: { then?: (resolve: (n: number) => void) => void }) { await v; }')).toEqual([
+    "1: 'await' オペランドの型は、有効な Promise であるか、呼び出し可能な 'then' メンバーを含んでいないかのどちらかであることが必要です。",
+  ]);
+  expect(
+    diagnosticsOf(
+      'class Loop { then(resolve: (v: Loop) => void) { resolve(this); } }\nasync function main() { await new Loop(); }'
+    )
+  ).toEqual(["2: 型は、それ自身の 'then' メソッドのフルフィルメント コールバック内で直接または間接的に参照されます。"]);
+
+  expect(
+    diagnosticsOf(
+      "declare module 'custom' { export function id<T>(x: T): T; }\ntype Fn = typeof import('custom').id<string>;\nconst f: Fn = (x) => x;\nconst n: number = f('hello');"
+    )
+  ).toEqual(["4: 型 'string' を型 'number' に代入することはできません。"]);
+  expect(diagnosticsOf("type Bad = typeof import('fs').readFile<string>;")).toEqual([
+    '1: fs.readFile は、この採点環境では使えません。',
+  ]);
+
+  expect(
+    diagnosticsOf(
+      'function f(check: ((x: unknown) => asserts x is string) | undefined, value: unknown) { check?.(value); console.log(value.toUpperCase()); }'
+    )
+  ).toEqual(["1: 'value' の型は 'unknown' です。"]);
+
+  expect(
+    executeProgram(
+      'typescript',
+      "declare module 'custom' { export interface A { x: number } }\ndeclare module 'custom' { export interface B { y: number } }\nconst a: import('custom').A = { x: 1 };\nconst b: import('custom').B = { y: 2 };\nconsole.log(a.x, b.y);"
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '1 2\n' });
+
+  expect(diagnosticsOf("declare namespace N { console.log('hidden'); }")).toEqual([
+    '1: ステートメントは環境コンテキストでは使用できません。',
+  ]);
+
+  expect(diagnosticsOf("import * as fs from 'fs'; fs.existsSync = () => true;")).toEqual([
+    '1: existsSync は読み取り専用のプロパティなので、代入できません。',
+  ]);
+  expect(diagnosticsOf("import * as fs from 'node:fs'; fs['existsSync'] = () => true;")).toEqual([
+    '1: existsSync は読み取り専用のプロパティなので、代入できません。',
+  ]);
+
+  expect(diagnosticsOf('namespace M { export var v = 1; var v = 2; }')).toEqual([
+    "1: マージされた宣言 'v' の個々の宣言はすべてエクスポートされるか、すべてローカルであるかのどちらかである必要があります。",
+    "1: マージされた宣言 'v' の個々の宣言はすべてエクスポートされるか、すべてローカルであるかのどちらかである必要があります。",
+  ]);
+
+  expect(
+    executeProgram(
+      'typescript',
+      'function* inner() { return Promise.resolve(3); }\nasync function* outer() { const n: number = yield* inner(); console.log(n.toFixed(1)); }\nouter().next();'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '3.0\n' });
+
+  expect(executeProgram('typescript', 'process.exitCode = null;\nconsole.log(process.exitCode);')).toMatchObject({
+    kind: 'executed',
+    stdout: 'undefined\n',
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      "const f = () => 3;\nenum Level { Low = 1, High = f() }\nconst labels: Record<Level, string> = { [Level.Low]: 'low', [Level.High]: 'high' };\nconsole.log(labels[Level.High]);"
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'high\n' });
+
+  expect(diagnosticsOf('function f(this: { key: string }) { return class C { [this.key]() { return 1; } }; }')).toEqual(
+    ["1: 'this' は、計算されたプロパティ名では参照できません。"]
+  );
+  expect(
+    executeProgram(
+      'typescript',
+      "function f(this: { key: string }) { return { [this.key]() { return 7; } }; }\nconsole.log((f.call({ key: 'm' }) as any).m());"
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '7\n' });
+
+  const descriptorCollision = executeProgram(
+    'typescript',
+    "const a: string = 'x', b: string = 'x';\nfunction wrap(value: any, _ctx: any) { console.log(typeof value); return () => 3; }\nclass C { @wrap [a]() { return 1; } get [b]() { return 2; } }"
+  );
+  expect(descriptorCollision).toMatchObject({
+    kind: 'executed',
+    stdout: 'undefined\n',
+  });
+  expect(descriptorCollision.kind === 'executed' ? descriptorCollision.uncaughtException : '').toContain(
+    'TypeError: Invalid property descriptor'
+  );
+
+  expect(
+    diagnosticsOf(
+      "export {};\nnamespace N { declare module 'custom' { global { interface Array<T> { extra: number } } } }\nconsole.log([1].extra);"
+    )
+  ).toEqual([
+    '2: アンビエント モジュールを、他のモジュールまたは名前空間内の入れ子にすることはできません。',
+    '2: グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。',
+    "3: プロパティ 'extra' は型 'number[]' にありません。",
+  ]);
+});

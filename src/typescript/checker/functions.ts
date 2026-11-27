@@ -745,26 +745,34 @@ export class FunctionChecker {
 
   /** What `yield*` gives back: what the generator or other iterator it delegates to returns when done. */
   private delegatedReturnType(operandType: Type, isAsync: boolean): Type {
+    const delegated = this.delegatedIteration(operandType, isAsync);
+    if (delegated) {
+      return delegated.syncToAsync ? awaitedType(this.c, delegated.types.returnType) : delegated.types.returnType;
+    }
     const apparent = this.c.apparentType(operandType);
     const hasAsyncMethod = isAsync && this.c.patterns.hasCallableIteratorMethod(apparent, 'asyncIterator');
     const asyncReturn = isAsync ? this.c.patterns.iteratorReturnType(operandType, 'asyncIterator') : undefined;
+    if (asyncReturn) return asyncReturn;
     // An async generator delegates to a synchronous iterable through its `[Symbol.iterator]()` when it has no async one.
-    const returned =
-      asyncReturn ?? (hasAsyncMethod ? undefined : this.c.patterns.iteratorReturnType(operandType, 'iterator'));
-    return (
-      this.delegatedIterationTypes(operandType, isAsync)?.returnType ??
-      (returned && isAsync ? awaitedType(this.c, returned) : returned) ??
-      anyType
-    );
+    const syncReturn = hasAsyncMethod ? undefined : this.c.patterns.iteratorReturnType(operandType, 'iterator');
+    return (syncReturn && isAsync ? awaitedType(this.c, syncReturn) : syncReturn) ?? anyType;
   }
 
   private delegatedIterationTypes(operandType: Type, isAsync: boolean): IterationTypes | undefined {
+    return this.delegatedIteration(operandType, isAsync)?.types;
+  }
+
+  private delegatedIteration(
+    operandType: Type,
+    isAsync: boolean
+  ): { types: IterationTypes; syncToAsync: boolean } | undefined {
     const apparent = this.c.apparentType(operandType);
-    if (isAsync) {
+    if (isAsync && this.c.patterns.hasCallableIteratorMethod(apparent, 'asyncIterator')) {
       const asyncTypes = this.iterationTypesOf(apparent, true);
-      if (asyncTypes || this.c.patterns.hasCallableIteratorMethod(apparent, 'asyncIterator')) return asyncTypes;
+      return asyncTypes ? { types: asyncTypes, syncToAsync: false } : undefined;
     }
-    return this.iterationTypesOf(apparent, false);
+    const syncTypes = this.iterationTypesOf(apparent, false);
+    return syncTypes ? { types: syncTypes, syncToAsync: isAsync } : undefined;
   }
 
   private checkDelegatedNextType(

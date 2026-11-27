@@ -9,6 +9,7 @@ import {
   assignmentKind,
   isDirectGlobalAugmentationContainer,
   isGlobalAugmentationNamespace,
+  isTopLevelAmbientModule,
   isWithin,
   named,
   patternIdentifiers,
@@ -260,13 +261,22 @@ export class Binder {
 
   /** `declare module "m" { ... }`, whose declarations are the exports an `import` of "m" sees. */
   private bindAmbientModule(node: TreeNode, name: string, scope: Scope): void {
-    const module = new Sym(name, scope);
-    module.valueKind = 'namespace';
+    const valid = Boolean(this.options?.deferLibraryTypes) || isTopLevelAmbientModule(node);
+    let module = valid ? this.ambientModules.get(name) : undefined;
+    if (!module) {
+      module = new Sym(name, scope);
+      module.valueKind = 'namespace';
+      module.namespaceExports = new Scope('block', scope, node);
+      if (valid) this.ambientModules.set(name, module);
+    }
     module.valueDeclarations.push(node);
-    module.namespaceExports = new Scope('block', scope, node);
-    this.ambientModules.set(name, module);
     const body = node.childForFieldName('body');
-    if (body) this.bindNamespaceBody(body, this.newNamespaceBody(node, module, true), true);
+    if (!body) return;
+    const bodyScope = this.newNamespaceBody(node, module, true);
+    const exports = module.namespaceExports as Scope;
+    for (const [exportName, exported] of exports.values) bodyScope.values.set(exportName, exported);
+    for (const [exportName, exported] of exports.types) bodyScope.types.set(exportName, exported);
+    this.bindNamespaceBody(body, bodyScope, true);
   }
 
   /** The names an `import` declares, which stand for what a module exports. */

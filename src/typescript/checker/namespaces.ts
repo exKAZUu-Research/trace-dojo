@@ -1,6 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { isAmbient, isCheckedAmbientDeclaration, isInstantiatedNamespace } from '../namespaceInstantiation';
+import { isAmbient, isInstantiatedNamespace } from '../namespaceInstantiation';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import { FlowState } from './flow';
@@ -13,6 +13,7 @@ import {
   isDirectGlobalAugmentationContainer,
   isGlobalAugmentationNamespace,
   isNamespaceBody,
+  isTopLevelAmbientModule,
   named,
   stringValue,
 } from './syntax';
@@ -420,25 +421,37 @@ export class Namespaces {
       return;
     }
     const name = node.childForFieldName('name');
+    this.checkDeclarationPlacement(node, name);
+    const body = node.childForFieldName('body');
+    if (!body || this.c.isLibrary(node)) return;
+    const ambientBody = isAmbient(node) || name?.type === 'string';
+    const outer = this.c.flow.current;
+    this.c.flow.current = new FlowState();
+    try {
+      this.c.statements.declareHoistedVariables(this.c.binder.ownScope(body));
+      if (ambientBody) this.c.statements.checkAmbientBodyStatements(body);
+      else this.c.statements.checkBlockStatements(named(body));
+    } finally {
+      this.c.flow.current = outer;
+    }
+  }
+
+  private checkDeclarationPlacement(node: TreeNode, name: TreeNode | null): void {
     if (node.type === 'module' && name?.type !== 'string')
       this.c.error(
         node,
         "'namespace' の宣言に 'module' キーワードは使えません。代わりに 'namespace' キーワードを使ってください。"
       );
+    if (name?.type === 'string' && !isTopLevelAmbientModule(node)) {
+      this.c.error(
+        isNamespaceOrModuleTopLevel(node) ? name : node,
+        isNamespaceOrModuleTopLevel(node)
+          ? 'アンビエント モジュールを、他のモジュールまたは名前空間内の入れ子にすることはできません。'
+          : 'アンビエント モジュール宣言は、ファイルの最上位にのみ使用できます。'
+      );
+    }
     if (name?.type !== 'string' && !isNamespaceOrModuleTopLevel(node))
       this.c.error(node, '名前空間宣言は、名前空間またはモジュールの最上位レベルでのみ許可されます。');
-    const body = node.childForFieldName('body');
-    if (!body || this.c.isLibrary(node)) return;
-    const statements =
-      isAmbient(node) || name?.type === 'string' ? named(body).filter(isCheckedAmbientDeclaration) : named(body);
-    const outer = this.c.flow.current;
-    this.c.flow.current = new FlowState();
-    try {
-      this.c.statements.declareHoistedVariables(this.c.binder.ownScope(body));
-      this.c.statements.checkBlockStatements(statements);
-    } finally {
-      this.c.flow.current = outer;
-    }
   }
 
   private checkGlobalAugmentationNamespace(node: TreeNode): void {
@@ -455,7 +468,7 @@ export class Namespaces {
       return;
     }
     const body = node.childForFieldName('body');
-    if (body) this.c.statements.checkBlockStatements(named(body).filter(isCheckedAmbientDeclaration));
+    if (body) this.c.statements.checkAmbientBodyStatements(body);
   }
 }
 

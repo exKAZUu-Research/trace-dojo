@@ -301,17 +301,20 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
     runtime.io[file === 1 ? 'stdout' : 'stderr'].write(UTF8_DECODER.decode(bytes));
     return;
   }
-  const streamPath = withErrors(runtime, 'open', path, () => runtime.io.files.resolveStreamPath(path));
-  const stream = streamPath ? STANDARD_STREAMS[streamPath as keyof typeof STANDARD_STREAMS] : undefined;
-  if (stream) {
-    if (parsed.mode.create === 'exclusive') throwNodeError(runtime, 'EEXIST', 'open', path);
-    if (!parsed.writable) throwNodeError(runtime, 'EBADF', 'write');
-    runtime.io[stream].write(UTF8_DECODER.decode(bytes));
-    return;
-  }
+  if (writeStandardStreamPath(runtime, path, bytes, parsed)) return;
   const handle = withErrors(runtime, 'open', path, () => runtime.io.files.open(path, parsed.mode));
   if (!parsed.writable) throwNodeError(runtime, 'EBADF', 'write');
   handle.writeBytes(bytes);
+}
+
+function writeStandardStreamPath(runtime: Runtime, path: string, bytes: Uint8Array, parsed: ParsedOpenFlag): boolean {
+  const streamPath = withErrors(runtime, 'open', path, () => runtime.io.files.resolveStreamPath(path));
+  const stream = streamPath ? STANDARD_STREAMS[streamPath as keyof typeof STANDARD_STREAMS] : undefined;
+  if (!stream) return false;
+  if (parsed.mode.create === 'exclusive') throwNodeError(runtime, 'EEXIST', 'open', path);
+  if (!parsed.writable) throwNodeError(runtime, 'EBADF', 'write');
+  runtime.io[stream].write(UTF8_DECODER.decode(bytes));
+  return true;
 }
 
 function normalizeUtf8(text: string): string {

@@ -365,7 +365,7 @@ export class TypeOperators {
   }
 
   private addMappedMember(structure: Structure, info: MappedInfo, mapper: Mapper, nameMember: Type): void {
-    if (nameMember.kind === 'literal' && typeof nameMember.value !== 'boolean') {
+    if (isPropertyKeyLiteral(nameMember)) {
       const name = String(nameMember.value);
       const key = mapper.get(info.typeParameter.id) as Type;
       let names = this.mappedKeys.get(structure);
@@ -378,7 +378,11 @@ export class TypeOperators {
       structure.properties.set(name, this.mappedProperty(info, keys, name, unionOf(nameTypes)));
       return;
     }
-    const key = isAnyLike(nameMember) ? stringType : nameMember;
+    const key = isAnyLike(nameMember)
+      ? stringType
+      : nameMember.kind === 'literal' && nameMember.enumMember?.computed
+        ? numberType
+        : nameMember;
     if (key !== stringType && key !== numberType && key !== symbolType && !isPatternKey(key)) return;
     const source =
       !info.readonlyModifier && info.source ? applicableIndex(this.c, this.c.structureOf(info.source), key) : undefined;
@@ -398,8 +402,7 @@ export class TypeOperators {
   private mappedProperty(info: MappedInfo, keys: Type[], name: string, nameType: Type): Property {
     const [firstKey] = keys;
     const key = unionOf(keys);
-    const sourceName =
-      firstKey.kind === 'literal' && typeof firstKey.value !== 'boolean' ? String(firstKey.value) : undefined;
+    const sourceName = isPropertyKeyLiteral(firstKey) ? String(firstKey.value) : undefined;
     const sourceProperty =
       info.source && sourceName !== undefined ? this.c.propertyOf(info.source, sourceName) : undefined;
     let type: Type | undefined;

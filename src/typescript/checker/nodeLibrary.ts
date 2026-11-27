@@ -89,7 +89,7 @@ ${[...UNAVAILABLE_STREAM_MEMBERS].map((name) => `        ${name}: any;`).join('\
         stdin: ReadStream;
         argv: string[];
         env: { [key: string]: string | undefined };
-        exitCode?: number | string | undefined;
+        exitCode?: number | string | null | undefined;
         exit(code?: number | string | null): never;
         on(event: string, listener: (...args: any[]) => void): this;
 ${UNAVAILABLE_UNTYPED_PROCESS_MEMBERS.map((name) => `        ${name}: any;`).join('\n')}

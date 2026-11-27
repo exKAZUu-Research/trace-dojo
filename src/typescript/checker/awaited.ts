@@ -3,11 +3,14 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { hasToken } from './syntax';
 import {
+  anyType,
   errorType,
   isAnyLike,
   isIntrinsic,
   mapType,
   neverType,
+  propertyAccessType,
+  regularOf,
   type Signature,
   type Type,
   typeMembers,
@@ -42,18 +45,40 @@ const awaitBoundaries = new Set([
  * `then` method fulfills with, unwrapped through promises of promises, while keeping a generic type whose constraint
  * has no thenable value as itself and wrapping one that may in `Awaited<T>`.
  */
-export function awaitedType(c: Checker, type: Type, site?: AwaitedErrorSite, depth = 0): Type {
+export function awaitedType(
+  c: Checker,
+  type: Type,
+  site?: AwaitedErrorSite,
+  depth = 0,
+  seen: ReadonlySet<Type> = new Set()
+): Type {
   if (isAnyLike(type) || depth > MAX_AWAITED_DEPTH) return type;
-  if (type.kind === 'union') return mapType(type, (member) => awaitedType(c, member, site, depth + 1));
+  if (type.kind === 'union') return mapType(type, (member) => awaitedType(c, member, site, depth + 1, seen));
   if (isGenericAwaitedOperand(type)) {
     return mayBeThenableGeneric(c, type, depth) ? c.globalTypeAlias('Awaited', [type]) : type;
   }
   if (type.kind !== 'object' && type.kind !== 'intersection') return type;
-  if (isLibraryPromiseType(c, type)) return awaitedType(c, type.typeArguments?.[0] ?? unknownType, site, depth + 1);
+  const canonical = regularOf(type);
+  if (seen.has(canonical)) return reportCircularThenable(c, site);
+  const nextSeen = new Set([...seen, canonical]);
+  if (isLibraryPromiseType(c, type))
+    return awaitedType(c, type.typeArguments?.[0] ?? unknownType, site, depth + 1, nextSeen);
   const step = inspectThenable(c, type);
   if (step.kind === 'nonThenable') return type;
-  if (step.kind === 'valid') return awaitedType(c, step.value, site, depth + 1);
+  if (step.kind === 'valid') return awaitedType(c, step.value, site, depth + 1, nextSeen);
   return reportInvalidThenable(c, site);
+}
+
+function reportCircularThenable(c: Checker, site: AwaitedErrorSite | undefined): Type {
+  if (!site) return anyType;
+  if (!site.reported) {
+    site.reported = true;
+    c.error(
+      site.node,
+      "型は、それ自身の 'then' メソッドのフルフィルメント コールバック内で直接または間接的に参照されます。"
+    );
+  }
+  return errorType;
 }
 
 function isLibraryPromiseType(c: Checker, type: Type): type is Extract<Type, { kind: 'object' }> {
@@ -124,7 +149,8 @@ function mayBeThenableConstraint(c: Checker, member: Type, depth: number): boole
 type ThenableStep = { kind: 'nonThenable' } | { kind: 'invalid' } | { kind: 'valid'; value: Type };
 
 function inspectThenable(c: Checker, type: Type): ThenableStep {
-  const thenType = c.propertyOf(type, 'then')?.type();
+  const thenProperty = c.propertyOf(type, 'then');
+  const thenType = thenProperty && propertyAccessType(thenProperty);
   if (!thenType || isAnyLike(thenType)) return { kind: 'nonThenable' };
   if (c.signaturesOf(c.relations.removeNullish(thenType), 'call').length === 0) return { kind: 'nonThenable' };
   const signatures = c.relations.isNullable(thenType) ? [] : c.signaturesOf(thenType, 'call');

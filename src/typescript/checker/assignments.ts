@@ -539,6 +539,10 @@ export class AssignmentChecker {
     const properties = (objectType.kind === 'union' ? objectType.types : [objectType])
       .map((member) => this.c.propertyOf(member, key))
       .filter((property): property is Property => property !== undefined);
+    if (this.isNamespaceImportReceiver(objectNode) && properties.length > 0) {
+      this.c.error(propertyNode, `${propertyNode.text} は読み取り専用のプロパティなので、代入できません。`);
+      return errorType;
+    }
     for (const member of properties) {
       if (this.c.classes.isReadonlyFor(member, expression, objectNode) || member.getterOnly) {
         this.c.error(propertyNode, `${propertyNode.text} は読み取り専用のプロパティなので、代入できません。`);
@@ -596,13 +600,21 @@ export class AssignmentChecker {
   /** Whether `expression`, an element access by a literal key, names a property that it cannot write. */
   private isReadonlyProperty(expression: TreeNode, objectType: Type, name: string): boolean {
     const objectNode = expression.childForFieldName('object') as TreeNode;
+    const isNamespaceImport = this.isNamespaceImportReceiver(objectNode);
     return (objectType.kind === 'union' ? objectType.types : [objectType]).some((member) => {
       const property = this.c.propertyOf(member, name);
       return (
         property !== undefined &&
-        (this.c.classes.isReadonlyFor(property, expression, objectNode) || property.getterOnly)
+        (isNamespaceImport || this.c.classes.isReadonlyFor(property, expression, objectNode) || property.getterOnly)
       );
     });
+  }
+
+  private isNamespaceImportReceiver(objectNode: TreeNode): boolean {
+    const unwrapped = skipParentheses(objectNode);
+    if (unwrapped.type !== 'identifier') return false;
+    const symbol = this.c.scopeOf(unwrapped).lookupValue(unwrapped.text);
+    return symbol?.valueKind === 'import' && symbol.importTarget?.name === '*';
   }
 
   private referenceFlow(reference: TreeNode): FlowEntry | undefined {

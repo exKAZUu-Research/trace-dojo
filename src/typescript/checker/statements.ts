@@ -268,11 +268,20 @@ export class StatementChecker {
       if (child.type === 'statement_block') {
         if (!isDirectGlobalAugmentationContainer(node, this.c.isModule))
           this.c.error(node, globalAugmentationPlacementMessage(node));
-        else this.checkBlockStatements(named(child).filter(isCheckedAmbientDeclaration));
+        else this.checkAmbientBodyStatements(child);
       } else if (isCheckedAmbientDeclaration(child)) {
         this.check(child);
       }
     }
+  }
+
+  checkAmbientBodyStatements(body: TreeNode): void {
+    const valid: TreeNode[] = [];
+    for (const child of named(body)) {
+      if (isCheckedAmbientDeclaration(child)) valid.push(child);
+      else this.c.error(child, 'ステートメントは環境コンテキストでは使用できません。');
+    }
+    this.checkBlockStatements(valid);
   }
 
   private throwStatement(node: TreeNode): void {
@@ -1195,7 +1204,8 @@ function duplicateExportMessage(
 }
 
 export function globalAugmentationPlacementMessage(node: TreeNode): string {
-  return node.parent?.type === 'program' || isNamespaceBody(node.parent)
+  const owner = node.parent?.type === 'statement_block' ? node.parent.parent : undefined;
+  return node.parent?.type === 'program' || owner?.type === 'internal_module' || owner?.type === 'module'
     ? 'グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。'
     : 'アンビエント モジュール宣言は、ファイルの最上位にのみ使用できます。';
 }

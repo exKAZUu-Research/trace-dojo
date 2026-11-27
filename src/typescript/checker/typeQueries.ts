@@ -5,6 +5,7 @@ import type { Checker } from './checker';
 import type { FlowEntry } from './flow';
 import { isImportTypeCall } from './namespaces';
 import type { Sym } from './scopes';
+import { named } from './syntax';
 import { errorType, type Type } from './types';
 
 type QueryTarget = (node: TreeNode) => Type;
@@ -29,6 +30,10 @@ export function queryVariableEntry(c: Checker, node: TreeNode, symbol: Sym, key:
 function readQueryTarget(c: Checker, node: TreeNode, identifier: QueryTarget, expression: QueryTarget): Type {
   if (node.type === 'identifier') return identifier(node);
   if (isImportTypeCall(node)) return c.namespaces.importTypeQuery(node);
+  if (node.type === 'instantiation_expression') {
+    const target = node.childForFieldName('function') ?? named(node)[0];
+    return c.expressions.calls.instantiateType(node, readQueryTarget(c, target, identifier, expression));
+  }
   if (node.type !== 'member_expression') return expression(node);
   const object = node.childForFieldName('object') as TreeNode;
   const property = node.childForFieldName('property') as TreeNode;

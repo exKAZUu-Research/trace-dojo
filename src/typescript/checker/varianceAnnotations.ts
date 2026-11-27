@@ -58,7 +58,8 @@ function checkAnnotationPlaces(c: Checker, node: TreeNode, annotated: TreeNode[]
     }
     return false;
   }
-  const value = node.type === 'type_alias_declaration' ? node.childForFieldName('value') : undefined;
+  let value = node.type === 'type_alias_declaration' ? node.childForFieldName('value') : undefined;
+  while (value?.type === 'parenthesized_type') value = named(value)[0];
   if (!value || varianceAliasValues.has(value.type)) return true;
   for (const parameter of annotated)
     c.error(parameter, '分散の注釈は、オブジェクト・関数・コンストラクター・マップ型の型エイリアスでしか使えません。');

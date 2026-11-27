@@ -697,27 +697,31 @@ function resolveImportAliasValue(
   let current = unwrapAliasSymbol(binder.lookupValue(path[0], nameOf(path[0])), binder, seen);
   for (const [index, part] of path.slice(1).entries()) {
     if (!current) return undefined;
-    const partName = nameOf(part);
-    const isLast = index === path.length - 2;
-    if (current.kind === 'builtinModule') {
-      if (!isLast) return undefined;
-      current = fsImportMeanings(current.module, partName)?.value ? { kind: 'value' } : undefined;
-    } else if (current.kind === 'symbol') {
-      const member =
-        current.symbol.valueKind === 'enum' && isLast
-          ? current.symbol.enumMembers?.values.get(partName)
-          : current.symbol.namespaceExports?.values.get(partName);
-      current = unwrapAliasSymbol(member, binder, seen);
-    } else {
-      return undefined;
-    }
+    current = stepAliasTarget(current, nameOf(part), index === path.length - 2, binder, seen);
   }
-  if (!current) return undefined;
-  if (current.kind !== 'symbol') return current;
+  if (!current || current.kind !== 'symbol') return current;
   return current.symbol.valueEntries.some((entry) => entry.kind !== 'namespace') ||
     isInstantiatedNamespace(current.symbol)
     ? current
     : undefined;
+}
+
+function stepAliasTarget(
+  current: AliasValueTarget,
+  partName: string,
+  isLast: boolean,
+  binder: Binder,
+  seen: Set<number>
+): AliasValueTarget | undefined {
+  if (current.kind === 'builtinModule') {
+    return isLast && fsImportMeanings(current.module, partName)?.value ? { kind: 'value' } : undefined;
+  }
+  if (current.kind !== 'symbol') return undefined;
+  const member =
+    current.symbol.valueKind === 'enum' && isLast
+      ? current.symbol.enumMembers?.values.get(partName)
+      : current.symbol.namespaceExports?.values.get(partName);
+  return unwrapAliasSymbol(member, binder, seen);
 }
 
 function unwrapAliasSymbol(symbol: Sym | undefined, binder: Binder, seen: Set<number>): AliasValueTarget | undefined {
@@ -730,19 +734,24 @@ function unwrapAliasSymbol(symbol: Sym | undefined, binder: Binder, seen: Set<nu
     return resolveImportAliasValue(namespacePathOf(target), binder, seen);
   }
   if (symbol.valueKind !== 'import') return { kind: 'symbol', symbol };
-  const target = symbol.importTarget;
-  if (!target || target.typeOnly) return undefined;
+  return symbol.importTarget ? unwrapImportTarget(symbol.importTarget, binder, seen) : undefined;
+}
+
+function unwrapImportTarget(
+  target: NonNullable<Sym['importTarget']>,
+  binder: Binder,
+  seen: Set<number>
+): AliasValueTarget | undefined {
+  if (target.typeOnly) return undefined;
   const ambient = binder.ambientModules.get(target.module);
   if (ambient) {
-    if (target.name === '*' || (target.name === 'default' && !ambient.namespaceExports?.values.has('default')))
-      return { kind: 'symbol', symbol: ambient };
-    return unwrapAliasSymbol(ambient.namespaceExports?.values.get(target.name), binder, seen);
+    return target.name === '*' || (target.name === 'default' && !ambient.namespaceExports?.values.has('default'))
+      ? { kind: 'symbol', symbol: ambient }
+      : unwrapAliasSymbol(ambient.namespaceExports?.values.get(target.name), binder, seen);
   }
-  if (target.module === 'fs' || target.module === 'node:fs') {
-    if (target.name === '*' || target.name === 'default') return { kind: 'builtinModule', module: target.module };
-    return fsImportMeanings(target.module, target.name)?.value ? { kind: 'value' } : undefined;
-  }
-  return { kind: 'value' };
+  if (target.module !== 'fs' && target.module !== 'node:fs') return { kind: 'value' };
+  if (target.name === '*' || target.name === 'default') return { kind: 'builtinModule', module: target.module };
+  return fsImportMeanings(target.module, target.name)?.value ? { kind: 'value' } : undefined;
 }
 
 /** The statements of the first namespace of a path `A.B.C`, which declare the next ones down to the body's. */

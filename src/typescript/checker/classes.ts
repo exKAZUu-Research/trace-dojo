@@ -794,6 +794,7 @@ export class ClassChecker {
         case 'method_definition':
         case 'field_definition': {
           if (current.childForFieldName('name')?.id !== child.id) return current;
+          if (child.type === 'computed_property_name' && current.parent?.type === 'class_body') return child;
           break;
         }
         case 'class_heritage': {
@@ -826,8 +827,9 @@ export class ClassChecker {
   thisTypeOfExpression(node: TreeNode): Type {
     const owner = this.thisOwner(node);
     if (!owner) return this.globalThisType(node);
-    if (owner.type === 'internal_module' || owner.type === 'module') {
-      this.c.error(node, "'this' はモジュール本体内または名前空間本体内では参照できません。");
+    const invalid = invalidThisOwnerMessage(owner);
+    if (invalid) {
+      this.c.error(node, invalid);
       return errorType;
     }
     const thisParameter = this.thisParameterType(owner);
@@ -1290,6 +1292,13 @@ export class ClassChecker {
 }
 
 export { anonymousObject };
+
+function invalidThisOwnerMessage(owner: TreeNode): string | undefined {
+  if (owner.type === 'computed_property_name') return "'this' は、計算されたプロパティ名では参照できません。";
+  if (owner.type === 'internal_module' || owner.type === 'module')
+    return "'this' はモジュール本体内または名前空間本体内では参照できません。";
+  return undefined;
+}
 
 function isInParameterInitializer(node: TreeNode, owner: TreeNode): boolean {
   for (let parent = node.parent; parent && parent.id !== owner.id; parent = parent.parent) {

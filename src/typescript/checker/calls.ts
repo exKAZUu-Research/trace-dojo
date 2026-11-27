@@ -102,7 +102,10 @@ export class Calls {
    */
   instantiationExpression(node: TreeNode): Type {
     const expression = node.childForFieldName('function') ?? named(node)[0];
-    const type = this.c.expressions.check(expression);
+    return this.instantiateType(node, this.c.expressions.check(expression));
+  }
+
+  instantiateType(node: TreeNode, type: Type): Type {
     const typeArguments = this.typeArguments.written(node) ?? [];
     if (isAnyLike(type) || type === errorType) return type;
     const members = this.instantiationMembers(type);

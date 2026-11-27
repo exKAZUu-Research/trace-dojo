@@ -237,10 +237,14 @@ export class ConditionChecker {
       return;
     }
     const { target, type } = predicate;
-    this.c.flow.current =
+    const narrowCurrent = (): State =>
       predicate.asserts === 'truthy'
         ? this.c.silently(() => this.condition(target, false)).whenTrue
         : this.narrowed(target, (current) => this.c.flow.narrowByPredicate(current, type)).whenTrue;
+    const chain = this.c.members.callChainFlow(call);
+    this.c.flow.current = chain
+      ? this.c.flow.merge([this.c.flow.withState(chain.executed, narrowCurrent), ...chain.stops])
+      : narrowCurrent();
   }
 
   /** Reports a tested expression that is `void`, or that is always truthy or always falsy by its syntax. */

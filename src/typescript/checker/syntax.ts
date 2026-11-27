@@ -382,12 +382,21 @@ export function isGlobalAugmentationNamespace(node: TreeNode): boolean {
   );
 }
 
+export function isTopLevelAmbientModule(node: TreeNode | null | undefined): boolean {
+  if (
+    (node?.type !== 'module' && node?.type !== 'internal_module') ||
+    node.childForFieldName('name')?.type !== 'string'
+  )
+    return false;
+  let container = node.parent;
+  while (container && (container.type === 'ambient_declaration' || container.type === 'export_statement')) {
+    container = container.parent;
+  }
+  return container?.type === 'program';
+}
+
 export function isAmbientModuleBody(node: TreeNode | null | undefined): boolean {
-  const owner = node?.type === 'statement_block' ? node.parent : undefined;
-  return (
-    (owner?.type === 'module' || owner?.type === 'internal_module') &&
-    owner.childForFieldName('name')?.type === 'string'
-  );
+  return node?.type === 'statement_block' && isTopLevelAmbientModule(node.parent);
 }
 
 export function isNamespaceBody(node: TreeNode | null | undefined): boolean {

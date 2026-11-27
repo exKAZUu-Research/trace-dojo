@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps duplicate-declaration, overload, index-conformance, and merged-export checks together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { blockHasRuntimeCode, isAmbient } from '../namespaceInstantiation';
@@ -12,12 +13,16 @@ import { isAnyLike, isIntrinsic, type Property, type Type, undefinedType, unionO
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
 export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
   checkBuiltinUndefinedDeclaration(c);
+  const reportedExportMix = new Set<number>();
   for (const symbol of uniqueSymbols(scopes, (scope) => scope.values.values())) {
-    if (symbol.valueEntries.some((entry) => !c.isLibrary(entry.name))) checkValueDuplicates(c, symbol);
+    if (!symbol.valueEntries.some((entry) => !c.isLibrary(entry.name))) continue;
+    checkValueDuplicates(c, symbol);
+    checkMergedValueExportConsistency(c, symbol, reportedExportMix);
   }
   for (const symbol of uniqueSymbols(scopes, (scope) => scope.types.values())) {
     if (!symbol.typeEntries.some((entry) => !c.isLibrary(entry.name))) continue;
     checkTypeDuplicates(c, symbol);
+    checkMergedTypeExportConsistency(c, symbol, reportedExportMix);
     checkReservedTypeName(c, symbol);
   }
 }
@@ -258,6 +263,78 @@ function mergesTypeDeclarations(kinds: string[]): boolean {
     kinds.every((kind) => kind === 'interface' || kind === 'class') &&
     kinds.filter((kind) => kind === 'class').length <= 1
   );
+}
+
+function checkMergedValueExportConsistency(c: Checker, symbol: Sym, reported: Set<number>): void {
+  const entries = symbol.valueEntries;
+  if (entries.length < 2 || !checksExportConsistencyInScope(symbol.scope)) return;
+  if (
+    !entries.some((entry) => entry.kind === 'namespace') &&
+    entries.some(
+      (entry) => importKinds.has(entry.kind) || blockScopedKinds.has(entry.kind) || entry.kind === 'parameter'
+    )
+  )
+    return;
+  const kinds = entries.map((entry) => entry.kind);
+  if (kinds.every((kind) => kind === 'function')) return;
+  if (kinds.some((kind) => kind === 'function') && kinds.some((kind) => kind === 'var')) return;
+  if (kinds.includes('enum') && !kinds.every((kind) => kind === 'enum' || kind === 'namespace')) return;
+  if (kinds.includes('namespace') && !kinds.every((kind) => ['namespace', 'function', 'class', 'enum'].includes(kind)))
+    return;
+  reportMixedExports(c, symbol.name, entries, symbol.valueDeclarations, reported);
+}
+
+function checkMergedTypeExportConsistency(c: Checker, symbol: Sym, reported: Set<number>): void {
+  const entries = symbol.typeEntries;
+  if (entries.length < 2 || !checksExportConsistencyInScope(symbol.scope)) return;
+  const kinds = entries.map((entry) => entry.kind);
+  if (!mergesTypeDeclarations(kinds)) return;
+  reportMixedExports(c, symbol.name, entries, symbol.typeDeclarations, reported);
+}
+
+function checksExportConsistencyInScope(scope: Scope): boolean {
+  if (scope.node?.type === 'program') return true;
+  if (!scope.namespace) return false;
+  if (!scope.isAmbient) return true;
+  const body = scope.node?.childForFieldName('body');
+  return body
+    ? named(body).some((child) => child.type === 'export_statement' && !child.childForFieldName('declaration'))
+    : false;
+}
+
+function reportMixedExports(
+  c: Checker,
+  name: string,
+  entries: { name: TreeNode }[],
+  declarations: TreeNode[],
+  reported: Set<number>
+): void {
+  const userIndices = entries.map((_, index) => index).filter((index) => !c.isLibrary(entries[index].name));
+  if (userIndices.length < 2) return;
+  const flags = userIndices.map((index) => isExportedDeclaration(declarations[index]));
+  if (flags.every(Boolean) || flags.every((flag) => !flag)) return;
+  for (const index of userIndices) {
+    const site = entries[index].name;
+    if (reported.has(site.id)) continue;
+    reported.add(site.id);
+    c.error(
+      site,
+      `マージされた宣言 '${name}' の個々の宣言はすべてエクスポートされるか、すべてローカルであるかのどちらかである必要があります。`
+    );
+  }
+}
+
+function isExportedDeclaration(declaration: TreeNode | undefined): boolean {
+  let current: TreeNode | null | undefined = declaration?.parent;
+  while (
+    current &&
+    ['lexical_declaration', 'variable_declaration', 'expression_statement', 'ambient_declaration'].includes(
+      current.type
+    )
+  ) {
+    current = current.parent;
+  }
+  return current?.type === 'export_statement';
 }
 
 function reportImportConflict(c: Checker, name: string, entries: { kind: string; name: TreeNode }[]): void {

@@ -181,7 +181,6 @@ export function runInitializers(runtime: Runtime, initializers: Value[], thisVal
   for (const initializer of initializers) runtime.call(initializer, thisValue, []);
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Applies each kind of member's decorator as the standard defines it.
 function decorateMember(
   runtime: Runtime,
   definition: MemberDefinition,
@@ -189,7 +188,7 @@ function decorateMember(
   initializers: Value[],
   metadata: JsObject
 ): void {
-  const { member, target, key, isPrivate, property, field } = definition;
+  const { member, field } = definition;
   const callRow = member.decorators?.[index]?.row;
   const kind = member.kind === 'field' ? (member.isAutoAccessor ? 'accessor' : 'field') : member.kind;
   // A field's or an auto-accessor's decorators add initializers that run right after its storage is defined on each
@@ -202,28 +201,57 @@ function decorateMember(
     if (initializer !== undefined) addTransform(field, requireCallable(runtime, initializer));
     return;
   }
+  decorateInstalledMember(runtime, definition, kind, { callable, context, callRow });
+}
+
+const INVALID_DESCRIPTOR_MESSAGE =
+  'Invalid property descriptor. Cannot both specify accessors and a value or writable attribute, #<Object>';
+
+function decorateInstalledMember(
+  runtime: Runtime,
+  { target, key, isPrivate, property, field }: MemberDefinition,
+  kind: 'method' | 'getter' | 'setter' | 'accessor',
+  invocation: { callable: Value; context: DecoratorContextHandle; callRow: number | undefined }
+): void {
   const active = isPrivate || kind === 'accessor' ? property : (target.properties.get(key) ?? property);
   if (!active) return;
   if (kind === 'accessor' && isAccessor(active)) {
-    decorateAutoAccessor(runtime, { property: active, field, decorator: callable, context, callRow });
+    decorateAutoAccessor(runtime, {
+      property: active,
+      field,
+      decorator: invocation.callable,
+      context: invocation.context,
+      callRow: invocation.callRow,
+    });
     if (!isPrivate) target.properties.set(key, active);
     return;
   }
+  if (replaceMemberSlot(runtime, active, kind, invocation) && !isPrivate) {
+    target.properties.set(key, active);
+  }
+}
+
+function replaceMemberSlot(
+  runtime: Runtime,
+  active: Property,
+  kind: 'method' | 'getter' | 'setter' | 'accessor',
+  { callable, context, callRow }: { callable: Value; context: DecoratorContextHandle; callRow: number | undefined }
+): boolean {
   if (kind === 'getter' || kind === 'setter') {
-    const current = isAccessor(active) ? active[kind === 'getter' ? 'get' : 'set'] : undefined;
-    const result = callDecorator(runtime, callable, current, context, callRow);
-    if (result !== undefined && isAccessor(active)) {
-      active[kind === 'getter' ? 'get' : 'set'] = requireFunction(runtime, result);
-      if (!isPrivate) target.properties.set(key, active);
-    }
-    return;
+    const slot = kind === 'getter' ? 'get' : 'set';
+    const result = callDecorator(runtime, callable, isAccessor(active) ? active[slot] : undefined, context, callRow);
+    if (result === undefined) return false;
+    const replacement = requireFunction(runtime, result);
+    if (!isAccessor(active)) runtime.throwError('TypeError', INVALID_DESCRIPTOR_MESSAGE);
+    active[slot] = replacement;
+    return true;
   }
-  const current = isAccessor(active) ? undefined : active.value;
-  const result = callDecorator(runtime, callable, current, context, callRow);
-  if (result !== undefined && !isAccessor(active)) {
-    active.value = requireFunction(runtime, result);
-    if (!isPrivate) target.properties.set(key, active);
-  }
+  const result = callDecorator(runtime, callable, isAccessor(active) ? undefined : active.value, context, callRow);
+  if (result === undefined) return false;
+  const replacement = requireFunction(runtime, result);
+  if (isAccessor(active)) runtime.throwError('TypeError', INVALID_DESCRIPTOR_MESSAGE);
+  active.value = replacement;
+  return true;
 }
 
 /** An auto-accessor's decorator, which may replace its getter and setter and transform its initial value. */

@@ -37,6 +37,7 @@ import {
   isAnyLike,
   isIntrinsic,
   isPrimitive,
+  isPropertyKeyLiteral,
   type LiteralType,
   literalType,
   nonPrimitiveType,
@@ -77,7 +78,7 @@ const MAX_RECURSION_IDENTITY_COUNT = 3;
 
 /** Whether one type is assignable to, or comparable with, another, as TypeScript decides it. */
 export class Relations {
-  /** While positive, instantiations of a generic are related by their members, not by its variance annotations. */
+  /** While positive, `in` and `out` variance shortcuts are skipped for structural comparison while `in out` stays enforced. */
   private ignoresVariance = 0;
   /** Pairs assumed related while comparing their members, which recursive types revisit. */
   private readonly assumed = new Set<string>();
@@ -342,7 +343,7 @@ export class Relations {
   private writeTypeOf(object: Type, key: Type, numberIndexOnly: boolean): Type | undefined {
     const structure = this.c.structureOf(object);
     const { stringIndex, numberIndex } = structure;
-    if (key.kind === 'literal') {
+    if (isPropertyKeyLiteral(key)) {
       const indexed = typeof key.value === 'number' && numberIndex !== undefined;
       const name = String(key.value);
       if (numberIndexOnly && !indexed && !this.hasProperty(object, name)) return undefined;
@@ -350,7 +351,8 @@ export class Relations {
       if (property) return propertyAccessType(property, 'write');
       return this.c.typeOperators.indexedAccess(object, key);
     }
-    if (isIntrinsic(key, 'number')) return (numberIndex ?? (numberIndexOnly ? undefined : stringIndex))?.type;
+    if (isIntrinsic(key, 'number') || (key.kind === 'literal' && key.enumMember?.computed))
+      return (numberIndex ?? (numberIndexOnly ? undefined : stringIndex))?.type;
     if (numberIndexOnly) return undefined;
     if (isIntrinsic(key, 'string') || isIntrinsic(key, 'symbol') || isPatternKey(key))
       return applicableIndex(this.c, structure, key)?.type;
@@ -823,7 +825,7 @@ export class Relations {
     );
   }
 
-  /** Compares the members' structures alone, as checking a variance annotation does, which must not assume it. */
+  /** Compares the members' structures while still honoring nested `in out` invariance annotations, as tsc does. */
   structurally<T>(run: () => T): T {
     this.ignoresVariance++;
     try {
@@ -839,19 +841,20 @@ export class Relations {
    * breaks its annotation, related when every parameter is annotated and none does, and otherwise left to the members.
    */
   private annotatedVarianceRelation(source: Type, target: ObjectType, relation: Relation): boolean | undefined {
-    if (this.ignoresVariance > 0 || source.kind !== 'object') return undefined;
+    if (source.kind !== 'object') return undefined;
     const generic = this.instantiationsOfOneGeneric(source, target);
     if (!generic) return undefined;
     const { parameters, sourceArguments, targetArguments } = generic;
     let isEveryAnnotated = true;
     for (const [index, parameter] of parameters.entries()) {
       const [from, to] = [sourceArguments[index], targetArguments[index]];
-      if (!parameter.variance || !from || !to) {
+      const variance = this.ignoresVariance > 0 && parameter.variance !== 'in out' ? undefined : parameter.variance;
+      if (!variance || !from || !to) {
         isEveryAnnotated = false;
         continue;
       }
-      const covariant = parameter.variance === 'in' || this.isRelated(from, to, relation);
-      const contravariant = parameter.variance === 'out' || this.isRelated(to, from, relation);
+      const covariant = variance === 'in' || this.isRelated(from, to, relation);
+      const contravariant = variance === 'out' || this.isRelated(to, from, relation);
       if (!(covariant && contravariant)) return false;
     }
     return isEveryAnnotated ? true : undefined;

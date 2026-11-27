@@ -73,17 +73,27 @@ export class MemberChecker {
 
   /** For each optional chain being checked, its end and the flow states where its `?.` links stop it. */
   private readonly chainFrames: { end: TreeNode; stops: State[] }[] = [];
+  private readonly callChainFlows = new Map<number, { executed: State; stops: State[] }>();
 
   constructor(private readonly c: Checker) {}
 
   /** Checks a link of a chain, which joins where the chain's `?.` links stop it when it is the chain's end. */
   chainLink<T>(node: TreeNode, check: () => T): T {
     this.continuedTypes.delete(node.id);
+    this.callChainFlows.delete(node.id);
     if (this.chainFrames.at(-1)?.end.id === node.id) return check();
     const start = this.c.flow.current;
     const { result, stops } = this.stoppingChain(node, check);
-    if (stops.length > 0) this.c.flow.rejoin(start, stops);
+    if (stops.length > 0) {
+      if (!this.c.silent && node.type === 'call_expression' && this.continuedTypes.has(node.id))
+        this.callChainFlows.set(node.id, { executed: this.c.flow.current, stops });
+      this.c.flow.rejoin(start, stops);
+    }
     return result;
+  }
+
+  callChainFlow(node: TreeNode): { executed: State; stops: State[] } | undefined {
+    return this.callChainFlows.get(node.id);
   }
 
   /** Checks `condition` on `node`, which is false where `node`'s optional chain stops early. */
@@ -469,7 +479,7 @@ export class MemberChecker {
       return this.c.relations.stringIndexByGenericKey(objectType, indexType)?.readonly === true;
     if (objectType.kind === 'union') return objectType.types.some((member) => this.isReadonlyIndex(member, indexType));
     if (indexType.kind === 'union') return indexType.types.some((member) => this.isReadonlyIndex(objectType, member));
-    if (indexType.kind === 'literal' && this.c.propertyOf(objectType, String(indexType.value))) return false;
+    if (isPropertyKeyLiteral(indexType) && this.c.propertyOf(objectType, String(indexType.value))) return false;
     return applicableIndex(this.c, this.c.structureOf(objectType), indexType)?.readonly === true;
   }
 
@@ -606,10 +616,9 @@ export class MemberChecker {
       return unionOf(index.types.map((member) => this.indexedTypeAt(access, objectType, member)));
     }
     if (objectType.kind === 'indexedAccess') return this.c.typeOperators.indexedAccess(objectType, index);
-    const missing =
-      index.kind === 'literal'
-        ? `プロパティ '${printedPropertyName(String(index.value), index)}' は型 '${this.c.print(objectType)}' にありません。`
-        : '';
+    const missing = isPropertyKeyLiteral(index)
+      ? `プロパティ '${printedPropertyName(String(index.value), index)}' は型 '${this.c.print(objectType)}' にありません。`
+      : '';
     this.c.error(
       access.node,
       `型 '${this.c.print(index)}' の式は型 '${this.c.print(objectType)}' のインデックスに使えないため、要素の型が暗黙に any になります。${missing}`

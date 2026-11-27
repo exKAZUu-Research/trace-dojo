@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps POSIX virtual files, byte-offset handles, and standard-stream path resolution together.
 import { type ExecutionBudget, ExecutionLimitError, LIMITS } from './limits';
 
 export interface ProgramInput {
@@ -325,26 +326,33 @@ export class VirtualFileSystem {
       return true;
     }
     const top = steps.at(-1) as StreamStep;
-    if (steps.length === 1 && top.kind === 'real' && name === 'dev') {
-      const realDev = this.root.children.get('dev');
-      if (realDev?.kind === 'file') throw new FileSystemError('ENOTDIR', path);
-      steps.push({ kind: 'dev', dir: realDev });
+    const special = this.specialStreamStep(steps.length, top, name, path);
+    if (special) {
+      steps.push(special);
       return true;
-    }
-    if (top.kind === 'dev' && name === 'fd') {
-      const realFd = top.dir?.children.get('fd');
-      if (realFd?.kind === 'file') throw new FileSystemError('ENOTDIR', path);
-      steps.push({ kind: 'devFd', dir: realFd });
-      return true;
-    }
-    if ((top.kind === 'dev' && DEV_STREAMS.has(name)) || (top.kind === 'devFd' && DEV_FDS.has(name))) {
-      throw new FileSystemError('ENOTDIR', path);
     }
     const child = top.dir?.children.get(name);
     if (!child) throw new FileSystemError('ENOENT', path);
     if (child.kind === 'file') throw new FileSystemError('ENOTDIR', path);
     steps.push({ kind: 'real', dir: child });
     return true;
+  }
+
+  private specialStreamStep(depth: number, top: StreamStep, name: string, path: string): StreamStep | undefined {
+    if (depth === 1 && top.kind === 'real' && name === 'dev') {
+      const realDev = this.root.children.get('dev');
+      if (realDev?.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+      return { kind: 'dev', dir: realDev };
+    }
+    if (top.kind === 'dev' && name === 'fd') {
+      const realFd = top.dir?.children.get('fd');
+      if (realFd?.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+      return { kind: 'devFd', dir: realFd };
+    }
+    if ((top.kind === 'dev' && DEV_STREAMS.has(name)) || (top.kind === 'devFd' && DEV_FDS.has(name))) {
+      throw new FileSystemError('ENOTDIR', path);
+    }
+    return undefined;
   }
 
   kindOf(path: string): 'file' | 'directory' | undefined {
