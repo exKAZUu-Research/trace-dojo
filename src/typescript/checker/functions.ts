@@ -27,6 +27,7 @@ import {
   isIntrinsic,
   literalType,
   neverType,
+  propertyAccessType,
   type Signature,
   type Type,
   typeMembers,
@@ -682,9 +683,12 @@ export class FunctionChecker {
     if (type.kind !== 'object' && type.kind !== 'intersection') return undefined;
     const symbolKey = this.c.typeNodes.librarySymbolKey(isAsync ? 'asyncIterator' : 'iterator');
     const iteratorMethod = this.c.propertyOf(type, symbolKey);
-    const iterator = (iteratorMethod && this.c.signaturesOf(iteratorMethod.type(), 'call')[0]?.returnType()) ?? type;
+    const iterator = iteratorMethod
+      ? this.c.signaturesOf(propertyAccessType(iteratorMethod), 'call')[0]?.returnType()
+      : type;
+    if (!iterator) return undefined;
     const nextProperty = this.c.propertyOf(iterator, 'next');
-    const nextSignature = nextProperty && this.c.signaturesOf(nextProperty.type(), 'call')[0];
+    const nextSignature = nextProperty && this.c.signaturesOf(propertyAccessType(nextProperty), 'call')[0];
     if (!nextSignature) return undefined;
     const nextType = this.iteratorNextParameterType(nextSignature);
     const rawResult = nextSignature.returnType();
