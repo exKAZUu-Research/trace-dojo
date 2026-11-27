@@ -303,7 +303,6 @@ function operatorNumber(type: Type | undefined): (Type & { kind: 'int' | 'float'
  * std's impls of the arithmetic, bitwise, and shift operators (and their assignments) for numbers: both sides of one
  * type (through `&` too), except shifts, which take any integer on the right; `String + &str` and `String += &str`.
  */
-// code-gauge-allow functionCognitiveComplexity -- Follows std's impls of the operator traits.
 function numericOperator({ solver, t, ref }: Goal, name: string, assign: boolean): Answer {
   if (assign && t.kind === 'ref') return 'no';
   const rhs = ref.args[0] && normalize(shallow(ref.args[0]));
