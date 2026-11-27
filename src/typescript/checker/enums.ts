@@ -351,7 +351,7 @@ export class Enums {
   private memberAccessKey(node: TreeNode, evaluation: Evaluation): string | undefined {
     if (node.type === 'member_expression') return node.childForFieldName('property')?.text;
     const index = node.childForFieldName('index');
-    const value = index ? this.evaluate(index, evaluation) : undefined;
+    const value = index && isStringLiteralIndex(index) ? this.evaluate(index, evaluation) : undefined;
     return typeof value === 'string' ? value : undefined;
   }
 

@@ -1,6 +1,6 @@
 import { nameOf, type Node } from '../javascript/convertNodes';
 import { numberArithmetic } from '../javascript/expressionEvaluator';
-import { decodeStringLiteral } from '../javascript/literals';
+import { decodeStringLiteral, decodeTemplateFragment } from '../javascript/literals';
 
 /**
  * What tsx's esbuild knows of an enum member's value as it compiles the enum: a number it folded, a string, or
@@ -67,10 +67,22 @@ function foldBinary(node: Node, enums: EnumsInScope): FoldedValue {
 /** `E.A` or `E["A"]`, a member of an enum compiled before. */
 function foldedMember(node: Node, enums: EnumsInScope): FoldedValue {
   const object = node.childForFieldName('object');
-  const key = node.type === 'member_expression' ? node.childForFieldName('property') : node.childForFieldName('index');
-  if (object?.type !== 'identifier' || !key) return undefined;
-  const name = key.type === 'string' ? decodeStringLiteral(key.text) : nameOf(key);
-  return enums(nameOf(object))?.get(name);
+  if (object?.type !== 'identifier') return undefined;
+  const name = memberKeyName(node);
+  return name === undefined ? undefined : enums(nameOf(object))?.get(name);
+}
+
+function memberKeyName(node: Node): string | undefined {
+  if (node.type === 'member_expression') {
+    const property = node.childForFieldName('property');
+    return property ? nameOf(property) : undefined;
+  }
+  const index = node.childForFieldName('index');
+  if (!index) return undefined;
+  if (index.type === 'string') return decodeStringLiteral(index.text);
+  if (index.type !== 'template_string' || index.namedChildren.some((child) => child.type === 'template_substitution'))
+    return undefined;
+  return decodeTemplateFragment(index.text.slice(1, -1));
 }
 
 /** What a member without an initializer is: 0 first, one more than a folded number before it, or else undefined. */
