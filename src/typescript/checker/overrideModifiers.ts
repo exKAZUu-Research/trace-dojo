@@ -5,18 +5,21 @@ import { memberName } from './declarations';
 import { hasToken, named } from './syntax';
 import { isAnyLike } from './types';
 
+const invalidTypeMemberModifiers = new Set(['override_modifier', 'accessibility_modifier', 'static']);
+
 /** Reports class-only member modifiers (`override`, accessibility, `static`) written on interface or object-type members. */
 export function checkTypeMemberModifiers(c: Checker, root: TreeNode): void {
   for (const body of root.descendantsOfType(['interface_body', 'object_type'])) {
     c.budget.spend();
-    for (const member of named(body)) {
-      const nameId = member.childForFieldName('name')?.id;
-      for (const child of member.children) {
-        if (!child || child.id === nameId) continue;
-        if (child.type === 'override_modifier' || child.type === 'accessibility_modifier' || child.type === 'static') {
-          c.error(child, `'${child.text}' 修飾子は型メンバーでは使用できません。`);
-        }
-      }
+    for (const member of named(body)) reportInvalidTypeMemberModifiers(c, member);
+  }
+}
+
+function reportInvalidTypeMemberModifiers(c: Checker, member: TreeNode): void {
+  const nameId = member.childForFieldName('name')?.id;
+  for (const child of member.children) {
+    if (child && child.id !== nameId && invalidTypeMemberModifiers.has(child.type)) {
+      c.error(child, `'${child.text}' 修飾子は型メンバーでは使用できません。`);
     }
   }
 }

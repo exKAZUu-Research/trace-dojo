@@ -29,19 +29,22 @@ export function blockEmitsRuntimeNamespace(body: TreeNode): boolean {
 
 function statementHasRuntimeCode(statement: TreeNode, includeUnexportedAmbient: boolean): boolean {
   if (typeOnlyStatementTypes.has(statement.type)) return false;
-  if (statement.type === 'ambient_declaration')
-    return (
-      includeUnexportedAmbient &&
-      statement.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child, true))
-    );
+  if (statement.type === 'ambient_declaration') return includeUnexportedAmbient && bodyHasRuntimeCode(statement);
   const declaration = statement.type === 'export_statement' ? statement.childForFieldName('declaration') : statement;
   if (!declaration || typeOnlyStatementTypes.has(declaration.type)) return false;
-  if (declaration.type === 'ambient_declaration')
-    return declaration.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child, true));
+  if (declaration.type === 'ambient_declaration') return bodyHasRuntimeCode(declaration);
   // tsc counts an import alias only when it is exported.
   if (declaration.type === 'import_alias') return statement.type === 'export_statement';
   const inner = declaration.type === 'expression_statement' ? declaration.namedChildren[0] : declaration;
   if (inner?.type !== 'internal_module' && inner?.type !== 'module') return true;
+  return nestedNamespaceHasRuntimeCode(inner, includeUnexportedAmbient);
+}
+
+function bodyHasRuntimeCode(node: TreeNode): boolean {
+  return node.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child, true));
+}
+
+function nestedNamespaceHasRuntimeCode(inner: TreeNode, includeUnexportedAmbient: boolean): boolean {
   const innerBody = inner.childForFieldName('body');
   if (!innerBody) return false;
   if (includeUnexportedAmbient) return blockHasRuntimeCode(innerBody);

@@ -15,7 +15,7 @@ const arithmeticOperators = new Set(['+', '-', '*', '/', '%', '**', '|', '&', '^
 
 /**
  * The value esbuild folds an enum initializer to: number and string literals, template literals (always strings),
- * arithmetic on folded numbers, and earlier members of the same enum or of enums compiled before.
+ * string-producing operations, arithmetic on folded numbers, and earlier members of the same enum or of enums compiled before.
  */
 export function foldEnumValue(node: Node, enums: EnumsInScope): FoldedValue {
   switch (node.type) {
@@ -36,6 +36,13 @@ export function foldEnumValue(node: Node, enums: EnumsInScope): FoldedValue {
     }
     case 'binary_expression': {
       return foldBinary(node, enums);
+    }
+    case 'ternary_expression': {
+      return foldTernary(node, enums);
+    }
+    case 'sequence_expression': {
+      const last = node.namedChildren.at(-1);
+      return last && foldEnumValue(last, enums)?.kind === 'string' ? { kind: 'string' } : undefined;
     }
     case 'member_expression':
     case 'subscript_expression': {
@@ -63,6 +70,7 @@ function foldTemplate(node: Node, enums: EnumsInScope): FoldedValue {
 
 function foldUnary(node: Node, enums: EnumsInScope): FoldedValue {
   const operator = node.childForFieldName('operator')?.text;
+  if (operator === 'typeof') return { kind: 'string' };
   const operand = foldEnumValue(node.childForFieldName('argument') as Node, enums);
   if (operand?.kind !== 'number') return undefined;
   if (operator === '-') return { kind: 'number', value: -operand.value };
@@ -74,12 +82,23 @@ function foldBinary(node: Node, enums: EnumsInScope): FoldedValue {
   const operator = node.childForFieldName('operator')?.text ?? '';
   const left = foldEnumValue(node.childForFieldName('left') as Node, enums);
   const right = foldEnumValue(node.childForFieldName('right') as Node, enums);
-  if (operator === '+' && left && right && (left.kind === 'string' || right.kind === 'string')) {
-    const value = left.value !== undefined && right.value !== undefined ? `${left.value}${right.value}` : undefined;
+  if (operator === '+' && (left?.kind === 'string' || right?.kind === 'string')) {
+    const value = left?.value !== undefined && right?.value !== undefined ? `${left.value}${right.value}` : undefined;
     return { kind: 'string', value };
   }
   if (left?.kind !== 'number' || right?.kind !== 'number' || !arithmeticOperators.has(operator)) return undefined;
   return { kind: 'number', value: numberArithmetic(operator, left.value, right.value) };
+}
+
+function foldTernary(node: Node, enums: EnumsInScope): FoldedValue {
+  const consequent = node.childForFieldName('consequence');
+  const alternate = node.childForFieldName('alternative');
+  return consequent &&
+    alternate &&
+    foldEnumValue(consequent, enums)?.kind === 'string' &&
+    foldEnumValue(alternate, enums)?.kind === 'string'
+    ? { kind: 'string' }
+    : undefined;
 }
 
 /** `E.A` or `E["A"]`, a member of an enum compiled before. */
