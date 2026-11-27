@@ -275,6 +275,7 @@ export class StatementChecker {
 
   /** `declare global` augments the globals only directly inside an external or ambient module. */
   private ambientDeclaration(node: TreeNode): void {
+    const alreadyAmbient = this.reportRedundantAmbientModifier(node);
     const validContainer = isValidAmbientDeclarationContainer(node);
     for (const child of named(node)) {
       if (child.type === 'statement_block') {
@@ -282,11 +283,22 @@ export class StatementChecker {
           this.c.error(node, globalAugmentationPlacementMessage(node));
         else this.checkAmbientBodyStatements(child);
       } else if (isCheckedAmbientDeclaration(child)) {
-        if (!validContainer && !isModuleOrNamespaceDeclaration(child))
+        if (!alreadyAmbient && !validContainer && !isModuleOrNamespaceDeclaration(child))
           this.c.error(node, 'ここで修飾子を使用することはできません。');
         this.check(child);
       }
     }
+  }
+
+  private reportRedundantAmbientModifier(node: TreeNode): boolean {
+    if (!isInAmbientContext(node)) return false;
+    this.c.error(
+      node,
+      node.parent?.type === 'ambient_declaration'
+        ? "'declare' 修飾子は既に存在します。"
+        : "'declare' 修飾子は、環境コンテキストでは使用できません。"
+    );
+    return true;
   }
 
   checkAmbientBodyStatements(body: TreeNode): void {
@@ -1237,6 +1249,19 @@ function isValidAmbientDeclarationContainer(node: TreeNode): boolean {
 function isModuleOrNamespaceDeclaration(node: TreeNode): boolean {
   const inner = node.type === 'expression_statement' ? named(node)[0] : node;
   return inner?.type === 'internal_module' || inner?.type === 'module';
+}
+
+function isInAmbientContext(node: TreeNode): boolean {
+  for (let current = node.parent; current; current = current.parent) {
+    if (current.type === 'ambient_declaration') return true;
+    if (
+      (current.type === 'module' || current.type === 'internal_module') &&
+      current.childForFieldName('name')?.type === 'string'
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
