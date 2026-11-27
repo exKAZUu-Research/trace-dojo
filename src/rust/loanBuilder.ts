@@ -17,11 +17,13 @@ import {
 } from './loanGraph';
 import {
   type BindingMode,
+  derefCoercedLayout,
   derefCoercedPlace,
   isReference,
   matchDeref,
   project,
   refTarget,
+  relateArrayBorrow,
   storedElement,
   tupleElem,
   variantOf,
@@ -48,7 +50,6 @@ import {
 } from './regions';
 import { relateCallThroughBound, relateOpaqueCall, SignatureInstance } from './signatureInstance';
 import { markExtendedTemporaries, promotable } from './temporaryScopes';
-import { arrayTryFrom } from './traitConversions';
 import type { TraitSolver } from './traits';
 import { relateReturnedError } from './tryErrors';
 import { type ClosureType, type FnDef, resolve, shallow, substitute, type Type, UNIT } from './types';
@@ -702,7 +703,20 @@ export class LoanBuilder {
     }
     const coerced = derefCoercedPlace(this.annotations, expr, (e) => this.place(e));
     if (coerced) return this.read(coerced.place, coerced.type, expr.span);
-    return this.valueInner(expr);
+    return this.derefCoercedValue(expr, this.valueInner(expr));
+  }
+
+  /**
+   * A value no place holds (a call's result) coerced through shared references (`&&'a str` to `&str`) is the inner
+   * reference it copies, whose region is its own, not the outer one's.
+   */
+  private derefCoercedValue(expr: Expr, value: Value): Value {
+    if (value === undefined) return value;
+    const layout = derefCoercedLayout(this.annotations, expr, this.layout(value));
+    if (!layout) return value;
+    const inner = this.newVarWithLayout('{coerced}', layout);
+    this.point({ uses: [value], defs: [inner] });
+    return inner;
   }
 
   // code-gauge-allow functionNcss -- One case per kind of expression.
@@ -1222,20 +1236,14 @@ export class LoanBuilder {
     const signature = new SignatureInstance(fn, typeArgs, this.fresh, this.outlives, () => this.static());
     signature.bindInputs(inputs);
     signature.bindOutput(result, inputs);
-    this.relateArrayBorrow(fn, typeArgs, inputs[0], result);
-    signature.relateBounds((callee, args, ret, higherRanked) => this.applyClosure(callee, args, ret, higherRanked));
-  }
-
-  private relateArrayBorrow(fn: FnDef, typeArgs: readonly Type[], input: Layout, result: Layout): void {
-    const name = fn.trait?.builtin;
-    if (name !== 'TryInto' && name !== 'TryFrom') return;
-    const [from, to] = name === 'TryInto' ? typeArgs : [typeArgs[1], typeArgs[0]];
-    if (arrayTryFrom(from, to)?.mode !== 'borrow') return;
-    relate(
+    relateArrayBorrow(
       this.outlives,
-      input,
+      fn,
+      typeArgs,
+      inputs[0],
       fieldLayout(result, 0, 0, () => this.static())
     );
+    signature.relateBounds((callee, args, ret, higherRanked) => this.applyClosure(callee, args, ret, higherRanked));
   }
 
   /**

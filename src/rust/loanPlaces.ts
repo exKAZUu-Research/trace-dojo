@@ -2,7 +2,8 @@ import type { Annotations } from './annotations';
 import type { Expr, Pattern } from './ast';
 import { normalize } from './infer';
 import type { Place } from './loanGraph';
-import { type Layout, NONE } from './regions';
+import { type Layout, NONE, type Outlives, relate } from './regions';
+import { arrayTryFrom } from './traitConversions';
 import { type FnDef, shallow, type Type } from './types';
 
 /** How a pattern binds variables: by value, or by a shared or a mutable reference (match ergonomics). */
@@ -79,4 +80,30 @@ export function storedElement<V>(fn: FnDef, args: V[]): V | undefined {
   const key = fn.nativeKey;
   if (!key || !/^(Vec|VecDeque|BinaryHeap)<_>::(push|push_back|push_front|insert|extend)$/.test(key)) return undefined;
   return args[key.endsWith('::insert') ? 1 : 0];
+}
+
+/** For a value of a reference coerced through shared references (`&&'a str` to `&str`), the inner reference's layout. */
+export function derefCoercedLayout(annotations: Annotations, expr: Expr, layout: Layout): Layout | undefined {
+  const coercion = annotations.coercions.get(expr);
+  if (coercion?.kind !== 'deref' || coercion.fromMut || coercion.derefs.length === 0) return undefined;
+  let inner = layout;
+  for (const step of coercion.derefs) {
+    if (step !== 'ref' || inner.kind !== 'ref' || inner.target.kind !== 'ref') return undefined;
+    inner = inner.target;
+  }
+  return inner;
+}
+
+/** `TryFrom<&[T]>` for `&[T; N]` borrows the array from the slice: the input outlives what the result holds. */
+export function relateArrayBorrow(
+  outlives: Outlives,
+  fn: FnDef,
+  typeArgs: readonly Type[],
+  input: Layout,
+  held: Layout
+): void {
+  const name = fn.trait?.builtin;
+  if (name !== 'TryInto' && name !== 'TryFrom') return;
+  const [from, to] = name === 'TryInto' ? typeArgs : [typeArgs[1], typeArgs[0]];
+  if (arrayTryFrom(from, to)?.mode === 'borrow') relate(outlives, input, held);
 }
