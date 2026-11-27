@@ -9,6 +9,7 @@ import { isGenericObjectOrIndexType } from './genericTypes';
 import { narrowIndexedOperands, narrowKeyConstraints } from './indexedAccessKeys';
 import { addIndexInfo, isPatternKey } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
+import { isImportTypeCall } from './namespaces';
 import { RecursiveAliases } from './recursiveAliases';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
@@ -108,6 +109,12 @@ export class TypeNodes {
       (node) =>
         node.parent?.type === 'generic_type' ? this.qualifiedType(node) : this.qualifiedReference(node, node, []),
     ],
+    [
+      'member_expression',
+      (node) =>
+        node.parent?.type === 'generic_type' ? this.importMemberType(node) : this.importMemberReference(node, node, []),
+    ],
+    ['call_expression', (node) => (isImportTypeCall(node) ? this.bareImportType(node) : anyType)],
     ['identifier', (node) => this.typeReference(node, node, [])],
     ['generic_type', (node) => this.genericType(node)],
     ['parenthesized_type', (node) => this.typeFromNode(named(node)[0])],
@@ -238,9 +245,45 @@ export class TypeNodes {
     const name = node.childForFieldName('name') as TreeNode;
     const argumentsNode = node.childForFieldName('type_arguments');
     const argumentNodes = argumentsNode ? named(argumentsNode) : [];
-    return name.type === 'nested_type_identifier'
-      ? this.qualifiedReference(node, name, argumentNodes)
-      : this.typeReference(node, name, argumentNodes);
+    if (name.type === 'nested_type_identifier') return this.qualifiedReference(node, name, argumentNodes);
+    if (name.type === 'member_expression') return this.importMemberReference(node, name, argumentNodes);
+    return this.typeReference(node, name, argumentNodes);
+  }
+
+  private bareImportType(node: TreeNode): Type {
+    const module = this.c.namespaces.resolveImportTypeModule(node);
+    if (!module) return errorType;
+    this.c.error(
+      node,
+      `モジュール '${module.name}' は型を参照していませんが、ここでは型として使用されています。'typeof import('${module.name}')' を意図していましたか?`
+    );
+    return errorType;
+  }
+
+  private importMemberType(node: TreeNode): Type {
+    const resolved = this.c.namespaces.resolveImportTypeMember(node);
+    if (resolved.symbol) {
+      const property = node.childForFieldName('property') ?? node;
+      return this.reportUnusableSymbol(node, property, resolved.symbol)
+        ? errorType
+        : this.declaredTypeOf(resolved.symbol);
+    }
+    if (resolved.error) this.c.error(resolved.site ?? node, resolved.error);
+    return errorType;
+  }
+
+  private importMemberReference(node: TreeNode, name: TreeNode, argumentNodes: TreeNode[]): Type {
+    const type = this.importMemberType(name);
+    if (type === errorType) return errorType;
+    const symbol = this.c.namespaces.resolveImportTypeMember(name).symbol;
+    if (!symbol) return type;
+    const parameters = this.c.signatures.typeParametersOfSymbol(symbol);
+    if (parameters.length === 0) {
+      if (argumentNodes.length > 0) this.c.error(node, `型 ${name.text} は型引数をとりません。`);
+      return type;
+    }
+    if (!this.checkTypeArgumentCount(node, name.text, parameters, argumentNodes.length)) return errorType;
+    return this.referenceWithArguments(node, symbol, parameters, argumentNodes);
   }
 
   /** `N.Box<number>` or `N.Box`: the generic a namespace exports, applied to its type arguments or its defaults. */
@@ -307,7 +350,7 @@ export class TypeNodes {
     const reference = list?.parent;
     if (list?.type !== 'type_arguments' || reference?.type !== 'generic_type') return undefined;
     const name = reference.childForFieldName('name');
-    if (!name || name.type === 'nested_type_identifier') return undefined;
+    if (!name || name.type === 'nested_type_identifier' || name.type === 'member_expression') return undefined;
     const arguments_ = named(list);
     const target = this.resolveTypeName(reference, name, arguments_.length);
     if (target === 'stringMapping') return stringType;
@@ -502,7 +545,7 @@ export class TypeNodes {
       else if (node.type === 'generic_type') {
         const name = node.childForFieldName('name');
         const argumentsNode = node.childForFieldName('type_arguments');
-        if (name && name.type !== 'nested_type_identifier')
+        if (name && name.type !== 'nested_type_identifier' && name.type !== 'member_expression')
           this.resolveTypeName(node, name, argumentsNode ? named(argumentsNode).length : 0);
       } else if (isStandaloneTypeReference(node)) this.resolveTypeName(node, node, 0);
     }

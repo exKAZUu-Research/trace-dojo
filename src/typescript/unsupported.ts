@@ -1,11 +1,25 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
+import { erasedClassMembers, erasedStatementTypes, erasedTypeNodes } from './erasedSyntax';
 
-/** Syntax this interpreter does not run yet, by node type, named as learners know it. */
-const unsupportedNodes: Record<string, string> = {
-  import: 'import や export',
-};
+const nonRuntimeTypeContainers = new Set([
+  ...erasedStatementTypes,
+  ...erasedTypeNodes,
+  ...erasedClassMembers,
+  'opting_type_annotation',
+  'omitting_type_annotation',
+  'adding_type_annotation',
+  'implements_clause',
+  'extends_type_clause',
+]);
+
+const initializerOwners = new Set([
+  'variable_declarator',
+  'field_definition',
+  'required_parameter',
+  'optional_parameter',
+]);
 
 /** The modules a program may import, which are the Node.js modules this interpreter provides. */
 export const importableModules = new Set(['fs', 'node:fs']);
@@ -22,9 +36,8 @@ export function rejectUnsupportedSyntax(root: TreeNode): void {
     if (diagnostics.length < 5) diagnostics.push({ row: node.startPosition.row, message: unsupportedMessage(feature) });
   };
   const visit = (node: TreeNode): void => {
-    const feature = node.isNamed ? (unsupportedNodes[node.type] as string | undefined) : undefined;
-    if (feature) {
-      reject(node, feature);
+    if (node.isNamed && node.type === 'import' && !isTypePositionImport(node)) {
+      reject(node, 'import や export');
       return;
     }
     const feature2 = unsupportedForm(node);
@@ -33,6 +46,21 @@ export function rejectUnsupportedSyntax(root: TreeNode): void {
   };
   visit(root);
   if (diagnostics.length > 0) throw new CompileError(diagnostics);
+}
+
+function isTypePositionImport(node: TreeNode): boolean {
+  const call = node.parent;
+  if (call?.type !== 'call_expression' || call.childForFieldName('function')?.id !== node.id) return false;
+  let child: TreeNode = call;
+  for (let parent = call.parent; parent; child = parent, parent = parent.parent) {
+    if (parent.type === 'computed_property_name' || parent.type === 'decorator') return false;
+    if (initializerOwners.has(parent.type) && parent.childForFieldName('value')?.id === child.id) return false;
+    if (parent.type === 'as_expression' || parent.type === 'satisfies_expression') {
+      return parent.namedChildren.find((part) => part?.type !== 'comment')?.id !== child.id;
+    }
+    if (nonRuntimeTypeContainers.has(parent.type)) return true;
+  }
+  return false;
 }
 
 /** A feature that a node of a supported type spells in a form this interpreter does not run. */

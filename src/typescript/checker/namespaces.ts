@@ -12,6 +12,7 @@ import {
   anonymousObject,
   anyType,
   emptyStructure,
+  errorType,
   intersectionOf,
   type ObjectType,
   simpleProperty,
@@ -256,8 +257,74 @@ export class Namespaces {
     return module && this.objectType(module);
   }
 
-  private moduleNamed(name: string): Sym | undefined {
+  moduleNamed(name: string): Sym | undefined {
     return this.c.libraryBinder.ambientModules.get(name) ?? this.c.binder.ambientModules.get(name);
+  }
+
+  /** Resolves the target module of a type-position `import("...")`, reporting invalid specifiers or unknown modules. */
+  resolveImportTypeModule(callNode: TreeNode): Sym | undefined {
+    const argumentsNode = callNode.childForFieldName('arguments');
+    const first = argumentsNode ? named(argumentsNode)[0] : undefined;
+    const literal =
+      first?.type === 'string'
+        ? first
+        : first?.type === 'literal_type' && named(first)[0]?.type === 'string'
+          ? named(first)[0]
+          : undefined;
+    if (!literal) {
+      this.c.error(first ?? callNode, '文字列リテラルが必要です。');
+      return undefined;
+    }
+    const specifier = stringValue(literal);
+    const module = this.moduleNamed(specifier);
+    if (!module) {
+      this.c.error(first ?? literal, `モジュール '${specifier}' またはそれに対応する型宣言が見つかりません。`);
+      return undefined;
+    }
+    return module;
+  }
+
+  /** Resolves `typeof import("...")` to the module's namespace object type. */
+  importTypeQuery(callNode: TreeNode): Type {
+    const module = this.resolveImportTypeModule(callNode);
+    return module ? this.objectType(module) : errorType;
+  }
+
+  /** Resolves `import("...").A.B` in type space, enforcing unavailable Node member checks and TS2694 diagnostics. */
+  resolveImportTypeMember(node: TreeNode): { symbol?: Sym; error?: string; site?: TreeNode } {
+    const parts = importTypeMemberChain(node);
+    if (!parts) return {};
+    const { call, members } = parts;
+    const module = this.resolveImportTypeModule(call);
+    if (!module) return {};
+    const firstUnavailable = this.isLibraryModule(module) && unavailableNodeMember(`"${module.name}"`, members[0].text);
+    if (firstUnavailable) {
+      this.c.error(members[0], unsupportedMessage(firstUnavailable));
+      return {};
+    }
+    let current = module;
+    let label = `"${module.name}"`;
+    for (const [index, part] of members.entries()) {
+      const isLast = index === members.length - 1;
+      const member = this.importContainerMember(current, part.text, isLast ? 'type' : 'value');
+      if (
+        !member ||
+        (!isLast && !member.namespaceExports && !(member.valueKind === 'enum' && index === members.length - 2))
+      ) {
+        return {
+          error: `名前空間 '${label}' にエクスポートされたメンバー '${part.text}' がありません。`,
+          site: part,
+        };
+      }
+      current = member;
+      label = `${label}.${part.text}`;
+    }
+    return { symbol: current };
+  }
+
+  private importContainerMember(container: Sym, name: string, meaning: 'value' | 'type'): Sym | undefined {
+    if (container.namespaceExports) return this.exportedMember(container, name, meaning);
+    return container.enumMembers?.values.get(name);
   }
 
   /** Reports a default import of a module without a default export, and a name a module does not export. */
@@ -352,6 +419,23 @@ export class Namespaces {
       this.c.flow.current = outer;
     }
   }
+}
+
+export function isImportTypeCall(node: TreeNode): boolean {
+  return node.type === 'call_expression' && node.childForFieldName('function')?.type === 'import';
+}
+
+export function importTypeMemberChain(node: TreeNode): { call: TreeNode; members: TreeNode[] } | undefined {
+  const members: TreeNode[] = [];
+  let current = node;
+  while (current.type === 'member_expression') {
+    const object = current.childForFieldName('object');
+    const property = current.childForFieldName('property');
+    if (!object || !property) return undefined;
+    members.unshift(property);
+    current = object;
+  }
+  return isImportTypeCall(current) && members.length > 0 ? { call: current, members } : undefined;
 }
 
 function canonicalImportSpecifier(node: TreeNode): string {

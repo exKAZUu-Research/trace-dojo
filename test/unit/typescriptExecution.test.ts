@@ -803,3 +803,33 @@ console.log(existsSync('missing'), nodeExists('missing'), ns.existsSync('missing
     '1: fs.readFile は、この採点環境では使えません。',
   ]);
 });
+
+test('resolves type-position import("fs") queries and type references while rejecting dynamic import()', () => {
+  const source = `type FsModule = typeof import('fs');
+const fs2: FsModule = require('fs') as typeof import('fs');
+let p: import('fs').PathLike = 'a.txt';
+const exists: typeof import('node:fs').existsSync = fs2.existsSync;
+declare module 'custom-mod' {
+  export interface Box<T> { value: T }
+  export const version: number;
+}
+const boxed: import('custom-mod').Box<string> = { value: 'ok' };
+const ver: typeof import('custom-mod').version = 1;
+console.log(typeof exists, p, boxed.value, ver);`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'function a.txt ok 1\n',
+    uncaughtException: undefined,
+  });
+  expect(diagnosticsOf("const m = import('fs');")).toEqual(['1: import や export は、この採点環境では使えません。']);
+  expect(diagnosticsOf("type Bad = typeof import('no-such');")).toEqual([
+    "1: モジュール 'no-such' またはそれに対応する型宣言が見つかりません。",
+  ]);
+  expect(diagnosticsOf("type Bad = import('fs').NoSuch;")).toEqual([
+    "1: 名前空間 '\"fs\"' にエクスポートされたメンバー 'NoSuch' がありません。",
+  ]);
+  expect(diagnosticsOf("type Bad = typeof import('fs').readFile;")).toEqual([
+    '1: fs.readFile は、この採点環境では使えません。',
+  ]);
+  expect(diagnosticsOf("type Bad = import('fs').Stats;")).toEqual(['1: fs.Stats は、この採点環境では使えません。']);
+});
