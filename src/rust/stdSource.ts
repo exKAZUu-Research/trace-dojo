@@ -1606,15 +1606,14 @@ pub mod future {
         type Output = T;
         fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<T>;
     }
-    /** Also names the output \`T\`, which an impl cannot take from the closure's bound alone. */
-    pub struct PollFn<F, T>;
-    impl<T, F: FnMut(&mut Context) -> Poll<T>> Future for PollFn<F, T> {
+    pub struct PollFn<F>;
+    impl<T, F: FnMut(&mut Context) -> Poll<T>> Future for PollFn<F> {
         type Output = T;
         fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<T>;
     }
     pub fn ready<T>(t: T) -> Ready<T>;
     pub fn pending<T>() -> Pending<T>;
-    pub fn poll_fn<T, F: FnMut(&mut Context) -> Poll<T>>(f: F) -> PollFn<F, T>;
+    pub fn poll_fn<T, F: FnMut(&mut Context) -> Poll<T>>(f: F) -> PollFn<F>;
 }
 pub mod task {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

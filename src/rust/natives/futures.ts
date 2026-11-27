@@ -8,7 +8,7 @@ define({
   'AsyncFuture<_>::poll': pollFuture,
   'Ready<_>::poll': pollFuture,
   'Pending<_>::poll': pollFuture,
-  'PollFn<_, _>::poll': pollFuture,
+  'PollFn<_>::poll': pollFuture,
   // A `Box<F>` (or a `Pin<Box<F>>`) is the future it holds, which a pinned reference to it refers to.
   'Box<_>::poll': ([pinned, context], ctx) => pollInner(ctx, pinned, context),
   'Pin<Box<_>>::poll': ([pinned, context], ctx) => pollInner(ctx, pinned, context),
