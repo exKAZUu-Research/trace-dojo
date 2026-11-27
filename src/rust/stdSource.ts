@@ -1676,6 +1676,12 @@ pub mod time {
     impl super::ops::Add for Duration { type Output = Duration; fn add(self, rhs: Duration) -> Duration; }
     impl super::ops::Sub for Duration { type Output = Duration; fn sub(self, rhs: Duration) -> Duration; }
     impl super::ops::Mul<u32> for Duration { type Output = Duration; fn mul(self, rhs: u32) -> Duration; }
+    impl super::ops::Mul<Duration> for u32 { type Output = Duration; fn mul(self, rhs: Duration) -> Duration; }
+    impl super::ops::Div<u32> for Duration { type Output = Duration; fn div(self, rhs: u32) -> Duration; }
+    impl super::ops::AddAssign for Duration { fn add_assign(&mut self, rhs: Duration); }
+    impl super::ops::SubAssign for Duration { fn sub_assign(&mut self, rhs: Duration); }
+    impl super::ops::MulAssign<u32> for Duration { fn mul_assign(&mut self, rhs: u32); }
+    impl super::ops::DivAssign<u32> for Duration { fn div_assign(&mut self, rhs: u32); }
 }
 pub mod thread {
     use super::pseudo::Any;

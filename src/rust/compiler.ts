@@ -1066,10 +1066,6 @@ function readRef(c: Compiler, expr: ExprOf<'ref'>): Eval {
   return dropsBorrowedTemporary(c, expr.operand, c.read(expr.operand));
 }
 
-/**
- * A raw pointer made of a reference: to the place a borrow written there borrows (so it reads what the place holds
- * later), or else to the place a `&mut` is, or to the value a shared reference refers to.
- */
 /** Runs a block whose variables go when it ends, after the temporaries of its tail (edition 2024). */
 function scoped(run: Eval, declared: number[]): Eval {
   return (frame) => {
@@ -1091,6 +1087,10 @@ function scoped(run: Eval, declared: number[]): Eval {
   };
 }
 
+/**
+ * A raw pointer made of a reference: to the place a borrow written there borrows (so it reads what the place holds
+ * later), or else to the place a `&mut` is, or to the value a shared reference refers to.
+ */
 function rawPointer(c: Compiler, expr: Expr, read: Eval): Eval {
   if (expr.kind === 'ref' && !expr.raw) {
     const place = c.place(expr.operand);

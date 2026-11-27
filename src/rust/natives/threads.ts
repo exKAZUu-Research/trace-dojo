@@ -15,7 +15,7 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { call, define, deref, err, type NativeContext, none, ok, panic, some } from './support';
+import { call, define, deref, err, type NativeContext, none, ok, panic, placeOf, some } from './support';
 
 /**
  * The threads of a run, which run one at a time by a fixed rule, since the interpreter runs one thread of JavaScript:
@@ -440,7 +440,27 @@ define({
     return new DurationValue(duration(a) - duration(b));
   },
   'Duration::mul': ([d, factor]) => new DurationValue(duration(d) * (factor as bigint)),
+  'Duration::div': ([d, divisor], ctx) => divided(ctx, d, divisor),
+  // `u32 * Duration`, the one operator impl std gives `u32` with a right operand that is not a number.
+  'u32::mul': ([factor, d]) => new DurationValue((factor as bigint) * duration(d)),
+  'Duration::add_assign': ([d, other]) => assigned(d, new DurationValue(duration(d) + duration(other))),
+  'Duration::sub_assign': ([d, other], ctx) => {
+    if (duration(d) < duration(other)) panic(ctx, 'overflow when subtracting durations');
+    return assigned(d, new DurationValue(duration(d) - duration(other)));
+  },
+  'Duration::mul_assign': ([d, factor]) => assigned(d, new DurationValue(duration(d) * (factor as bigint))),
+  'Duration::div_assign': ([d, divisor], ctx) => assigned(d, divided(ctx, d, divisor)),
 });
+
+function divided(ctx: NativeContext, d: Value, divisor: Value): DurationValue {
+  if (divisor === 0n) panic(ctx, 'divide by zero error when dividing duration by scalar');
+  return new DurationValue(duration(d) / (divisor as bigint));
+}
+
+function assigned(target: Value, value: Value): Value {
+  placeOf(target).set(value);
+  return UNIT_VALUE;
+}
 
 function cellPlace(target: CellBox): Value {
   return { isPlace: true, get: () => target.value, set: (value: Value) => (target.value = value) };

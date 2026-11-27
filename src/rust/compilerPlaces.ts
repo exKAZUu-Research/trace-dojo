@@ -161,7 +161,7 @@ function indexPlace(c: Compiler, expr: ExprOf<'index'>): PlaceEval {
   }
   if (res.range) {
     if (res.container === 'str') return strRangePlace(c, base, index, span);
-    const read = compileIndex(c, expr);
+    const read = sliceRangeIndex(base, index, span);
     return (frame) => new CellPlace(read(frame));
   }
   return (frame) => {
@@ -360,7 +360,9 @@ export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
   }
   if (res.range) {
     if (res.container === 'str') return strRangeIndex(c, base, index, span);
-    return sliceRangeIndex(placeThrough(c, expr.operand, res.derefs), index, span);
+    // A read derefs through the program's `Deref`, not `DerefMut`, which the type may not implement.
+    const owner = res.derefs.includes('user') ? readPlace(base) : placeThrough(c, expr.operand, res.derefs);
+    return sliceRangeIndex(owner, index, span);
   }
   return (frame) => {
     const container = base(frame);

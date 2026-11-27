@@ -378,7 +378,7 @@ export class Interpreter implements CallSupport {
     const place = t.kind === 'ref' && isPlace(value) ? value : new CellPlace(value);
     const next = this.program.traitDef('Iterator').methods.get('next') as FnDef;
     const frame = this.runtime.frames.at(-1) as Frame;
-    return new IterValue(
+    const iter = new IterValue(
       () => {
         const result = this.callFn(next, [self], [place], undefined, { row: 0, col: 1 }, frame) as EnumValue;
         return result.variant === 1 ? result.fields[0] : DONE;
@@ -387,6 +387,17 @@ export class Interpreter implements CallSupport {
       undefined,
       [place]
     );
+    // An iterator taken by value is the loop's, which drops it when the loop ends however it ends.
+    if (t.kind !== 'ref') {
+      iter.releases = [
+        () => {
+          const owned = place.get();
+          place.set(MOVED);
+          this.dropper.drop(owned, self);
+        },
+      ];
+    }
+    return iter;
   }
 
   // -------------------------------------------------------------------------------------------------------------------
