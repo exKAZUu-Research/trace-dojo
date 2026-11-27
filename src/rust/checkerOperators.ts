@@ -45,7 +45,8 @@ function settleBinary(
     c.requireKnownTypes();
     compileError(expr.opSpan, `型が決まりません（${typeToString(resolve(leftType))} の型を書いてください）。`);
   }
-  const output = setOperation(c, expr, left, right) ?? settledOutput(c, expr, l, r);
+  const output =
+    setOperation(c, expr, left, right) ?? overloadedOutput(c, expr, left, right) ?? settledOutput(c, expr, l, r);
   if (!output) badOperands(expr, leftType, rightType);
   if (!c.unifier.tryUnify(result, output)) {
     compileError(
@@ -53,6 +54,18 @@ function settleBinary(
       `${typeToString(resolve(left))} ${expr.op} ${typeToString(resolve(right))} の結果は ${typeToString(resolve(output))} ですが、${typeToString(resolve(result))} が必要です。`
     );
   }
+}
+
+/** The result of an operator whose left side turned out to be a type an operator trait's impl takes (a struct). */
+function overloadedOutput(
+  c: Checker,
+  expr: Extract<Expr, { kind: 'binary' }>,
+  left: Type,
+  right: Type
+): Type | undefined {
+  const traits = BINARY_TRAITS[expr.op];
+  if (!traits || !isOverloadable(numericOperand(left)) || isSetOperand(left, expr.op)) return undefined;
+  return overloadedOperator(c, expr, traits[0], traits[1], left, [right], expr.opSpan, expr.op);
 }
 
 /** The result type of an operator on numbers, booleans, or strings whose types are known, if std implements it. */
