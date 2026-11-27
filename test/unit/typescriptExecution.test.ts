@@ -1221,4 +1221,15 @@ test('enforces variance, thenable, import-query, optional-assertion, ambient-mod
   expect('traceItems' in factoryTrace ? factoryTrace.traceItems.at(-1)?.vars : undefined).toEqual({
     'Returned.count': 1,
   });
+
+  expect(
+    executeProgram(
+      'typescript',
+      'async function wrap<T>(p: Promise<T>): Promise<T> { return await p; }\nfunction wrapUnion<T>(p: Promise<T> | undefined): Promise<T> | undefined { return p; }\nfunction wrapLike<T>(p: PromiseLike<T>): PromiseLike<T> { return p; }\nasync function main() {\n  console.log(await wrap(new Promise((resolve) => resolve("slow"))), await wrapUnion(new Promise((resolve) => resolve(42))), await wrapLike(new Promise((resolve) => resolve(true))));\n}\nmain();'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'slow 42 true\n',
+    uncaughtException: undefined,
+  });
 });

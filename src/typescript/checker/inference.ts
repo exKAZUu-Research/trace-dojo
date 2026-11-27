@@ -108,7 +108,17 @@ interface InferencePath {
 /** Infers type arguments from the types that are matched against the types their parameters appear in. */
 export class TypeInference {
   private depth = 0;
+  private readonly nonInferrableParameters = new Map<number, TypeParameter>();
   constructor(private readonly c: Checker) {}
+
+  contextualMapper(
+    parameters: TypeParameter[],
+    inferences: Map<number, Inference>,
+    fixes: (parameter: TypeParameter) => boolean = () => false,
+    keepsFixed: (parameter: TypeParameter) => boolean = () => false
+  ): Mapper | undefined {
+    return this.partialMapper(parameters, inferences, fixes, keepsFixed, true);
+  }
 
   /**
    * The type arguments inferred so far, with each parameter `fixes` selects fixed to its constraint or `unknown` when
@@ -119,13 +129,16 @@ export class TypeInference {
     parameters: TypeParameter[],
     inferences: Map<number, Inference>,
     fixes: (parameter: TypeParameter) => boolean = () => false,
-    keepsFixed: (parameter: TypeParameter) => boolean = () => false
+    keepsFixed: (parameter: TypeParameter) => boolean = () => false,
+    useNonInferrable = false
   ): Mapper | undefined {
     const mapper: Mapper = new Map();
     for (const parameter of parameters) {
       const inference = inferences.get(parameter.id);
       const fixed = fixes(parameter);
-      const type = this.provisionalType(parameter, inference, fixed);
+      const type =
+        this.provisionalType(parameter, inference, fixed) ??
+        (useNonInferrable ? this.nonInferrableOf(parameter) : undefined);
       if (!type) continue;
       mapper.set(parameter.id, type);
       if (fixed && inference && keepsFixed(parameter)) inference.fixed = type;
@@ -142,6 +155,15 @@ export class TypeInference {
     if (!inference || !hasCandidates(inference)) return fixed ? (parameter.constraint?.() ?? unknownType) : undefined;
     const type = this.inferredType(parameter, inference, fixed);
     return inference.priority === InferencePriority.ReturnType && isAnyLike(type) ? undefined : type;
+  }
+
+  private nonInferrableOf(parameter: TypeParameter): TypeParameter {
+    let placeholder = this.nonInferrableParameters.get(parameter.id);
+    if (!placeholder) {
+      placeholder = { ...parameter, id: newTypeId(), isNonInferrable: true };
+      this.nonInferrableParameters.set(parameter.id, placeholder);
+    }
+    return placeholder;
   }
 
   finalMapper(signature: Signature, parameters: TypeParameter[], inferences: Map<number, Inference>): Mapper {
@@ -329,7 +351,7 @@ export class TypeInference {
   private inferPair(run: InferenceRun, source: Type, target: Type, covariant: boolean, path: InferencePath): void {
     const { active } = path;
     this.c.budget.spend();
-    if (target.noInfer || !couldContainTypeVariables(target)) return;
+    if (isNonInferrableParameter(source) || target.noInfer || !couldContainTypeVariables(target)) return;
     const variable = inferenceVariable(target, run);
     if (variable) {
       this.inferToParameter(run, source, variable, covariant, path);
@@ -502,7 +524,7 @@ export class TypeInference {
     path: InferencePath
   ): void {
     const inference = run.inferences.get(target.id);
-    if (!inference) return;
+    if (!inference || this.containsNonInferrable(source)) return;
     run.reportInference?.(run.priority);
     if (inference.fixed || run.priority > inference.priority) return;
     if (run.priority < inference.priority) {
@@ -517,6 +539,20 @@ export class TypeInference {
       inference.contravariant.push(source);
     if ((run.priority & InferencePriority.ReturnType) === 0 && !isTopLevelTypeParameter(path.originalTarget, target))
       inference.topLevel = false;
+  }
+
+  private containsNonInferrable(type: Type): boolean {
+    if (this.nonInferrableParameters.size === 0 || !couldContainTypeVariables(type)) return false;
+    const pending = [type];
+    const seen = new Set<Type>();
+    for (let current = pending.pop(); current; current = pending.pop()) {
+      this.c.budget.spend();
+      if (seen.has(current)) continue;
+      if (isNonInferrableParameter(current)) return true;
+      seen.add(current);
+      for (const child of nonInferrableChildren(current)) pending.push(child);
+    }
+    return false;
   }
 
   private recordCovariantCandidate(inference: Inference, source: Type, depth: number): void {
@@ -1204,6 +1240,25 @@ export function newInferenceRun(parameters: TypeParameter[], contextualSignature
 
 function hasCandidates(inference: Inference | undefined): boolean {
   return !!inference && (inference.candidates.length > 0 || inference.contravariant.length > 0);
+}
+
+function isNonInferrableParameter(type: Type): boolean {
+  return type.kind === 'typeParameter' && type.isNonInferrable === true;
+}
+
+function nonInferrableChildren(type: Type): readonly Type[] {
+  if (type.kind === 'conditional') {
+    return [type.checkType, type.extendsType, ...(type.mapper?.values() ?? [])];
+  }
+  const children = childTypes(type);
+  if (type.kind !== 'object') return children;
+  const mapped =
+    type.objectKind === 'mapped' && type.mapped
+      ? [type.mapped.constraint, type.mapped.template, type.mapped.nameType, type.mapped.source].filter(
+          (child): child is Type => child !== undefined
+        )
+      : [];
+  return [...children, ...(type.aliasArguments ?? []), ...(type.mapper?.values() ?? []), ...mapped];
 }
 
 function inferenceVariable(type: Type, run?: InferenceRun): TypeParameter | undefined {

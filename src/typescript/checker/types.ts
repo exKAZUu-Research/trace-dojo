@@ -279,6 +279,8 @@ export interface TypeParameter {
   isThisType?: boolean;
   /** The variance its `in` and `out` annotations declare, which relates instantiations by their type arguments. */
   variance?: 'in' | 'out' | 'in out';
+  /** A placeholder substituted for an uninferred outer type parameter when probing a nested call's contextual type. */
+  isNonInferrable?: true;
 }
 
 export function thisParameter(type: ObjectType): TypeParameter {

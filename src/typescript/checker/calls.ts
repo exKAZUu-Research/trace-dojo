@@ -1145,7 +1145,7 @@ export class Calls {
         signature.returnType(),
         true
       );
-    const returnContext = this.c.inference.partialMapper(parameters, run.inferences);
+    const returnContext = this.c.inference.contextualMapper(parameters, run.inferences);
     // A `this` parameter infers from the object the method is called on.
     if (receiver && signature.thisType)
       this.c.inference.inferTypes({ ...run, contextualSignatures: false }, receiver, signature.thisType, true);
@@ -1164,7 +1164,7 @@ export class Calls {
         this.inferenceTuple(
           arguments_.slice(restIndex),
           parameterTypes.slice(restIndex),
-          this.c.inference.partialMapper(parameters, run.inferences),
+          this.c.inference.contextualMapper(parameters, run.inferences),
           signature.parameters.at(-1)?.type
         ),
         (signature.parameters.at(-1) as Parameter).type,
@@ -1183,7 +1183,7 @@ export class Calls {
         run,
         arg,
         parameterType,
-        this.c.inference.partialMapper(parameters, run.inferences, fixes, typesCallbackParameter)
+        this.c.inference.contextualMapper(parameters, run.inferences, fixes, typesCallbackParameter)
       );
     }
     const mapper = this.c.inference.finalMapper(signature, parameters, run.inferences);
