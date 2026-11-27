@@ -117,6 +117,7 @@ const overloadFollowerTypes = new Set([
   'method_signature',
   'method_definition',
 ]);
+const functionOverloadTypes = new Set(['function_signature', 'function_declaration', 'generator_function_declaration']);
 
 /** Checks function expressions and bodies, inferring the types they return. */
 export class FunctionChecker {
@@ -132,6 +133,7 @@ export class FunctionChecker {
   private readonly inferredReturns = new Map<number, Type>();
   /** The flow at the `return` statements of each checked function body whose end no path reaches, by function. */
   private readonly returnFlows = new Map<number, FlowState>();
+  private readonly checkedAmbientOverloadSymbols = new Set<number>();
 
   constructor(private readonly c: Checker) {}
 
@@ -868,6 +870,7 @@ export class FunctionChecker {
     if (body && isAmbient(node)) this.c.error(body, '実装は環境コンテキストでは宣言できません。');
     const name = node.childForFieldName('name');
     const symbol = name ? this.c.scopeOf(node).lookupValue(name.text) : undefined;
+    if (symbol) this.checkAmbientOverloadConsistency(symbol);
     const signature = this.c.signatures.signatureOf(node);
     this.checkFunctionLike(node, signature, undefined);
     if (symbol) this.checkOverloads(symbol, node, signature);
@@ -878,6 +881,9 @@ export class FunctionChecker {
     this.c.signatures.signatureOf(node);
     checkVarianceAnnotations(this.c, node);
     this.checkSignatureAnnotations(node);
+    const ownName = node.type === 'function_signature' ? node.childForFieldName('name') : undefined;
+    const symbol = ownName ? this.c.scopeOf(node).lookupValue(ownName.text) : undefined;
+    if (symbol) this.checkAmbientOverloadConsistency(symbol);
     if (isAmbient(node)) return;
     const { later, next } = followingDeclarations(node);
     // An optional method needs no implementation, unless a later declaration of the method follows.
@@ -901,6 +907,28 @@ export class FunctionChecker {
     this.c.error(node.childForFieldName('name') ?? node, '関数の実装がないか、宣言の直後にありません。');
   }
 
+  private checkAmbientOverloadConsistency(symbol: Sym): void {
+    if (this.checkedAmbientOverloadSymbols.has(symbol.id)) return;
+    this.checkedAmbientOverloadSymbols.add(symbol.id);
+    const declarations = symbol.valueDeclarations.filter(
+      (declaration) => !this.c.isLibrary(declaration) && functionOverloadTypes.has(declaration.type)
+    );
+    if (declarations.length < 2) return;
+    const firstAmbientBody = isAmbient(declarationContainer(declarations[0]));
+    const sameAmbientBody = declarations.every((decl) => isAmbient(declarationContainer(decl)) === firstAmbientBody);
+    const expectedAmbient =
+      sameAmbientBody && declarations.some((decl) => decl.childForFieldName('body') !== null && !isAmbient(decl))
+        ? false
+        : isAmbient(declarations[0]);
+    for (const declaration of declarations) {
+      if (isAmbient(declaration) === expectedAmbient) continue;
+      this.c.error(
+        declaration.childForFieldName('name') ?? declaration,
+        'オーバーロードのシグネチャは、すべてアンビエントであるか、すべてアンビエントでないかのどちらかである必要があります。'
+      );
+    }
+  }
+
   /** An overload and the declaration after it, which must agree on being static and on being exported. */
   private checkOverloadModifiers(node: TreeNode, next: TreeNode): void {
     if (hasToken(next, 'static') !== hasToken(node, 'static'))
@@ -908,7 +936,7 @@ export class FunctionChecker {
         next.childForFieldName('name') ?? next,
         'オーバーロードの static 修飾子は一致しなければいけません。'
       );
-    if ((node.parent?.type === 'export_statement') !== (next.parent?.type === 'export_statement'))
+    if (isExportedOverload(node) !== isExportedOverload(next))
       this.c.error(
         node.childForFieldName('name') ?? node,
         'オーバーロードのシグネチャはすべてがエクスポート済みであるか、またはエクスポート済みでない必要があります。'
@@ -1138,10 +1166,42 @@ function mayReturnNever(node: TreeNode): boolean {
  * signature and its implementation are the declarations of neighbouring export statements.
  */
 function followingDeclarations(node: TreeNode): { later: TreeNode[]; next: TreeNode | undefined } {
-  const item = node.parent?.type === 'export_statement' ? node.parent : node;
+  let item = node;
+  while (item.parent?.type === 'ambient_declaration' || item.parent?.type === 'export_statement') {
+    item = item.parent;
+  }
   const siblings = item.parent ? named(item.parent) : [];
-  const later = siblings.slice(siblings.findIndex((sibling) => sibling.id === item.id) + 1);
-  const next =
-    later[0]?.type === 'export_statement' ? (later[0].childForFieldName('declaration') ?? later[0]) : later[0];
-  return { later, next };
+  const later = siblings
+    .slice(siblings.findIndex((sibling) => sibling.id === item.id) + 1)
+    .map((sibling) => unwrapOverloadSibling(sibling));
+  return { later, next: later[0] };
+}
+
+function unwrapOverloadSibling(node: TreeNode): TreeNode {
+  let current = node;
+  for (;;) {
+    if (current.type === 'export_statement') {
+      current = current.childForFieldName('declaration') ?? current;
+      continue;
+    }
+    if (current.type === 'ambient_declaration') {
+      current = named(current)[0] ?? current;
+      continue;
+    }
+    return current;
+  }
+}
+
+function declarationContainer(node: TreeNode): TreeNode {
+  let current = node;
+  while (current.parent?.type === 'ambient_declaration' || current.parent?.type === 'export_statement') {
+    current = current.parent;
+  }
+  return current.parent ?? current;
+}
+
+function isExportedOverload(node: TreeNode): boolean {
+  let current: TreeNode | null = node.parent;
+  if (current?.type === 'ambient_declaration') current = current.parent;
+  return current?.type === 'export_statement';
 }
