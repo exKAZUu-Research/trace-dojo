@@ -742,8 +742,8 @@ export class StatementChecker {
 
   private iteratedLoopType(loop: TreeNode, right: TreeNode, rightType: Type, reportErrors: boolean): Type {
     const element = hasToken(loop, 'await')
-      ? this.c.patterns.asyncIteratedType(reportErrors ? right : undefined, rightType)
-      : this.c.patterns.iteratedType(reportErrors ? right : undefined, rightType);
+      ? this.c.patterns.asyncIteratedType(reportErrors ? right : undefined, rightType, 'loop')
+      : this.c.patterns.iteratedType(reportErrors ? right : undefined, rightType, 'loop');
     return this.c.literals.inlineBindingType(element, right);
   }
 

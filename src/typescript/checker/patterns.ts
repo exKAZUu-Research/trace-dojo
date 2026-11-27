@@ -37,6 +37,7 @@ import {
   undefinedType,
   unionOf,
   type UnionType,
+  unknownType,
 } from './types';
 
 export { defaultedTarget } from './bindingPatternTypes';
@@ -523,7 +524,7 @@ export class BindingPatterns {
   }
 
   private bindArrayPattern(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions, assigned?: Type): void {
-    if (isEmptyPattern(pattern)) this.iteratedType(pattern, type);
+    if (isEmptyPattern(pattern)) this.iteratedType(pattern, type, 'destructure');
     for (const { element, index } of arrayPatternElements(pattern)) {
       if (!containsBinding(element, options.binding)) continue;
       if (element.type === 'rest_pattern') {
@@ -541,7 +542,7 @@ export class BindingPatterns {
     if (isAnyLike(type)) return anyType;
     if (isTuple(type)) return this.tupleElementAt(node, type, index);
     if (type.kind === 'union' && type.types.some(isTuple)) return this.unionElementAt(node, type, index);
-    return this.iteratedType(node, type);
+    return this.iteratedType(node.parent ?? node, type, 'destructure');
   }
 
   /**
@@ -560,7 +561,7 @@ export class BindingPatterns {
     return unionOf(
       type.types.map((member) => {
         if (!isTuple(member) || reaches(member)) return this.elementAt(node, member, index);
-        return allTuples ? undefinedType : this.iteratedType(node, member);
+        return allTuples ? undefinedType : this.iteratedType(node.parent ?? node, member, 'destructure');
       }),
       true
     );
@@ -586,7 +587,9 @@ export class BindingPatterns {
     const source = binding ? this.arrayPatternSource(type) : type;
     if (source.kind === 'union' && source.types.every(isTuple))
       return unionOf(source.types.map((member) => this.sliceTuple(member, from)));
-    return isTuple(source) ? this.sliceTuple(source, from) : this.c.arrayType(this.iteratedType(pattern, type));
+    return isTuple(source)
+      ? this.sliceTuple(source, from)
+      : this.c.arrayType(this.iteratedType(pattern, type, 'destructure'));
   }
 
   private sliceTuple(type: ObjectType, from: number): Type {
@@ -604,27 +607,31 @@ export class BindingPatterns {
   }
 
   /** The type of the elements a `for...of` loop or a spread takes from a value. */
-  iteratedType(node: TreeNode | undefined, type: Type): Type {
+  iteratedType(
+    node: TreeNode | undefined,
+    type: Type,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar' = 'spread'
+  ): Type {
     if (isAnyLike(type)) return anyType;
     if (type.kind === 'union')
       return unionOf(
-        type.types.map((member) => this.iteratedType(node, member)),
+        type.types.map((member) => this.iteratedType(node, member, consumer)),
         true
       );
     if (type.kind === 'object' && this.c.isArrayOrTuple(type)) return this.c.elementTypeOf(type);
     const bound = this.iterableConstraint(type);
-    if (bound) return this.iteratedType(node, bound);
+    if (bound) return this.iteratedType(node, bound, consumer);
     if (
       isIntrinsic(type, 'string') ||
       (type.kind === 'literal' && typeof type.value === 'string') ||
       type.kind === 'templateLiteral'
     )
       return stringType;
-    const element = this.iteratorElementType(type, 'iterator');
+    const element = this.iteratorElementType(type, 'iterator', node, consumer);
     if (element) return element;
     if (type.kind === 'typeParameter') {
       const constraint = this.c.constraintOf(type);
-      if (constraint) return this.iteratedType(node, constraint);
+      if (constraint) return this.iteratedType(node, constraint, consumer);
     }
     if (node)
       this.c.error(node, `型 '${this.c.print(type)}' には、反復処理に使う [Symbol.iterator]() メソッドがありません。`);
@@ -635,17 +642,24 @@ export class BindingPatterns {
    * The type `for await` gives each element of `type`: what its `[Symbol.asyncIterator]()` iterator yields, or else
    * what the promises its synchronous iterator yields fulfill with.
    */
-  asyncIteratedType(node: TreeNode | undefined, type: Type): Type {
+  asyncIteratedType(
+    node: TreeNode | undefined,
+    type: Type,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar' = 'loop'
+  ): Type {
     if (isAnyLike(type)) return anyType;
     if (type.kind === 'union')
       return unionOf(
-        type.types.map((member) => this.asyncIteratedType(node, member)),
+        type.types.map((member) => this.asyncIteratedType(node, member, consumer)),
         true
       );
-    const asyncElement = this.iteratorElementType(type, 'asyncIterator', node);
+    const asyncElement = this.iteratorElementType(type, 'asyncIterator', node, consumer);
     if (asyncElement) return asyncElement;
-    const element = this.iteratedType(undefined, type);
-    if (element !== errorType) return awaitedType(this.c, element, node ? { node, kind: 'await' } : undefined);
+    const element = this.iteratedType(undefined, type, consumer);
+    if (element !== errorType) {
+      if (node) this.iteratedType(node, type, consumer);
+      return awaitedType(this.c, element, node ? { node, kind: 'await' } : undefined);
+    }
     if (node)
       this.c.error(
         node,
@@ -659,10 +673,16 @@ export class BindingPatterns {
    * `value` of the results its `next()` gives that are not done (awaited for an async iterator), or else a library
    * iterator's type argument.
    */
-  private iteratorElementType(type: Type, method: 'iterator' | 'asyncIterator', node?: TreeNode): Type | undefined {
+  private iteratorElementType(
+    type: Type,
+    method: 'iterator' | 'asyncIterator',
+    node?: TreeNode,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar' = 'spread'
+  ): Type | undefined {
     const iteration = this.iteratorResults(type, method, node);
     if (!iteration) return undefined;
-    const { iteratorType, settled } = iteration;
+    const { iteratorType, nextType, settled } = iteration;
+    if (node && consumer !== 'yieldStar') this.checkIteratorNextInput(node, nextType, consumer);
     if (!settled) return iteratorType.typeArguments?.[0];
     if (isAnyLike(settled)) return anyType;
     const results = settled.kind === 'union' ? settled.types : [settled];
@@ -673,6 +693,15 @@ export class BindingPatterns {
     const values = yielding.flatMap((member) => this.c.propertyOf(member, 'value')?.type() ?? []);
     // tsc gives an iterator whose results are all done elements of type any.
     return values.length > 0 ? unionOf(values) : anyType;
+  }
+
+  private checkIteratorNextInput(node: TreeNode, nextType: Type, consumer: 'loop' | 'spread' | 'destructure'): void {
+    if (isAnyLike(nextType) || this.c.relations.isAssignable(undefinedType, nextType)) return;
+    const sender = consumer === 'loop' ? 'for-of' : consumer === 'destructure' ? '配列の非構造化' : '配列展開';
+    this.c.error(
+      node,
+      `反復子の 'next' メソッドは型 '${this.c.print(nextType)}' を予期するため、値を反復処理できませんが、${sender} は常に 'undefined' を送信します。`
+    );
   }
 
   /**
@@ -696,15 +725,21 @@ export class BindingPatterns {
     type: Type,
     method: 'iterator' | 'asyncIterator',
     node?: TreeNode
-  ): { iteratorType: ObjectType; settled: Type | undefined } | undefined {
+  ): { iteratorType: ObjectType; nextType: Type; settled: Type | undefined } | undefined {
     const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey(method));
     const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
     if (iteratorType?.kind !== 'object') return undefined;
     const next = this.c.propertyOf(iteratorType, 'next');
-    const result = next && this.c.signaturesOf(next.type(), 'call')[0]?.returnType();
+    const nextSignature = next && this.c.signaturesOf(next.type(), 'call')[0];
+    if (!nextSignature && !this.c.functions.isKnownLibraryIterator(iteratorType, method)) return undefined;
+    const result = nextSignature?.returnType();
+    const nextType = nextSignature
+      ? this.c.functions.iteratorNextParameterType(nextSignature)
+      : (iteratorType.typeArguments?.[2] ?? unknownType);
     const site = node ? { node, kind: 'await' as const } : undefined;
     return {
       iteratorType,
+      nextType,
       settled: result && (method === 'asyncIterator' ? awaitedType(this.c, result, site) : result),
     };
   }

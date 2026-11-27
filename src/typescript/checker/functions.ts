@@ -73,6 +73,7 @@ interface GeneratorContext {
   yieldType?: Type;
   nextType?: Type;
   yieldTypes: Type[];
+  inferredNextTypes: Type[];
 }
 
 export interface IterationTypes {
@@ -90,6 +91,17 @@ const asyncGeneratorReturnTypes = [
   'AsyncIterableIterator',
   'AsyncIteratorObject',
 ];
+const syncLibraryIterators = [
+  'Generator',
+  'Iterator',
+  'IterableIterator',
+  'IteratorObject',
+  'ArrayIterator',
+  'MapIterator',
+  'SetIterator',
+  'RegExpStringIterator',
+];
+const asyncLibraryIterators = ['AsyncGenerator', 'AsyncIterator', 'AsyncIterableIterator', 'AsyncIteratorObject'];
 
 /** Whether a function is a generator: `function*`, or a method written `*m()`. */
 export function isGeneratorFunction(node: TreeNode): boolean {
@@ -580,6 +592,7 @@ export class FunctionChecker {
         yieldType: given?.yieldType,
         nextType: given?.nextType,
         yieldTypes: [],
+        inferredNextTypes: [],
       },
       declaredReturn: declaredReturn && given?.returnType,
       contextualReturn: contextualTypes?.returnType,
@@ -601,10 +614,12 @@ export class FunctionChecker {
     if (context.asyncAnnotation) return context.asyncAnnotation.type;
     if (generator) {
       const yielded = generator.yieldTypes.length === 0 ? neverType : unionOf(generator.yieldTypes, true);
+      const inferredNext =
+        generator.inferredNextTypes.length > 0 ? intersectionOf(generator.inferredNextTypes, this.c) : unknownType;
       return this.c.globalType(context.isAsync ? 'AsyncGenerator' : 'Generator', [
         this.c.widen(this.widenObjectLiteral(yielded)),
         this.inferredReturnOf(context),
-        generator.nextType ?? unknownType,
+        generator.nextType ?? inferredNext,
       ]);
     }
     if (context.declaredReturn) return context.declaredReturn;
@@ -690,10 +705,10 @@ export class FunctionChecker {
     };
   }
 
-  private iteratorNextParameterType(signature: Signature): Type {
+  iteratorNextParameterType(signature: Signature): Type {
     const parameter = signature.parameters[0];
     if (!parameter) return unknownType;
-    if (!parameter.rest) return parameter.type;
+    if (!parameter.rest) return parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
     const elements = typeMembers(parameter.type).flatMap((member): Type[] => {
       if (member.kind === 'object' && member.objectKind === 'tuple') {
         const first = member.tuple?.elements[0];
@@ -702,6 +717,11 @@ export class FunctionChecker {
       return [this.c.restElementType(member)];
     });
     return elements.length > 0 ? unionOf(elements) : unknownType;
+  }
+
+  isKnownLibraryIterator(type: Type, method: 'iterator' | 'asyncIterator'): boolean {
+    const names = method === 'asyncIterator' ? asyncLibraryIterators : syncLibraryIterators;
+    return names.some((name) => this.c.isLibraryType(type, name));
   }
 
   private isAlwaysDoneResult(result: Type): boolean {
@@ -720,10 +740,35 @@ export class FunctionChecker {
     // An async generator delegates to a synchronous iterable through its `[Symbol.iterator]()` when it has no async one.
     const returned = asyncReturn ?? this.c.patterns.iteratorReturnType(operandType, 'iterator');
     return (
-      this.iterationTypesOf(operandType, isAsync)?.returnType ??
+      this.delegatedIterationTypes(operandType, isAsync)?.returnType ??
       (returned && isAsync ? awaitedType(this.c, returned) : returned) ??
       anyType
     );
+  }
+
+  private delegatedIterationTypes(operandType: Type, isAsync: boolean): IterationTypes | undefined {
+    const apparent = this.c.apparentType(operandType);
+    return (isAsync ? this.iterationTypesOf(apparent, true) : undefined) ?? this.iterationTypesOf(apparent, false);
+  }
+
+  private checkDelegatedNextType(
+    site: TreeNode,
+    operandType: Type,
+    generator: GeneratorContext,
+    isAsync: boolean
+  ): void {
+    const delegatedNext = this.delegatedIterationTypes(operandType, isAsync)?.nextType;
+    if (!delegatedNext || isAnyLike(delegatedNext)) return;
+    if (generator.nextType) {
+      if (!isAnyLike(generator.nextType) && !this.c.relations.isAssignable(generator.nextType, delegatedNext)) {
+        this.c.error(
+          site,
+          `反復子の 'next' メソッドには型 '${this.c.print(delegatedNext)}' が必要なため、値に反復をデリゲートすることはできませんが、含まれるジェネレーターは常に '${this.c.print(generator.nextType)}' を送信します。`
+        );
+      }
+      return;
+    }
+    if (!isIntrinsic(delegatedNext, 'unknown')) generator.inferredNextTypes.push(delegatedNext);
   }
 
   /**
@@ -760,9 +805,16 @@ export class FunctionChecker {
     // A contextual yield type only types the operand: the generator is checked against it as a whole, as tsc does.
     if (generator.annotation && generator.yieldType && yielded !== errorType)
       this.c.expressions.checkAssignable(operand ?? node, yielded, generator.yieldType, operand);
-    if (delegated) return this.delegatedReturnType(operandType, isAsync);
+    if (delegated) {
+      this.checkDelegatedNextType(operand ?? node, operandType, generator, isAsync);
+      return this.delegatedReturnType(operandType, isAsync);
+    }
     if (generator.nextType) return generator.nextType;
-    if (!isResultUnused(node) && (!contextual || isAnyLike(contextual)))
+    if (contextual && !isAnyLike(contextual)) {
+      generator.inferredNextTypes.push(contextual);
+      return contextual;
+    }
+    if (!isResultUnused(node))
       this.c.error(
         node,
         "'yield' 式の結果が暗黙に any になります。この式を含むジェネレーターに戻り値の型の注釈がないためです。"
@@ -775,7 +827,9 @@ export class FunctionChecker {
     if (!delegated) {
       return isAsync ? awaitedType(this.c, type, operand ? { node: operand, kind: 'yield' } : undefined) : type;
     }
-    return isAsync ? this.c.patterns.asyncIteratedType(operand, type) : this.c.patterns.iteratedType(operand, type);
+    return isAsync
+      ? this.c.patterns.asyncIteratedType(operand, type, 'yieldStar')
+      : this.c.patterns.iteratedType(operand, type, 'yieldStar');
   }
 
   private widenObjectLiteral(type: Type): Type {

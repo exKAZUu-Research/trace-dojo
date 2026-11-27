@@ -266,7 +266,7 @@ export class AssignmentChecker {
     type: Type,
     assign: (target: TreeNode, type: Type) => void
   ): void {
-    if (isEmptyPattern(pattern)) this.c.patterns.iteratedType(pattern, type);
+    if (isEmptyPattern(pattern)) this.c.patterns.iteratedType(pattern, type, 'destructure');
     for (const { element, index } of arrayPatternElements(pattern)) {
       if (element.type === 'spread_element' || element.type === 'rest_pattern') {
         assign(named(element)[0], this.c.patterns.restOfIterable(pattern, type, index));
