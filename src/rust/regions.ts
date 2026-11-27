@@ -208,7 +208,17 @@ export interface InvariantParams {
 
 const invariantParamsOf = new WeakMap<AdtDef, InvariantParams>();
 
-const INTERIOR_MUTABLE = new Set(['Cell', 'RefCell', 'RefMut', 'Mutex', 'MutexGuard', 'RwLock', 'RwLockWriteGuard']);
+const INTERIOR_MUTABLE = new Set([
+  'Cell',
+  'RefCell',
+  'RefMut',
+  'Mutex',
+  'MutexGuard',
+  'RwLock',
+  'RwLockWriteGuard',
+  'Sender',
+  'Receiver',
+]);
 
 /**
  * The parameters a type is invariant in: those its fields name behind a `&mut`, or as an argument that another type
@@ -218,7 +228,8 @@ const INTERIOR_MUTABLE = new Set(['Cell', 'RefCell', 'RefMut', 'Mutex', 'MutexGu
 export function invariantParams(def: AdtDef): InvariantParams {
   const known = invariantParamsOf.get(def);
   if (known) return known;
-  // std declares these without fields: what they hold can be written through a shared reference or a guard.
+  // std declares these without fields: what they hold can be written through a shared reference, a guard, or the
+  // other end of a channel.
   if (INTERIOR_MUTABLE.has(def.builtin ?? '')) {
     const result = { lifetimes: new Set<number>(), params: new Set([0]) };
     invariantParamsOf.set(def, result);
