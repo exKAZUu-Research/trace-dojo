@@ -50,7 +50,8 @@ function readImportTypeMemberQuery(c: Checker, node: TreeNode, object: TreeNode,
   const receiver = c.namespaces.importTypeQuery(object);
   if (receiver === errorType) return errorType;
   if (!module.exportEquals && receiver.kind === 'object' && !c.propertyOf(receiver, property.text)) {
-    const typeOnlyVal = module.namespaceExports?.typeOnlyValues.get(property.text);
+    const typeOnlyVal =
+      module.namespaceExports?.typeOnlyValues.get(property.text) ?? typeOnlyImportedMemberOf(c, module, property.text);
     if (typeOnlyVal) return readTypeOnlyExportValueQuery(c, typeOnlyVal);
     const nsExport = module.namespaceExports?.namespaces.get(property.text);
     if (nsExport && c.namespaces.isInstantiated(nsExport)) return c.namespaces.objectType(nsExport);
@@ -58,6 +59,17 @@ function readImportTypeMemberQuery(c: Checker, node: TreeNode, object: TreeNode,
     return errorType;
   }
   return c.members.propertyAccess(node, object, property, receiver, property.text);
+}
+
+function typeOnlyImportedMemberOf(c: Checker, module: Sym, name: string): Sym | undefined {
+  const exported = module.namespaceExports?.values.get(name);
+  if (
+    exported?.valueKind === 'import' &&
+    (exported.importTarget?.typeOnly || c.namespaces.isExportedTypeOnlyValue(exported))
+  ) {
+    return exported;
+  }
+  return undefined;
 }
 
 function readTypeOnlyExportValueQuery(c: Checker, symbol: Sym): Type {

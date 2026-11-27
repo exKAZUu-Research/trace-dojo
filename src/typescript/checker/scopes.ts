@@ -94,6 +94,7 @@ export class Scope {
   readonly namespaces = new Map<string, Sym>();
   readonly typeOnlyValues = new Map<string, Sym>();
   defaultTypeSymbol?: Sym;
+  private hasDefaultTypeLocalName = false;
 
   private readonly clauseOnlyValues = new Set<string>();
   private readonly clauseOnlyTypes = new Set<string>();
@@ -313,13 +314,23 @@ export class Scope {
       (shared.typeKind === 'interface' || (shared.typeKind === 'class' && kind === 'interface'));
     if (!canMerge) {
       const symbol = rawName
-        ? this.declareType(rawName, kind, declaration, nameNode)
+        ? this.declareFirstNamedDefaultType(rawName, kind, declaration, nameNode)
         : this.newAnonymousDefaultType(kind, declaration, nameNode);
       this.defaultTypeSymbol ??= symbol;
       return symbol;
     }
     this.mergeIntoDefaultType(shared, rawName, kind, declaration, nameNode);
     return shared;
+  }
+
+  private declareFirstNamedDefaultType(
+    rawName: string,
+    kind: 'interface' | 'class',
+    declaration: TreeNode,
+    nameNode: TreeNode
+  ): Sym {
+    this.hasDefaultTypeLocalName = true;
+    return this.declareType(rawName, kind, declaration, nameNode);
   }
 
   private newAnonymousDefaultType(kind: 'interface' | 'class', declaration: TreeNode, nameNode: TreeNode): Sym {
@@ -337,15 +348,10 @@ export class Scope {
     declaration: TreeNode,
     nameNode: TreeNode
   ): void {
-    if (rawName) {
+    if (rawName && !this.hasDefaultTypeLocalName) {
       const name = canonicalIdentifier(rawName, nameNode);
-      const local = this.types.get(name);
-      if (local && local !== shared && (local.typeKind === 'interface' || local.typeKind === 'class')) {
-        if (local.typeKind === 'class' && shared.typeKind === 'interface') shared.typeKind = 'class';
-        shared.typeDeclarations.push(...local.typeDeclarations);
-        shared.typeEntries.push(...local.typeEntries);
-      }
-      this.types.set(name, shared);
+      if (!this.types.has(name)) this.types.set(name, shared);
+      this.hasDefaultTypeLocalName = true;
     }
     if (kind === 'class' && shared.typeKind === 'interface') shared.typeKind = 'class';
     shared.typeDeclarations.push(declaration);

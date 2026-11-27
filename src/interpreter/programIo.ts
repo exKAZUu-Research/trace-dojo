@@ -206,8 +206,11 @@ export interface OpenMode {
 class FileNode {
   readonly kind = 'file';
   content = '';
-  /** Underlying UTF-8 bytes when byte-addressed writes have updated the file. */
+  /** Backing UTF-8 byte buffer when byte-addressed writes have updated the file. */
   rawBytes?: Uint8Array;
+  rawByteLength = 0;
+  syncedByteLength = 0;
+  syncedCharLength = 0;
   /** Whether a path names the file, whose contents then count as stored; a deleted file counts only what is written. */
   isLinked = true;
 }
@@ -243,7 +246,7 @@ export class FileHandle {
 
   /** Writes UTF-8 bytes, preserving split multi-byte sequences across successive update and append writes. */
   writeBytes(bytes: Uint8Array): void {
-    const start = this.bytePosition ?? (this.node.rawBytes ?? UTF8_ENCODER.encode(this.node.content)).length;
+    const start = this.bytePosition ?? this.files.ensureByteLength(this.node);
     this.files.writeBytesAt(this.node, start, bytes);
     if (this.bytePosition !== undefined) this.bytePosition += bytes.length;
   }
@@ -390,14 +393,14 @@ export class VirtualFileSystem {
     if (mode.truncate) {
       this.storedLength -= node.content.length;
       node.content = '';
-      node.rawBytes = undefined;
+      resetByteBuffer(node);
     }
     return new FileHandle(this, node, mode.append);
   }
 
   writeAt(node: FileNode, position: number, text: string): void {
     this.budget.spend(Math.ceil((text.length + Math.max(position - node.content.length, 0) + 1) / 64));
-    node.rawBytes = undefined;
+    resetByteBuffer(node);
     // Writing past the end, as a handle may after another truncates the file, leaves a gap of NUL characters.
     const content = node.content.padEnd(text === '' ? 0 : position, '\0');
     const updated = `${content.slice(0, position)}${text}${content.slice(position + text.length)}`;
@@ -407,18 +410,50 @@ export class VirtualFileSystem {
     node.content = updated;
   }
 
+  ensureByteLength(node: FileNode): number {
+    this.ensureByteBuffer(node);
+    return node.rawByteLength;
+  }
+
   writeBytesAt(node: FileNode, position: number, bytes: Uint8Array): void {
-    const current = node.rawBytes ?? UTF8_ENCODER.encode(node.content);
-    const gap = Math.max(position - current.length, 0);
-    this.budget.spend(Math.ceil((bytes.length + gap + 1) / 64));
-    const merged = new Uint8Array(Math.max(current.length, position + bytes.length));
-    merged.set(current);
-    merged.set(bytes, position);
-    const updated = UTF8_DECODER.decode(merged);
+    const initial = this.ensureByteBuffer(node);
+    const oldLength = node.rawByteLength;
+    const gap = Math.max(position - oldLength, 0);
+    const newLength = Math.max(oldLength, position + bytes.length);
+    const chargeBytes = position < oldLength ? newLength : bytes.length + gap;
+    this.budget.spend(Math.ceil((chargeBytes + 1) / 64));
+    const buffer = growByteBuffer(node, initial, oldLength, newLength);
+    if (position > oldLength) buffer.fill(0, oldLength, position);
+    buffer.set(bytes, position);
+    node.rawByteLength = newLength;
+    if (position < oldLength) {
+      node.syncedByteLength = 0;
+      node.syncedCharLength = 0;
+    }
+    const { updated, syncedBytes, syncedChars } = decodeUpdatedBytes(node, buffer, newLength);
     this.storedLength += node.isLinked ? updated.length - node.content.length : bytes.length + gap;
     if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
-    node.rawBytes = merged;
+    node.syncedByteLength = syncedBytes;
+    node.syncedCharLength = syncedChars;
     node.content = updated;
+  }
+
+  private ensureByteBuffer(node: FileNode): Uint8Array {
+    if (node.rawBytes) return node.rawBytes;
+    if (node.content.length === 0) {
+      node.rawBytes = new Uint8Array(64);
+      node.rawByteLength = 0;
+      node.syncedByteLength = 0;
+      node.syncedCharLength = 0;
+      return node.rawBytes;
+    }
+    this.budget.spend(Math.ceil((node.content.length + 1) / 64));
+    const encoded = UTF8_ENCODER.encode(node.content);
+    node.rawBytes = encoded;
+    node.rawByteLength = encoded.length;
+    node.syncedByteLength = encoded.length;
+    node.syncedCharLength = node.content.length;
+    return encoded;
   }
 
   /**
@@ -626,4 +661,59 @@ function segmentsOf(path: string): string[] {
     else segments.push(segment);
   }
   return segments;
+}
+
+function resetByteBuffer(node: FileNode): void {
+  node.rawBytes = undefined;
+  node.rawByteLength = 0;
+  node.syncedByteLength = 0;
+  node.syncedCharLength = 0;
+}
+
+function growByteBuffer(node: FileNode, buffer: Uint8Array, oldLength: number, newLength: number): Uint8Array {
+  if (newLength <= buffer.length) return buffer;
+  let capacity = Math.max(64, buffer.length * 2);
+  while (capacity < newLength) capacity *= 2;
+  const grown = new Uint8Array(capacity);
+  grown.set(buffer.subarray(0, oldLength));
+  node.rawBytes = grown;
+  return grown;
+}
+
+function decodeUpdatedBytes(
+  node: FileNode,
+  buffer: Uint8Array,
+  newLength: number
+): { updated: string; syncedBytes: number; syncedChars: number } {
+  const incomplete = trailingIncompleteUtf8Bytes(buffer, newLength);
+  const safeEnd = newLength - incomplete;
+  const safePart =
+    safeEnd > node.syncedByteLength ? UTF8_DECODER.decode(buffer.subarray(node.syncedByteLength, safeEnd)) : '';
+  const pendingPart = incomplete > 0 ? UTF8_DECODER.decode(buffer.subarray(safeEnd, newLength)) : '';
+  const base =
+    node.syncedCharLength === node.content.length ? node.content : node.content.slice(0, node.syncedCharLength);
+  const prefix = base + safePart;
+  return {
+    updated: pendingPart ? prefix + pendingPart : prefix,
+    syncedBytes: safeEnd,
+    syncedChars: prefix.length,
+  };
+}
+
+function trailingIncompleteUtf8Bytes(buffer: Uint8Array, end: number): number {
+  const maxScan = Math.min(3, end);
+  for (let offset = 1; offset <= maxScan; offset++) {
+    const byte = buffer[end - offset];
+    if ((byte & 0xc0) === 0x80) continue;
+    const expected = utf8LeadSequenceLength(byte);
+    return offset < expected ? offset : 0;
+  }
+  return 0;
+}
+
+function utf8LeadSequenceLength(byte: number): number {
+  if (byte >= 0xc2 && byte <= 0xdf) return 2;
+  if (byte >= 0xe0 && byte <= 0xef) return 3;
+  if (byte >= 0xf0 && byte <= 0xf4) return 4;
+  return 0;
 }

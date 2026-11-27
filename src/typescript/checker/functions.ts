@@ -586,7 +586,9 @@ export class FunctionChecker {
   ): Pick<FunctionContext, 'generator' | 'declaredReturn' | 'contextualReturn'> {
     const declared = declaredReturn && this.iterationTypesOf(declaredReturn, isAsync);
     const contextualTypes =
-      !declaredReturn && contextualReturn ? this.iterationTypesOf(contextualReturn, isAsync) : undefined;
+      !declaredReturn && contextualReturn && !isAnyLike(contextualReturn)
+        ? this.iterationTypesOf(contextualReturn, isAsync)
+        : undefined;
     const given = declaredReturn ? (declared ?? anyIterationTypes) : contextualTypes;
     return {
       generator: {

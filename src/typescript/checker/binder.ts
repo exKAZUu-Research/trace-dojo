@@ -419,7 +419,7 @@ export class Binder {
     if (ambientSymbol?.exportEquals) return { value: true, type: name !== '*', namespace: true };
     const ambient = ambientSymbol?.namespaceExports;
     if (ambient && name !== '*') {
-      const value = Boolean(fsMeanings?.value) || ambient.values.has(name);
+      const value = Boolean(fsMeanings?.value) || ambient.values.has(name) || ambient.typeOnlyValues.has(name);
       const type = Boolean(fsMeanings?.type) || ambient.types.has(name);
       const namespace =
         ambient.namespaces.has(name) || (Boolean(fsMeanings) && (name === 'default' || name === 'promises'));
@@ -481,16 +481,12 @@ export class Binder {
       const name = canonicalIdentifier(nameNode.text, nameNode);
       const exportName = targetExportName ?? name;
       const value = scope.values.get(name);
-      if (value && value.valueDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id))
+      if (value && hasDeclaredNode(value.valueDeclarations, declaration))
         this.exportFrom(scope, value, 'value', exportName);
-      const type = scope.types.get(name);
-      if (type && type.typeDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id))
-        this.exportTypeFrom(scope, type, exportName);
+      const type = declaredTypeToExport(scope, name, declaration, targetExportName);
+      if (type) this.exportTypeFrom(scope, type, exportName);
       const namespace = scope.namespaces.get(name);
-      if (
-        namespace &&
-        namespace.namespaceDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id)
-      )
+      if (namespace && hasDeclaredNode(namespace.namespaceDeclarations, declaration))
         this.exportFrom(scope, namespace, 'namespace', exportName);
     }
   }
@@ -795,6 +791,27 @@ function isExportedNamespaceRoot(node: TreeNode): boolean {
   const outer =
     node.parent?.type === 'expression_statement' || node.parent?.type === 'ambient_declaration' ? node.parent : node;
   return outer.parent?.type === 'export_statement';
+}
+
+function declaredTypeToExport(
+  scope: Scope,
+  name: string,
+  declaration: TreeNode,
+  targetExportName: string | undefined
+): Sym | undefined {
+  if (
+    targetExportName === 'default' &&
+    scope.defaultTypeSymbol &&
+    hasDeclaredNode(scope.defaultTypeSymbol.typeDeclarations, declaration)
+  ) {
+    return scope.defaultTypeSymbol;
+  }
+  const type = scope.types.get(name);
+  return type && hasDeclaredNode(type.typeDeclarations, declaration) ? type : undefined;
+}
+
+function hasDeclaredNode(nodes: readonly TreeNode[], declaration: TreeNode): boolean {
+  return nodes.some((node) => isWithin(node, declaration) || node.id === declaration.id);
 }
 
 function hasAmbientExportClause(body: TreeNode): boolean {

@@ -53,8 +53,7 @@ export class Namespaces {
       () => {
         const structure = emptyStructure();
         for (const [name, member] of exports?.values ?? []) {
-          if (member.valueKind === 'namespace' && !this.isInstantiated(member)) continue;
-          if (member.valueKind === 'importAlias' && !this.imported(member, 'value')) continue;
+          if (!this.isRuntimeNamespaceValueExport(member)) continue;
           const resolved = this.unaliased(member, 'value') ?? member;
           // Only a `const` export is read-only: tsc lets a program reassign an exported function, class, or enum.
           const readonly = member.valueEntries.every((entry) => entry.kind === 'const');
@@ -73,6 +72,15 @@ export class Namespaces {
     );
     this.objectTypes.set(symbol.id, type);
     return type;
+  }
+
+  private isRuntimeNamespaceValueExport(member: Sym): boolean {
+    if (member.valueKind === 'namespace') return this.isInstantiated(member);
+    if (member.valueKind === 'importAlias') return Boolean(this.imported(member, 'value'));
+    if (member.valueKind === 'import') {
+      return !member.importTarget?.typeOnly && !this.isExportedTypeOnlyValue(member);
+    }
+    return true;
   }
 
   /** The type of a function, class, or enum merged with a namespace, which has the namespace's exports too. */
@@ -318,7 +326,28 @@ export class Namespaces {
       return container?.namespaceExports ? this.exportedMember(container, target.name, meaning) : undefined;
     }
     if (target.name === '*' || this.isSyntheticDefault(module, target.name)) return module;
-    return this.exportedMember(module, target.name, meaning);
+    return (
+      this.exportedMember(module, target.name, meaning) ??
+      (meaning === 'value'
+        ? this.unaliased(module.namespaceExports?.typeOnlyValues.get(target.name), 'value')
+        : undefined)
+    );
+  }
+
+  /** Whether an `import` binding resolves in value space only through an upstream `export type` declaration. */
+  isExportedTypeOnlyValue(symbol: Sym, seen = new Set<number>()): boolean {
+    if (seen.has(symbol.id)) return false;
+    const target = symbol.importTarget;
+    const module = target && this.moduleNamed(target.module);
+    if (!target || !module || target.name === '*' || module.exportEquals) return false;
+    const exports = module.namespaceExports;
+    const directValue = exports?.values.get(target.name);
+    if (directValue) {
+      if (directValue.valueKind !== 'import') return false;
+      seen.add(symbol.id);
+      return directValue.importTarget?.typeOnly === true || this.isExportedTypeOnlyValue(directValue, seen);
+    }
+    return Boolean(exports?.typeOnlyValues.has(target.name));
   }
 
   exportEqualsSymbol(module: Sym, meaning: MeaningSpace): Sym | undefined {
@@ -407,6 +436,7 @@ export class Namespaces {
       exports?.values.has('default') ||
       exports?.types.has('default') ||
       exports?.namespaces.has('default') ||
+      exports?.typeOnlyValues.has('default') ||
       module.exportEquals ||
       this.isSyntheticDefault(module, 'default')
     );
@@ -445,13 +475,22 @@ export class Namespaces {
   }
 
   checkReExport(clause: TreeNode | undefined, source: TreeNode): void {
-    const module = this.moduleNamed(stringValue(source));
+    const specifier = stringValue(source);
+    const module = this.moduleNamed(specifier);
     if (!module) {
-      this.c.error(source, `モジュール '${stringValue(source)}' またはそれに対応する型宣言が見つかりません。`);
+      this.c.error(source, `モジュール '${specifier}' またはそれに対応する型宣言が見つかりません。`);
       return;
     }
-    if (!clause) return;
-    this.checkNamedImports(clause, module, `'"${stringValue(source)}"'`);
+    if (!clause) {
+      if (module.exportEquals) {
+        this.c.error(
+          source,
+          `モジュール '"${specifier}"' には 'export =' が使用されているため、'export *' は併用できません。`
+        );
+      }
+      return;
+    }
+    this.checkNamedImports(clause, module, `'"${specifier}"'`);
   }
 
   private checkNamedImports(imports: TreeNode, module: Sym, moduleName: string): void {
@@ -467,8 +506,7 @@ export class Namespaces {
         name &&
         exported &&
         !(exported === 'default' && this.hasDefaultExport(module)) &&
-        (!exports ||
-          (!exports.values.has(exported) && !exports.types.has(exported) && !exports.namespaces.has(exported)))
+        !hasModuleExportNamed(exports, exported)
       )
         this.reportMissingImport(name, exports, moduleName);
     }
@@ -477,7 +515,12 @@ export class Namespaces {
   /** A name a module does not export, with the export tsc suggests for a misspelling of one. */
   private reportMissingImport(name: TreeNode, exports: Scope | undefined, moduleName: string): void {
     const candidates = exports
-      ? new Set([...exports.values.keys(), ...exports.types.keys(), ...exports.namespaces.keys()])
+      ? new Set([
+          ...exports.values.keys(),
+          ...exports.types.keys(),
+          ...exports.namespaces.keys(),
+          ...exports.typeOnlyValues.keys(),
+        ])
       : new Set<string>();
     const suggestion = spellingSuggestion(name.text, candidates, this.c.budget);
     this.c.error(
@@ -584,6 +627,16 @@ export { importTypeMemberChain, isImportTypeCall };
 
 function canonicalImportSpecifier(node: TreeNode): string {
   return node.type === 'string' ? stringValue(node) : canonicalIdentifier(node.text, node);
+}
+
+function hasModuleExportNamed(exports: Scope | undefined, exported: string): boolean {
+  return Boolean(
+    exports &&
+    (exports.values.has(exported) ||
+      exports.types.has(exported) ||
+      exports.namespaces.has(exported) ||
+      exports.typeOnlyValues.has(exported))
+  );
 }
 
 function exportedModuleSite(node: TreeNode): TreeNode | undefined {

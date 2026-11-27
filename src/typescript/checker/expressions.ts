@@ -497,6 +497,10 @@ export class ExpressionChecker {
       this.c.error(node, `'import type' を使用してインポートされたため、'${name}' は値として使用できません。`);
       return errorType;
     }
+    if (symbol.valueKind === 'import' && this.c.namespaces.isExportedTypeOnlyValue(symbol)) {
+      this.c.error(node, `'export type' を使用してエクスポートされたため、'${name}' は値として使用できません。`);
+      return errorType;
+    }
     if (symbol === this.c.libraryBinder.moduleScope.lookupValue('require') && !isDirectOrWrappedRequireCallee(node))
       return this.reportRequireValue(node);
     this.checkUsedBeforeDeclaration(node, symbol);

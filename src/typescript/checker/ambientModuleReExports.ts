@@ -131,7 +131,8 @@ function resolveModuleExportByName(
   depExports: Scope | undefined,
   sourceName: string,
   context: ReExportContext,
-  typeOnly: boolean
+  typeOnly: boolean,
+  seen = new Set<string>()
 ): ResolvedExportTarget {
   if (sourceName === 'default' && dep.exportEquals) {
     const eq = resolveExportEqualsEntity(dep, context);
@@ -153,16 +154,11 @@ function resolveModuleExportByName(
       typeOnlyValue: typeOnly ? dep : undefined,
     };
   }
-  const rawValue = depExports?.values.get(sourceName) ?? depExports?.typeOnlyValues.get(sourceName);
-  return {
-    value: typeOnly ? undefined : depExports?.values.get(sourceName),
-    type: depExports?.types.get(sourceName),
-    namespace: depExports?.namespaces.get(sourceName),
-    typeOnlyValue: typeOnly ? rawValue : depExports?.typeOnlyValues.get(sourceName),
-  };
+  return depExports ? readNormalizedExportSlot(depExports, sourceName, typeOnly, context, seen) : {};
 }
 
 function exportNamespaceClause(nsExport: TreeNode, dep: Sym, exports: Scope, stmtTypeOnly: boolean): boolean {
+  if (dep.exportEquals) return false;
   const aliasNode = named(nsExport)[0];
   if (!aliasNode) return false;
   const targetName = decodedExportName(aliasNode);
@@ -183,7 +179,8 @@ function exportStarClause(
   starOrigins: Map<Scope, Map<string, StarOrigin>>,
   stmtTypeOnly: boolean
 ): boolean {
-  const depExports = targetExportsOf(dep, context);
+  if (dep.exportEquals) return false;
+  const depExports = dep.namespaceExports;
   if (!depExports) return false;
   let origins = starOrigins.get(exports);
   if (!origins) {
@@ -193,7 +190,7 @@ function exportStarClause(
   let changed = false;
   for (const name of collectStarCandidateNames(depExports)) {
     if (hasExplicitExport(exports, name)) continue;
-    const incoming = readStarTarget(depExports, name, stmtTypeOnly);
+    const incoming = readNormalizedExportSlot(depExports, name, stmtTypeOnly, context);
     if (!hasAnyMeaning(incoming)) continue;
     changed = mergeStarCandidate(starNode, dep.name, name, incoming, exports, origins) || changed;
   }
@@ -220,14 +217,96 @@ function hasExplicitExport(exports: Scope, name: string): boolean {
   );
 }
 
-function readStarTarget(depExports: Scope, name: string, stmtTypeOnly: boolean): ResolvedExportTarget {
-  const rawValue = depExports.values.get(name) ?? depExports.typeOnlyValues.get(name);
+function readNormalizedExportSlot(
+  depExports: Scope,
+  name: string,
+  typeOnly: boolean,
+  context: ReExportContext,
+  seen = new Set<string>()
+): ResolvedExportTarget {
+  const directValue = unwrapExportOrigin(depExports.values.get(name), 'value', context, seen);
+  const fallbackTypeOnly =
+    unwrapExportOrigin(depExports.typeOnlyValues.get(name), 'typeOnlyValue', context, seen) ??
+    unwrapExportOrigin(depExports.values.get(name), 'typeOnlyValue', context, seen);
+  const value = typeOnly ? undefined : directValue;
   return {
-    value: stmtTypeOnly ? undefined : depExports.values.get(name),
-    type: depExports.types.get(name),
-    namespace: depExports.namespaces.get(name),
-    typeOnlyValue: stmtTypeOnly ? rawValue : depExports.typeOnlyValues.get(name),
+    value,
+    type: unwrapExportOrigin(depExports.types.get(name), 'type', context, seen),
+    namespace: unwrapExportOrigin(depExports.namespaces.get(name), 'namespace', context, seen),
+    typeOnlyValue: value ? undefined : typeOnly ? (directValue ?? fallbackTypeOnly) : fallbackTypeOnly,
   };
+}
+
+type OriginMeaning = 'value' | 'type' | 'namespace' | 'typeOnlyValue';
+
+function unwrapExportOrigin(
+  symbol: Sym | undefined,
+  meaning: OriginMeaning,
+  context: ReExportContext,
+  seen: Set<string>
+): Sym | undefined {
+  if (!symbol) return undefined;
+  const kind = symbolEntryKind(symbol, meaning);
+  if (kind !== 'import' && kind !== 'importAlias') return symbol;
+  const key = `${symbol.id}:${meaning}`;
+  if (seen.has(key)) return undefined;
+  seen.add(key);
+  try {
+    return kind === 'import'
+      ? unwrapImportedSymbolOrigin(symbol, meaning, context, seen)
+      : unwrapAliasSymbolOrigin(symbol, meaning, context, seen);
+  } finally {
+    seen.delete(key);
+  }
+}
+
+function symbolEntryKind(symbol: Sym, meaning: OriginMeaning): string | undefined {
+  if (meaning === 'value' || meaning === 'typeOnlyValue') return symbol.valueKind;
+  return meaning === 'type' ? symbol.typeKind : symbol.namespaceKind;
+}
+
+function unwrapImportedSymbolOrigin(
+  symbol: Sym,
+  meaning: OriginMeaning,
+  context: ReExportContext,
+  seen: Set<string>
+): Sym | undefined {
+  const target = symbol.importTarget;
+  const dep = target ? findTargetModule(target.module, context.ambientModules, context.existingModules) : undefined;
+  if (!target || !dep) return undefined;
+  if (meaning === 'value' && target.typeOnly) return undefined;
+  if (target.name === '*') {
+    return meaning === 'type' ? undefined : dep;
+  }
+  const resolved = resolveModuleExportByName(
+    dep,
+    targetExportsOf(dep, context),
+    target.name,
+    context,
+    Boolean(target.typeOnly),
+    seen
+  );
+  if (meaning === 'typeOnlyValue') return resolved.typeOnlyValue ?? resolved.value;
+  return resolved[meaning];
+}
+
+function unwrapAliasSymbolOrigin(
+  symbol: Sym,
+  meaning: OriginMeaning,
+  context: ReExportContext,
+  seen: Set<string>
+): Sym | undefined {
+  const decl =
+    symbol.valueDeclarations.find((node) => node.type === 'import_alias') ??
+    symbol.typeDeclarations.find((node) => node.type === 'import_alias') ??
+    symbol.namespaceDeclarations.find((node) => node.type === 'import_alias');
+  const target = decl ? named(decl)[1] : undefined;
+  if (!decl || !target) return undefined;
+  const scope = context.scopeOf(decl);
+  const exports = scope.namespace?.namespaceExports ?? scope;
+  const entity = resolveAmbientEntityInBinder(decl, target, scope, exports, context.scopeOf, context.budget);
+  const picked = meaning === 'typeOnlyValue' ? entity.value : entity[meaning];
+  return unwrapExportOrigin(picked, meaning, context, seen);
 }
 
 function hasAnyMeaning(target: ResolvedExportTarget): boolean {
@@ -247,7 +326,13 @@ function mergeStarCandidate(
     origins.set(name, { firstModule: depName, ...incoming, conflicted: false });
     return exportResolvedMeanings(exports, name, incoming);
   }
-  if (sameStarSymbols(existing, incoming)) return false;
+  if (sameStarSymbols(existing, incoming)) {
+    if (incoming.value && !existing.value) existing.value = incoming.value;
+    if (incoming.typeOnlyValue && !existing.value && !existing.typeOnlyValue) {
+      existing.typeOnlyValue = incoming.typeOnlyValue;
+    }
+    return exportResolvedMeanings(exports, name, incoming);
+  }
   exports.recordAmbiguousStarExport(starNode, existing.firstModule, name);
   if (existing.conflicted) return false;
   existing.conflicted = true;
@@ -257,10 +342,7 @@ function mergeStarCandidate(
 
 function sameStarSymbols(a: StarOrigin, b: ResolvedExportTarget): boolean {
   return (
-    a.value === b.value &&
-    a.type === b.type &&
-    a.namespace === b.namespace &&
-    (a.value ?? a.typeOnlyValue) === (b.value ?? b.typeOnlyValue)
+    (a.value ?? a.typeOnlyValue) === (b.value ?? b.typeOnlyValue) && a.type === b.type && a.namespace === b.namespace
   );
 }
 
@@ -268,6 +350,7 @@ function exportResolvedMeanings(exports: Scope, name: string, resolved: Resolved
   let added = false;
   if (resolved.value && !exports.values.has(name)) {
     exports.exportViaClause(name, resolved.value, 'value');
+    exports.typeOnlyValues.delete(name);
     added = true;
   }
   if (resolved.type && !exports.types.has(name)) {

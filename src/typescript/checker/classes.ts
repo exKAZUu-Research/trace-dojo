@@ -155,14 +155,15 @@ export class ClassChecker {
   /** The interfaces of the class's name, which merge their members into its instances. */
   mergedInterfaces(node: TreeNode): TreeNode[] {
     const name = node.type === 'class' ? undefined : node.childForFieldName('name')?.text;
-    const scope = this.c.scopeOf(node.parent ?? node);
+    const outer = node.parent?.type === 'ambient_declaration' ? node.parent : node;
+    const scope = this.c.scopeOf(outer.parent ?? outer);
     const isDefault =
-      node.parent?.type === 'export_statement' &&
-      node.parent.children.some((child) => !child.isNamed && child.type === 'default');
-    const declarations = name
-      ? scope.lookupType(name)?.typeDeclarations
-      : isDefault
-        ? scope.defaultTypeSymbol?.typeDeclarations
+      outer.parent?.type === 'export_statement' &&
+      outer.parent.children.some((child) => !child.isNamed && child.type === 'default');
+    const declarations = isDefault
+      ? scope.defaultTypeSymbol?.typeDeclarations
+      : name
+        ? scope.lookupType(name)?.typeDeclarations
         : undefined;
     return declarations?.filter((declaration) => declaration.type === 'interface_declaration') ?? [];
   }
