@@ -470,7 +470,9 @@ export class ItemCollector {
       const written = param.defaultType;
       if (!written) continue;
       this.traitDefaults.push(() => {
-        def.params[index].defaultType = lowerType(written, { module, params, selfType: undefined });
+        // A const parameter's default has the parameter's type, as an argument written for it does.
+        const value = argumentFor(written, def.params[index]);
+        def.params[index].defaultType = lowerType(value, { module, params, selfType: undefined });
       });
     }
   }
