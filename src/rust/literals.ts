@@ -100,10 +100,20 @@ export function parseRawStringLiteral(text: string): { prefix: '' | 'b' | 'c'; b
   return { prefix, body };
 }
 
-/** The UTF-8 bytes of a C string's text, or undefined when it holds a NUL. */
+/** A lone surrogate that stands for a raw byte of a C string, which no Rust character can be. */
+const RAW_BYTE = 0xdc_00;
+
+/** The UTF-8 bytes of a C string's text (with its raw bytes as they are), or undefined when it holds a NUL. */
 export function cStringBytes(text: string): number[] | undefined {
   if (text.includes('\0')) return undefined;
-  return [...new TextEncoder().encode(text)];
+  const encoder = new TextEncoder();
+  const bytes: number[] = [];
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (char.length === 1 && code >= RAW_BYTE + 0x80 && code <= RAW_BYTE + 0xff) bytes.push(code - RAW_BYTE);
+    else bytes.push(...encoder.encode(char));
+  }
+  return bytes;
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Rust escape forms have different widths and allowed values.
@@ -142,6 +152,8 @@ function readEscape(body: string, index: number, kind: LiteralKind): { text: str
       if (!/^[\da-f]{2}$/i.test(hex)) return undefined;
       const code = Number.parseInt(hex, 16);
       if (kind !== 'byte' && kind !== 'byteString' && kind !== 'cString' && code > 0x7f) return undefined;
+      // In a C string, `\x80`–`\xff` is one byte, not a character, so it is kept apart as a lone surrogate.
+      if (kind === 'cString' && code > 0x7f) return { text: String.fromCodePoint(RAW_BYTE + code), last: index + 2 };
       return { text: String.fromCodePoint(code), last: index + 2 };
     }
     case 'u': {
