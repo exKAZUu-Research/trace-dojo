@@ -8991,6 +8991,10 @@ test('threads run when joined, waited for on a channel, or let run by sleep, sha
 use std::thread;
 use std::time::Duration;
 fn main() {
+    let child = thread::spawn(|| println!("child"));
+    thread::sleep(Duration::from_millis(50));
+    println!("main");
+    child.join().unwrap();
     let (tx, rx) = mpsc::channel();
     let tx1 = tx.clone();
     thread::spawn(move || { for v in [1, 2] { tx1.send(v).unwrap(); thread::sleep(Duration::from_millis(1)); } });
@@ -9003,7 +9007,45 @@ fn main() {
     let total = thread::scope(|s| s.spawn(|| (1..=10).sum::<i32>()).join().unwrap());
     println!("{:?} {} {} {} {:?}", got, *counter.lock().unwrap(), Arc::strong_count(&counter), total, Duration::from_millis(1500));
 }`;
-  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3] 10 1 55 1.5s\n' });
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'child\nmain\n[1, 2, 3] 10 1 55 1.5s\n',
+  });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('closures kept in collections, fields a move closure owns, and loop-body temporaries go where rustc drops them', () => {
+  const program = `use std::cell::RefCell;
+use std::sync::mpsc;
+struct Noisy(i32);
+impl Drop for Noisy { fn drop(&mut self) { println!("drop {}", self.0); } }
+struct Holder { noisy: Noisy, n: i32, tx: mpsc::Sender<i32> }
+fn main() {
+    let mut fs = Vec::new();
+    let s = String::from("hello");
+    let f = move || s.len();
+    fs.push(f);
+    println!("{}", fs[0]());
+    let (tx, rx) = mpsc::channel();
+    let h = Holder { noisy: Noisy(1), n: 2, tx };
+    {
+        let c = move || { let _ = &h.noisy; h.tx.send(h.n).unwrap(); };
+        c();
+    }
+    println!("{:?}", rx.iter().collect::<Vec<_>>());
+    let cell = RefCell::new(Vec::new());
+    for i in 0..3 {
+        cell.borrow_mut().push(i);
+        match cell.borrow().len() { 1 => continue, _ => {} }
+        cell.borrow_mut().push(10)
+    }
+    for i in 2..4 { match Noisy(i) { Noisy(n) => println!("got {}", n) } }
+    println!("{:?}", cell.borrow());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '5\ndrop 1\n[2]\ngot 2\ndrop 2\ngot 3\ndrop 3\n[0, 1, 10, 2, 10]\n',
+  });
 });
 
 // The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.

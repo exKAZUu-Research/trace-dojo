@@ -71,6 +71,8 @@ export interface ClosureCapture {
   duplicate?: (copy: CaptureCopy) => ClosureCapture;
   /** For a variable the closure owns, its type, by which the closure drops it when it goes. */
   owned?: Type;
+  /** For the fields of a variable the closure owns, their paths in its value and their types. */
+  ownedFields?: { path: number[]; type: Type }[];
 }
 
 interface FieldCapture {
@@ -245,7 +247,10 @@ export class Compiler {
 
   compileBlock(block: Block, tailAsStatement = false, clearsLocals = true): Eval {
     const stmts = block.stmts.map((stmt) => this.compileStmt(stmt));
-    const tail = block.tail && (tailAsStatement ? this.statement(block.tail) : this.value(block.tail));
+    // A tail whose value is not used is a statement, whose temporaries go at its end, as at each loop iteration's.
+    const tail =
+      block.tail &&
+      (tailAsStatement ? this.expressionStatement(this.statement(block.tail), block.tail) : this.value(block.tail));
     const declared = this.declaredSlots(block);
     const count = stmts.length;
     const run: Eval = (frame) => {
@@ -278,21 +283,32 @@ export class Compiler {
       }
       case 'expr': {
         const value = stmt.hidden ? this.value(stmt.expr, true) : this.statement(stmt.expr, stmt.span);
-        // The value of an expression statement is a temporary, which goes at the statement's end.
-        const dropped = this.droppedType(stmt.expr.ty);
-        return (frame) => {
-          frame.runtime.spend();
-          const mark = frame.runtime.liveGuards.length;
-          const result = value(frame);
-          if (dropped) frame.runtime.dropper?.drop(result, dropped(frame));
-          frame.runtime.releaseGuards(frame, mark);
-          return UNIT_VALUE;
-        };
+        return this.expressionStatement(value, stmt.expr);
       }
       case 'empty': {
         return () => UNIT_VALUE;
       }
     }
+  }
+
+  /** Runs an expression as a statement: its value and its temporaries go at its end, also when it breaks out. */
+  private expressionStatement(value: Eval, expr: Expr): Eval {
+    const dropped = this.droppedType(expr.ty);
+    return (frame) => {
+      frame.runtime.spend();
+      const mark = frame.runtime.liveGuards.length;
+      try {
+        const result = value(frame);
+        if (dropped) frame.runtime.dropper?.drop(result, dropped(frame));
+      } catch (error) {
+        // A guard the statement holds goes as the panic unwinds, which poisons its lock.
+        if (error instanceof RustPanic) frame.runtime.unwinding = true;
+        throw error;
+      } finally {
+        frame.runtime.releaseGuards(frame, mark);
+      }
+      return UNIT_VALUE;
+    };
   }
 
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of let statement (plain, destructuring, let-else).
@@ -871,8 +887,16 @@ export class Compiler {
 
   private ownedCapture(frame: Frame, value: Value, type: Type, fields: FieldCapture[]): ClosureCapture {
     const place = new CellPlace(value);
+    const ownedFields = fields
+      .filter(({ mode }) => mode === 'value')
+      .map(({ path }) => {
+        let fieldType = type;
+        for (const index of path) fieldType = captureFieldType(fieldType, index);
+        return { path, type: fieldType };
+      });
     return {
       place,
+      ownedFields,
       duplicate: (copy) => {
         const cloned = this.captureFields(frame, place.get(), type, fields, (source, index, item) =>
           copy(source[index], item)

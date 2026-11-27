@@ -324,7 +324,15 @@ export class Interpreter implements CallSupport {
       roots
     );
     fn.dropCaptures = () => {
-      for (const { place, owned } of captures) {
+      for (const { place, owned, ownedFields } of captures) {
+        for (const { path, type } of ownedFields ?? []) {
+          let container = place.get();
+          for (const index of path.slice(0, -1)) container = fieldsOf(container)[index];
+          const items = fieldsOf(container);
+          const value = items[path.at(-1) as number];
+          items[path.at(-1) as number] = MOVED;
+          this.dropper.drop(value, type);
+        }
         if (!owned) continue;
         const value = place.get();
         place.set(MOVED);
@@ -698,7 +706,7 @@ function releaseConsumed(def: FnDef, typeArgs: Type[], args: Value[], result: Va
     const borrowed = (index === 0 && def.selfMode !== undefined && def.selfMode !== 'value') || !type;
     if (!release || arg === result || borrowed || normalize(shallow(type)).kind === 'ref') continue;
     if (result instanceof IterValue) (result.releases ??= []).push(release);
-    else if (!returnsParam(def, index)) release();
+    else if (!keepsParam(def, index)) release();
   }
 }
 
@@ -711,15 +719,29 @@ function releaseOf(value: Value): (() => void) | undefined {
   return undefined;
 }
 
-/** Whether a function's result can hold its argument, as its result type names the argument's type parameter. */
-function returnsParam(def: FnDef, index: number): boolean {
+/**
+ * Whether a function can keep its argument: in its result, or in what another argument lends it mutably (`Vec::push`,
+ * `mem::replace`), as their types name the argument's type parameter.
+ */
+function keepsParam(def: FnDef, index: number): boolean {
   const params = def.selfMode ? [def.impl?.selfType, ...def.paramTypes] : def.paramTypes;
   const param = params[index] && shallow(params[index]);
-  return param?.kind === 'param' && mentions(def.ret, param.param);
+  if (param?.kind !== 'param') return false;
+  if (mentions(def.ret, param.param)) return true;
+  return params.some((other, position) => {
+    if (position === index || !other) return false;
+    const t = shallow(other);
+    const lentMutably = position === 0 && def.selfMode ? def.selfMode === 'mutRef' : t.kind === 'ref' && t.mutable;
+    return lentMutably && mentions(t, param.param);
+  });
 }
 
 function mentions(type: Type, param: TypeParam): boolean {
   const t = shallow(type);
   if (t.kind === 'param') return t.param === param;
   return childTypes(t).some((child) => mentions(child, param));
+}
+
+function fieldsOf(value: Value): Value[] {
+  return value instanceof StructValue ? value.fields : (value as Value[]);
 }
