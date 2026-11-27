@@ -712,7 +712,9 @@ export class FunctionChecker {
     const elements = typeMembers(parameter.type).flatMap((member): Type[] => {
       if (member.kind === 'object' && member.objectKind === 'tuple') {
         const first = member.tuple?.elements[0];
-        return first ? [first.type] : [];
+        if (!first) return [undefinedType];
+        if (first.rest) return [this.c.restElementType(first.type)];
+        return [first.optional ? unionOf([first.type, undefinedType]) : first.type];
       }
       return [this.c.restElementType(member)];
     });
@@ -736,9 +738,12 @@ export class FunctionChecker {
 
   /** What `yield*` gives back: what the generator or other iterator it delegates to returns when done. */
   private delegatedReturnType(operandType: Type, isAsync: boolean): Type {
+    const apparent = this.c.apparentType(operandType);
+    const hasAsyncMethod = isAsync && this.c.patterns.hasCallableIteratorMethod(apparent, 'asyncIterator');
     const asyncReturn = isAsync ? this.c.patterns.iteratorReturnType(operandType, 'asyncIterator') : undefined;
     // An async generator delegates to a synchronous iterable through its `[Symbol.iterator]()` when it has no async one.
-    const returned = asyncReturn ?? this.c.patterns.iteratorReturnType(operandType, 'iterator');
+    const returned =
+      asyncReturn ?? (hasAsyncMethod ? undefined : this.c.patterns.iteratorReturnType(operandType, 'iterator'));
     return (
       this.delegatedIterationTypes(operandType, isAsync)?.returnType ??
       (returned && isAsync ? awaitedType(this.c, returned) : returned) ??
@@ -748,7 +753,11 @@ export class FunctionChecker {
 
   private delegatedIterationTypes(operandType: Type, isAsync: boolean): IterationTypes | undefined {
     const apparent = this.c.apparentType(operandType);
-    return (isAsync ? this.iterationTypesOf(apparent, true) : undefined) ?? this.iterationTypesOf(apparent, false);
+    if (isAsync) {
+      const asyncTypes = this.iterationTypesOf(apparent, true);
+      if (asyncTypes || this.c.patterns.hasCallableIteratorMethod(apparent, 'asyncIterator')) return asyncTypes;
+    }
+    return this.iterationTypesOf(apparent, false);
   }
 
   private checkDelegatedNextType(

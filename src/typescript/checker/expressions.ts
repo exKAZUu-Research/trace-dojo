@@ -254,7 +254,7 @@ export class ExpressionChecker {
     const call = skipParentheses(element);
     if (call.type !== 'call_expression') return;
     if (this.calls.endsFlow(call, type)) this.c.flow.current = undefined;
-    else this.c.conditions.applyAssertion(call);
+    else this.c.conditions.applyAssertion(call, false);
   }
 
   /**

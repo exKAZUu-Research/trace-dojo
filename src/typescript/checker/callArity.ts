@@ -143,10 +143,7 @@ export function takesNoArguments(signatures: Signature[]): boolean {
  */
 export function tupleTypeAt(c: Checker, elements: TupleElement[], offset: number): Type | undefined {
   const restIndex = elements.findIndex((element) => element.rest);
-  if (restIndex === -1 || offset < restIndex) {
-    const element = elements[offset];
-    return element && (element.optional ? unionOf([element.type, undefinedType]) : element.type);
-  }
+  if (restIndex === -1 || offset < restIndex) return tupleElementContextType(elements[offset]);
   return c.restElementType(elements[restIndex].type);
 }
 
@@ -197,12 +194,16 @@ export function tupleArgumentContexts(
   const fromEnd = offsets(lengths.toReversed()).toReversed();
   return lengths.map((_, index) => {
     const start = fromStart[index];
-    if (start !== undefined && (restIndex === -1 || start < restIndex)) return elements[start]?.type;
+    if (start !== undefined && (restIndex === -1 || start < restIndex)) return tupleElementContextType(elements[start]);
     const end = fromEnd[index];
-    if (end !== undefined && end < trailing) return elements[elements.length - 1 - end].type;
+    if (end !== undefined && end < trailing) return tupleElementContextType(elements[elements.length - 1 - end]);
     if (restIndex === -1) return;
     return c.restElementType(elements[restIndex].type);
   });
+}
+
+function tupleElementContextType(element: TupleElement | undefined): Type | undefined {
+  return element && (element.optional ? unionOf([element.type, undefinedType]) : element.type);
 }
 
 /** How many values precede each argument, until a spread of unknown length. */

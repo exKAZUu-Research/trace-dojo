@@ -105,7 +105,9 @@ export class Calls {
     const type = this.c.expressions.check(expression);
     const typeArguments = this.typeArguments.written(node) ?? [];
     if (isAnyLike(type) || type === errorType) return type;
-    const members = type.kind === 'union' ? type.types : [type];
+    const resolved = this.instantiationTarget(type);
+    if (isAnyLike(resolved)) return resolved;
+    const members = resolved.kind === 'union' ? resolved.types : [resolved];
     let hasCallableMember = false;
     const instantiated = members.map((member) => {
       if (isAnyLike(member)) {
@@ -122,7 +124,7 @@ export class Calls {
         typeArguments
       );
       if (callSignatures.length === 0 && constructSignatures.length === 0) {
-        this.reportNoApplicableSignature(node, member);
+        this.reportNoApplicableSignature(node, members.length === 1 ? type : member);
         return errorType;
       }
       return anonymousObject(() => ({ ...structure, callSignatures, constructSignatures }));
@@ -132,6 +134,17 @@ export class Calls {
       return errorType;
     }
     return instantiated.includes(errorType) ? errorType : unionOf(instantiated);
+  }
+
+  private instantiationTarget(type: Type, seen = new Set<number>()): Type {
+    if (type.kind === 'typeParameter') {
+      if (seen.has(type.id)) return unknownType;
+      seen.add(type.id);
+      const constraint = this.c.constraintOf(type);
+      return constraint ? this.instantiationTarget(constraint, seen) : unknownType;
+    }
+    if (type.kind === 'indexedAccess' || type.kind === 'conditional') return this.c.apparentType(type);
+    return type;
   }
 
   private applicableInstantiationSignatures(

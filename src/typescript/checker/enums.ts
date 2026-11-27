@@ -33,6 +33,8 @@ import {
 
 type EnumValue = number | string;
 
+export const ENUM_MERGE_MESSAGE = '列挙型の宣言は、名前空間または他の列挙型の宣言とのみマージできます。';
+
 /** What an enum initializer is evaluated in: its enum, the members evaluated before it, and the errors found. */
 interface Evaluation {
   symbol: Sym;
@@ -198,7 +200,7 @@ export class Enums {
       for (const declaration of declarations)
         errors.push({
           node: declaration.childForFieldName('name') ?? declaration,
-          message: 'enum の宣言は、名前空間かほかの enum の宣言とだけ統合できます。',
+          message: ENUM_MERGE_MESSAGE,
         });
     for (const declaration of declarations) {
       let previous: EnumMember | undefined;

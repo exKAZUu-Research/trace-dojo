@@ -225,11 +225,11 @@ export class ConditionChecker {
    * Narrows the flow after a call to an assertion function, `asserts x is T` or `asserts x`, to where the assertion
    * holds, as a condition that is true there would.
    */
-  applyAssertion(call: TreeNode): void {
+  applyAssertion(call: TreeNode, requireExplicitCallee = true): void {
     const predicate = this.c.expressions.calls.predicateOf(call);
     if (!predicate?.asserts) return;
-    // As tsc does, an assertion through a callee without an explicit type is reported and narrows nothing.
-    if (!this.c.expressions.calls.hasExplicitCalleeType(call)) {
+    // As tsc does, an assertion statement through a callee without an explicit type is reported and narrows nothing.
+    if (requireExplicitCallee && !this.c.expressions.calls.hasExplicitCalleeType(call)) {
       this.c.error(
         call.childForFieldName('function') ?? call,
         'アサーションを使うには、呼び出し先のすべての名前が、明示的な型注釈を付けて宣言されている必要があります。'

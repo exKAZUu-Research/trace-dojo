@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { blockHasRuntimeCode, isAmbient } from '../namespaceInstantiation';
 import type { Checker } from './checker';
+import { ENUM_MERGE_MESSAGE } from './enums';
 import { checkDuplicateIndexSignatures } from './indexConformance';
 import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
 import type { Scope, Sym } from './scopes';
@@ -97,8 +98,7 @@ function checkNamespaceAndEnumMerges(c: Checker, symbol: Sym): boolean {
     return false;
   }
   if (!kinds.includes('enum')) return true;
-  for (const entry of symbol.valueEntries)
-    c.error(entry.name, 'enum の宣言は、namespace かほかの enum の宣言としかマージできません。');
+  for (const entry of symbol.valueEntries) c.error(entry.name, ENUM_MERGE_MESSAGE);
   return false;
 }
 
@@ -250,8 +250,7 @@ function checkTypeDuplicates(c: Checker, symbol: Sym): void {
 
 function reportEnumTypeMergeConflicts(c: Checker, entries: Sym['typeEntries'], kinds: string[]): void {
   if (!kinds.some((kind) => kind === 'alias' || kind === 'interface')) return;
-  for (const entry of entries)
-    c.error(entry.name, '列挙型の宣言は、名前空間または他の列挙型の宣言とのみマージできます。');
+  for (const entry of entries) c.error(entry.name, ENUM_MERGE_MESSAGE);
 }
 
 function mergesTypeDeclarations(kinds: string[]): boolean {

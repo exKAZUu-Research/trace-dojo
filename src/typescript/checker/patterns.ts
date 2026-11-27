@@ -13,7 +13,7 @@ import {
 import type { Checker } from './checker';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { isDefinitelyFalsy, isSpreadableProperty, spreadCopy } from './literals';
-import { nonUndefinedBindingSource } from './nullishConstraints';
+import { nonNullableType, nonUndefinedBindingSource } from './nullishConstraints';
 import type { Sym } from './scopes';
 import { arrayPatternElements, isImmediatelyInvoked, isWithin, named, numberValue, propertyNameText } from './syntax';
 import { tupleElementReadType, tupleSliceReadType } from './tupleIndexes';
@@ -655,10 +655,12 @@ export class BindingPatterns {
       );
     const asyncElement = this.iteratorElementType(type, 'asyncIterator', node, consumer);
     if (asyncElement) return asyncElement;
-    const element = this.iteratedType(undefined, type, consumer);
-    if (element !== errorType) {
-      if (node) this.iteratedType(node, type, consumer);
-      return awaitedType(this.c, element, node ? { node, kind: 'await' } : undefined);
+    if (!this.hasCallableIteratorMethod(type, 'asyncIterator')) {
+      const element = this.iteratedType(undefined, type, consumer);
+      if (element !== errorType) {
+        if (node) this.iteratedType(node, type, consumer);
+        return awaitedType(this.c, element, node ? { node, kind: 'await' } : undefined);
+      }
     }
     if (node)
       this.c.error(
@@ -720,6 +722,11 @@ export class BindingPatterns {
     return values.length > 0 ? unionOf(values) : anyType;
   }
 
+  hasCallableIteratorMethod(type: Type, method: 'iterator' | 'asyncIterator'): boolean {
+    const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey(method));
+    return iterator !== undefined && this.c.signaturesOf(nonNullableType(this.c, iterator.type()), 'call').length > 0;
+  }
+
   /** The iterator a value's iteration method returns, and what its `next()` settles to (awaited for an async one). */
   private iteratorResults(
     type: Type,
@@ -727,15 +734,19 @@ export class BindingPatterns {
     node?: TreeNode
   ): { iteratorType: ObjectType; nextType: Type; settled: Type | undefined } | undefined {
     const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey(method));
-    const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
+    const iteratorType =
+      iterator && this.c.signaturesOf(nonNullableType(this.c, iterator.type()), 'call')[0]?.returnType();
     if (iteratorType?.kind !== 'object') return undefined;
     const next = this.c.propertyOf(iteratorType, 'next');
+    const isLibraryIterator = this.c.functions.isKnownLibraryIterator(iteratorType, method);
     const nextSignature = next && this.c.signaturesOf(next.type(), 'call')[0];
-    if (!nextSignature && !this.c.functions.isKnownLibraryIterator(iteratorType, method)) return undefined;
+    if (!nextSignature && !isLibraryIterator) return undefined;
     const result = nextSignature?.returnType();
-    const nextType = nextSignature
-      ? this.c.functions.iteratorNextParameterType(nextSignature)
-      : (iteratorType.typeArguments?.[2] ?? unknownType);
+    const nextType = isLibraryIterator
+      ? (iteratorType.typeArguments?.[2] ?? unknownType)
+      : nextSignature
+        ? this.c.functions.iteratorNextParameterType(nextSignature)
+        : unknownType;
     const site = node ? { node, kind: 'await' as const } : undefined;
     return {
       iteratorType,

@@ -1201,7 +1201,7 @@ export class LiteralChecker {
       const apparent = member.kind === 'typeParameter' ? (this.c.constraintOf(member) ?? unknownType) : member;
       const property = this.c.propertyOf(apparent, name);
       if (property) {
-        types.push(property.type());
+        types.push(propertyAccessType(property));
         continue;
       }
       const index = namedPropertyIndex(this.c, this.c.structureOf(apparent), name, key);
