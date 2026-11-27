@@ -122,20 +122,9 @@ export class LiteralChecker {
     const isConstContext = this.isConstContext(node, contextual);
     const lengths = contextual ? this.arrayElementLengths(elements) : [];
     const firstSpread = elements.findIndex((element) => element?.type === 'spread_element');
-    const types: { type: Type; spread: boolean }[] = elements.map((element, index) => {
-      // A hole, as in `[, 1]`, reads as `undefined`.
-      if (!element) return { type: undefinedType, spread: false };
-      if (element.type === 'spread_element') {
-        const spread = this.c.expressions.check(named(element)[0]);
-        return { type: spread, spread: true };
-      }
-      const fixed = firstSpread === -1 || index < firstSpread;
-      const contexts = contextual ? this.arrayElementContexts(contextual, index, lengths, fixed) : [];
-      const context = contexts.length > 0 ? unionOf(contexts, true, true) : undefined;
-      const type = this.c.expressions.check(element, context);
-      const literalContext = contexts.find((candidate) => this.expectsLiteral(candidate, type)) ?? context;
-      return { type: this.literalValueType(type, literalContext, isConstContext), spread: false };
-    });
+    const types = elements.map((element, index) =>
+      this.checkArrayElement(element, index, { contextual, isConstContext, lengths, firstSpread })
+    );
     if (isConstContext || this.isInTupleContext(node, contextual)) {
       return this.tupleOfElements(
         node,
@@ -154,6 +143,31 @@ export class LiteralChecker {
     };
     this.arrayLiterals.add(array.id);
     return array;
+  }
+
+  private checkArrayElement(
+    element: TreeNode | undefined,
+    index: number,
+    options: {
+      contextual: Type | undefined;
+      isConstContext: boolean;
+      lengths: (number | undefined)[];
+      firstSpread: number;
+    }
+  ): { type: Type; spread: boolean } {
+    // A hole, as in `[, 1]`, reads as `undefined`.
+    if (!element) return { type: undefinedType, spread: false };
+    const { contextual, isConstContext, lengths, firstSpread } = options;
+    if (element.type === 'spread_element') {
+      const spreadContext = contextual && isAnyLike(contextual) ? contextual : undefined;
+      return { type: this.c.expressions.check(named(element)[0], spreadContext), spread: true };
+    }
+    const fixed = firstSpread === -1 || index < firstSpread;
+    const contexts = contextual ? this.arrayElementContexts(contextual, index, lengths, fixed) : [];
+    const context = contexts.length > 0 ? unionOf(contexts, true, true) : undefined;
+    const type = this.c.expressions.check(element, context);
+    const literalContext = contexts.find((candidate) => this.expectsLiteral(candidate, type)) ?? context;
+    return { type: this.literalValueType(type, literalContext, isConstContext), spread: false };
   }
 
   private arrayElementLengths(elements: (TreeNode | undefined)[]): (number | undefined)[] {
@@ -296,13 +310,14 @@ export class LiteralChecker {
   }
 
   private elementContext(contextual: Type, position: number | undefined): Type | undefined {
+    if (isAnyLike(contextual)) return contextual;
     if (contextual.kind !== 'object') return undefined;
     const property = position === undefined ? undefined : this.c.propertyOf(contextual, String(position));
     if (property) return propertyAccessType(property);
     if (this.c.isArrayOrTuple(contextual)) return this.c.elementTypeOf(contextual);
     if (!this.c.propertyOf(contextual, this.c.typeNodes.librarySymbolKey('iterator'))) return undefined;
     const iterated = this.c.silently(() => this.c.patterns.iteratedType(undefined, contextual));
-    return iterated === errorType || isAnyLike(iterated) ? undefined : iterated;
+    return iterated === errorType ? undefined : iterated;
   }
 
   /** Whether a literal is checked with const inference or inside a const assertion. */

@@ -788,7 +788,7 @@ function stepAliasTarget(
   if (current.kind !== 'symbol') return undefined;
   const member =
     current.symbol.valueKind === 'enum' && isLast
-      ? current.symbol.enumMembers?.values.get(partName)
+      ? (current.symbol.enumMembers?.values.get(partName) ?? current.symbol.namespaceExports?.values.get(partName))
       : current.symbol.namespaceExports?.values.get(partName);
   return unwrapAliasSymbol(member, binder, seen);
 }
@@ -800,7 +800,11 @@ function unwrapAliasSymbol(symbol: Sym | undefined, binder: Binder, seen: Set<nu
     const target = declaration?.namedChildren[1];
     if (!declaration || !target || seen.has(declaration.id)) return undefined;
     seen.add(declaration.id);
-    return resolveImportAliasValue(namespacePathOf(target), binder, seen);
+    try {
+      return resolveImportAliasValue(namespacePathOf(target), binder, seen);
+    } finally {
+      seen.delete(declaration.id);
+    }
   }
   if (symbol.valueKind !== 'import') return { kind: 'symbol', symbol };
   return symbol.importTarget ? unwrapImportTarget(symbol.importTarget, binder, seen) : undefined;

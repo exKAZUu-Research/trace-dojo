@@ -76,8 +76,8 @@ export class ConditionChecker {
     return { whenTrue, whenFalse };
   }
 
-  condition(node: TreeNode, testsTruthiness = true): Condition {
-    const result = this.conditionOf(node);
+  condition(node: TreeNode, testsTruthiness = true, contextual?: Type): Condition {
+    const result = this.conditionOf(node, contextual);
     if (node.type === 'true') result.whenFalse = undefined;
     if (node.type === 'false') result.whenTrue = undefined;
     if (testsTruthiness) this.checkTruthiness(node, result.type);
@@ -85,7 +85,7 @@ export class ConditionChecker {
   }
 
   // code-gauge-allow functionNcss -- Computes branch states for each kind of narrowing expression.
-  private conditionOf(node: TreeNode): Condition {
+  private conditionOf(node: TreeNode, contextual?: Type): Condition {
     const expression = skipParentheses(node);
     switch (expression.type) {
       case 'unary_expression': {
@@ -101,12 +101,12 @@ export class ConditionChecker {
         };
       }
       case 'binary_expression': {
-        const result = this.binaryCondition(expression);
+        const result = this.binaryCondition(expression, contextual);
         if (result) return result;
         break;
       }
       case 'call_expression': {
-        return this.c.members.chainCondition(expression, () => this.callCondition(expression));
+        return this.c.members.chainCondition(expression, () => this.callCondition(expression, contextual));
       }
       case 'identifier': {
         const aliased = this.inlined.aliasedCondition(expression);
@@ -126,17 +126,17 @@ export class ConditionChecker {
       }
     }
     return this.c.members.chainCondition(expression, () => {
-      const type = this.c.expressions.check(expression);
+      const type = this.c.expressions.check(expression, contextual);
       return { ...this.truthiness(expression), type };
     });
   }
 
   /** The condition a binary expression is, if its operator narrows. */
-  private binaryCondition(expression: TreeNode): Condition | undefined {
+  private binaryCondition(expression: TreeNode, contextual?: Type): Condition | undefined {
     const operator = expression.childForFieldName('operator')?.text ?? '';
     const left = expression.childForFieldName('left') as TreeNode;
     const right = expression.childForFieldName('right') as TreeNode;
-    if (operator === '&&' || operator === '||') return this.logicalCondition(operator, left, right);
+    if (operator === '&&' || operator === '||') return this.logicalCondition(operator, left, right, contextual);
     if (!['===', '!==', '==', '!=', 'instanceof', 'in'].includes(operator)) return undefined;
     const { type, leftType, rightType } = this.c.operators.checkBinaryOperands(expression, operator, left, right);
     if (operator === 'instanceof') {
@@ -163,12 +163,12 @@ export class ConditionChecker {
       : this.truthiness(expression);
   }
 
-  private logicalCondition(operator: '&&' | '||', left: TreeNode, right: TreeNode): Condition {
-    const leftResult = this.condition(left);
+  private logicalCondition(operator: '&&' | '||', left: TreeNode, right: TreeNode, contextual?: Type): Condition {
+    const leftResult = this.condition(left, true, operator === '||' ? contextual : undefined);
     const rightState = operator === '&&' ? leftResult.whenTrue : leftResult.whenFalse;
     let rightResult: Condition = { whenTrue: undefined, whenFalse: undefined, type: neverType };
     this.c.flow.from(rightState, () => {
-      rightResult = this.condition(right, false);
+      rightResult = this.condition(right, false, contextual);
     });
     this.checkLogicalOperands(left, leftResult.type, right, rightResult.type);
     const merged =
@@ -204,11 +204,11 @@ export class ConditionChecker {
   }
 
   /** The condition a call is, narrowing what its signature's type predicate tests. */
-  private callCondition(expression: TreeNode): Condition {
+  private callCondition(expression: TreeNode, contextual?: Type): Condition {
     const cached = this.c.flow.narrowingScope?.reuseCallPredicates
       ? this.c.expressions.calls.predicateOf(expression)
       : undefined;
-    const type = cached ? booleanType : this.c.expressions.check(expression);
+    const type = cached ? booleanType : this.c.expressions.check(expression, contextual);
     const predicate = cached ?? this.c.expressions.calls.predicateOf(expression);
     if (!predicate || predicate.asserts) return { ...this.truthiness(expression), type };
     const { target, type: predicateType } = predicate;

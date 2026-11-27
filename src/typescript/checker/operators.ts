@@ -430,7 +430,11 @@ export class OperatorChecker {
       this.c.flow.current = this.c.flow.merge([skipped, after]);
       return this.coalescingType(leftType, rightType);
     }
-    const { whenTrue, whenFalse, type: leftType } = this.c.conditions.condition(left);
+    const {
+      whenTrue,
+      whenFalse,
+      type: leftType,
+    } = this.c.conditions.condition(left, true, operator === '||' ? contextual : undefined);
     const rightState = operator === '&&' ? whenTrue : whenFalse;
     let rightType: Type = neverType;
     const after = this.c.flow.from(rightState, () => {

@@ -41,7 +41,9 @@ export class ExpressionListFlow {
   }
 
   private position(node: TreeNode): ArgumentPosition | undefined {
-    this.positions ??= this.c.flow.probe(() => this.c.silently(() => this.collectPositions()));
+    this.positions ??= this.c.overloadContexts.withoutPreview(() =>
+      this.c.flow.probe(() => this.c.silently(() => this.collectPositions()))
+    );
     return this.positions.get(node.id);
   }
 

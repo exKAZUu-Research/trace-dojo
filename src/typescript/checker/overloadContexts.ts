@@ -96,6 +96,17 @@ export class OverloadContexts {
     }
   }
 
+  withoutPreview<T>(check: () => T): T {
+    const preview = this.preview;
+    if (!preview) return check();
+    this.preview = undefined;
+    try {
+      return check();
+    } finally {
+      this.preview = preview;
+    }
+  }
+
   contextOf(node: TreeNode, contextual: Type | undefined): Type | undefined {
     return this.locked.findLast((frame) => frame.types.has(node.id))?.types.get(node.id) ?? contextual;
   }

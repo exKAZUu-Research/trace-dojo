@@ -336,7 +336,7 @@ export class ClassChecker {
 
   private resolveBaseInstance(node: TreeNode): Type | undefined {
     const staticType = this.baseStaticType(node);
-    if (!staticType || isAnyLike(staticType)) return staticType && anyType;
+    if (!staticType || isAnyLike(staticType)) return staticType;
     const instantiated = this.baseConstructSignatures(node)?.[0];
     if (instantiated) return instantiated.returnType();
     // The `extends` clause reports type arguments no base signature takes, and the base's members then read as `any`.

@@ -1305,7 +1305,9 @@ export class Calls {
 
   private probeArgumentType(arg: ExpandedArgument, contextual: Type | undefined, mapper?: Mapper): Type {
     const context = contextual && mapper ? this.c.instantiateContextual(contextual, mapper) : contextual;
-    return this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, context)), arg.before);
+    return this.c.overloadContexts.withoutPreview(() =>
+      this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, context)), arg.before)
+    );
   }
 
   private spreadElements(arg: TreeNode, type: Type): TupleElement[] {
@@ -1325,7 +1327,9 @@ export class Calls {
     const expression = skipParentheses(arg);
     if (functionExpressionTypes.has(expression.type)) return expression.childForFieldName('type_parameters') !== null;
     if (!['identifier', 'member_expression', 'subscript_expression'].includes(expression.type)) return false;
-    const type = this.c.silently(() => this.c.expressions.check(expression));
+    const type = this.c.overloadContexts.withoutPreview(() =>
+      this.c.silently(() => this.c.expressions.check(expression))
+    );
     return this.c.signaturesOf(type, 'call').some((signature) => signature.typeParameters.length > 0);
   }
 

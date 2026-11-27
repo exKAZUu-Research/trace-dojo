@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { memberName } from './declarations';
 import { hasToken, named } from './syntax';
-import { isAnyLike } from './types';
+import { errorType, permissiveAnyType } from './types';
 
 const invalidTypeMemberModifiers = new Set(['override_modifier', 'accessibility_modifier', 'static']);
 
@@ -49,7 +49,8 @@ export function checkOverrideModifiers(c: Checker, node: TreeNode, members: Tree
     const name = memberName(c, member);
     const isStatic = hasToken(member, 'static');
     const base = isStatic ? c.classes.baseStaticType(node) : c.classes.baseInstanceType(node);
-    if (name === undefined || !base || isAnyLike(base) || c.propertyOf(base, name)) continue;
+    if (name === undefined || !base || base === errorType || base === permissiveAnyType || c.propertyOf(base, name))
+      continue;
     c.error(
       member,
       `このメンバーには 'override' 修飾子を付けられません。基底クラス '${c.print(c.classes.baseInstanceType(node) ?? base)}' で宣言されていません。`
