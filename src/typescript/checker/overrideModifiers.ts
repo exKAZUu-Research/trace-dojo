@@ -30,7 +30,7 @@ export function checkOverrideModifiers(c: Checker, node: TreeNode, members: Tree
   const parameters = named(ctor?.childForFieldName('parameters') ?? ctor ?? node).filter(
     (parameter) => ctor !== undefined && parameter.type !== 'comment'
   );
-  const hasBase = c.classes.extendsClause(node) !== undefined;
+  const hasBase = c.classes.extendsClause(node) !== undefined && !c.classes.extendsNull(node);
   const className = node.childForFieldName('name')?.text ?? '(Anonymous class)';
   for (const member of [...members, ...parameters]) {
     const modifier = named(member).find((child) => child.type === 'override_modifier');
