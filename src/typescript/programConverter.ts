@@ -100,11 +100,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     const inlined = this.inlinedConstEnumMember(node);
     if (inlined) return inlined;
     const member = convertMember(node);
-    const inferredName = inferredTargetNameOf(node);
-    if (member.kind === 'member') {
-      if (inferredName !== undefined) member.inferredName = inferredName;
-      if (isUnboundCallMember(node)) member.isUnboundCall = true;
-    }
+    if (member.kind === 'member' && isUnboundCallMember(node)) member.isUnboundCall = true;
     return member;
   }
 

@@ -158,9 +158,7 @@ export abstract class ExpressionConverter extends ConverterBase {
   /** Converts the value of `name = value`, which names an anonymous function after the variable. */
   protected namedValue(node: Node, target: Pattern): Expression {
     const value = this.expression(node);
-    const name =
-      target.kind === 'identifier' ? target.name : target.kind === 'member' ? target.inferredName : undefined;
-    if (name !== undefined) nameAnonymous(value, name);
+    if (target.kind === 'identifier') nameAnonymous(value, target.name);
     return value;
   }
 

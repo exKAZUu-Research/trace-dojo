@@ -285,13 +285,8 @@ export abstract class EvaluatorBase {
       }
       case 'default': {
         const resolved = value === undefined ? this.evaluate(pattern.value) : value;
-        const targetName =
-          pattern.target.kind === 'identifier'
-            ? pattern.target.name
-            : pattern.target.kind === 'member'
-              ? pattern.target.inferredName
-              : undefined;
-        if (targetName !== undefined && resolved instanceof JsFunction) nameFunction(runtime, resolved, targetName);
+        if (pattern.target.kind === 'identifier' && resolved instanceof JsFunction)
+          nameFunction(runtime, resolved, pattern.target.name);
         this.bindPattern(pattern.target, resolved, mode);
         return;
       }

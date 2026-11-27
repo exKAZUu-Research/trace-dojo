@@ -31,7 +31,7 @@ class ViewNode implements Node {
   isUnstepped = false;
   /** Whether a synthesized function (such as a namespace body wrapper) hides its call frame from trace `callLines`. */
   hidesCallRow = false;
-  /** The variable name a synthesized namespace-export member target stands for, for anonymous function/class naming. */
+  /** The inferred name an anonymous default export carries (`"default"`), for function/class naming. */
   inferredName?: string;
   /** Whether a viewed `class` came from an unnamed `export default [abstract] class` declaration. */
   isUnnamedDefaultClassDeclaration = false;
@@ -280,7 +280,7 @@ function shorthandPropertyView(node: TreeNode, binder: Binder): ViewNode {
 }
 
 function shorthandPropertyPatternView(node: TreeNode, binder: Binder): ViewNode {
-  const target = isAssignmentPatternPosition(node) ? rewrittenAssignmentReference(node, binder) : undefined;
+  const target = isAssignmentPatternPosition(node) ? rewrittenIdentifierReference(node, binder) : undefined;
   return target ? pairPattern(node, node, target) : generic(node, node.type, binder);
 }
 
@@ -289,7 +289,7 @@ function objectAssignmentPatternView(node: TreeNode, binder: Binder): ViewNode {
   const right = node.childForFieldName('right');
   const target =
     left?.type === 'shorthand_property_identifier_pattern' && right && isAssignmentPatternPosition(node)
-      ? rewrittenAssignmentReference(left, binder)
+      ? rewrittenIdentifierReference(left, binder)
       : undefined;
   if (!target || !left || !right) return generic(node, node.type, binder);
   return pairPattern(node, left, defaultedTarget(node, target, right, binder));
@@ -309,12 +309,6 @@ function defaultedTarget(position: TreeNode, target: ViewNode, right: TreeNode, 
     { node: token(position, '='), fieldName: undefined },
     { node: view(right, binder), fieldName: 'right' },
   ]);
-}
-
-function rewrittenAssignmentReference(node: TreeNode, binder: Binder): ViewNode | undefined {
-  const target = rewrittenIdentifierReference(node, binder);
-  if (target) target.inferredName = nameOf(node);
-  return target;
 }
 
 const patternContainerTypes = new Set([
@@ -537,12 +531,6 @@ function isTopLevelEnumDeclaration(node: TreeNode): boolean {
     node.parent?.type === 'program' ||
     (node.parent?.type === 'export_statement' && node.parent.parent?.type === 'program')
   );
-}
-
-function exportedMemberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
-  const reference = memberReference(position, objectName, memberName);
-  reference.inferredName = memberName;
-  return reference;
 }
 
 function memberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
@@ -931,7 +919,7 @@ function exportedVariables(declaration: TreeNode, namespaceName: string, binder:
     if (!declarator || !name || !value) return [];
     const target =
       name.type === 'identifier'
-        ? exportedMemberReference(name, namespaceName, nameOf(name))
+        ? memberReference(name, namespaceName, nameOf(name))
         : exportedPattern(name, namespaceName, binder);
     return [assignment(declarator, target, view(value, binder))];
   });
@@ -949,16 +937,16 @@ function exportedVariables(declaration: TreeNode, namespaceName: string, binder:
  * it read as the namespace's properties already.
  */
 function exportedPattern(node: TreeNode, namespaceName: string, binder: Binder): ViewNode {
-  if (node.type === 'identifier') return exportedMemberReference(node, namespaceName, nameOf(node));
+  if (node.type === 'identifier') return memberReference(node, namespaceName, nameOf(node));
   if (node.type === 'shorthand_property_identifier_pattern')
-    return pairPattern(node, node, exportedMemberReference(node, namespaceName, nameOf(node)));
+    return pairPattern(node, node, memberReference(node, namespaceName, nameOf(node)));
   const left = node.childForFieldName('left');
   const right = node.childForFieldName('right');
   if (node.type === 'object_assignment_pattern' && left?.type === 'shorthand_property_identifier_pattern' && right)
     return pairPattern(
       node,
       left,
-      defaultedTarget(node, exportedMemberReference(left, namespaceName, nameOf(left)), right, binder)
+      defaultedTarget(node, memberReference(left, namespaceName, nameOf(left)), right, binder)
     );
   if (!exportedPatternTypes.has(node.type)) return view(node, binder);
   return assemble(
@@ -1109,7 +1097,7 @@ export function isHiddenCallFunction(node: Node): boolean {
   return node instanceof ViewNode && node.hidesCallRow;
 }
 
-/** The inferred name a synthesized namespace-export target or anonymous default export carries, if any. */
+/** The inferred name an anonymous default export carries, if any. */
 export function inferredTargetNameOf(node: Node): string | undefined {
   return node instanceof ViewNode ? node.inferredName : undefined;
 }
