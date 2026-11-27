@@ -1494,25 +1494,25 @@ function literalTargetRelated(s: Type, t: LiteralType, relation: Relation): bool
 
 /**
  * Whether two enum declarations are compatible in TypeScript (`isEnumTypeRelatedTo`): the same declaration, or two
- * non-computed enums of the same name where every member of `source` exists in `target` with the same value.
+ * enums of the same name where every member of `source` exists in `target` with matching computedness and constant
+ * value.
  */
 export function enumDeclarationsRelated(source: EnumMemberInfo, target: EnumMemberInfo): boolean {
   if (source.enumId === target.enumId) return true;
   if (source.enumName !== target.enumName) return false;
   const [sourceMembers, targetMembers] = [source.members(), target.members()];
-  for (const [, member] of targetMembers) if (member.computed) return false;
   for (const [name, member] of sourceMembers) {
-    if (member.computed) return false;
     const other = targetMembers.get(name);
-    if (!other || other.value !== member.value) return false;
+    if (!other || other.computed !== member.computed) return false;
+    if (!member.computed && other.value !== member.value) return false;
   }
   return true;
 }
 
 /**
- * Whether a literal or enum-member type is related to another, where computed enum members match only themselves (or a
- * number on the source when assigning, or on either side when comparing) and distinct enum declarations require
- * compatible member sets.
+ * Whether a literal or enum-member type is related to another, where computed enum members match only compatible
+ * declarations' members of the same name (or a number on the source when assigning, or on either side when comparing)
+ * and distinct enum declarations require compatible member sets.
  */
 function literalRelated(s: LiteralType, t: LiteralType, relation: Relation): boolean {
   if (s.enumMember && t.enumMember) return enumMembersRelated(s, t);
@@ -1524,7 +1524,8 @@ function literalRelated(s: LiteralType, t: LiteralType, relation: Relation): boo
 
 function enumMembersRelated(s: LiteralType, t: LiteralType): boolean {
   const [from, to] = [s.enumMember as EnumMemberInfo, t.enumMember as EnumMemberInfo];
-  if (from.computed || to.computed) return regularOf(s) === regularOf(t);
+  if (from.computed !== to.computed) return false;
+  if (from.computed) return from.name === to.name && enumDeclarationsRelated(from, to);
   return s.value === t.value && enumDeclarationsRelated(from, to);
 }
 
