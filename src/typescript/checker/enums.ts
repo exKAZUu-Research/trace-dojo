@@ -237,6 +237,7 @@ export class Enums {
       if (message) context.errors.push({ node: initializer, message });
       return value;
     }
+    if (!context.isConst && isAmbient(memberNode)) return undefined;
     if (!previous) return 0;
     if (typeof previous.value === 'number') return previous.value + 1;
     context.errors.push({ node: memberNode, message: 'enum のメンバーには初期値が必要です。' });
