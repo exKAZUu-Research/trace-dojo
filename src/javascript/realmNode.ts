@@ -206,7 +206,7 @@ function readFileSync(runtime: Runtime, args: Value[]): Value {
   const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
   const parsed = parseOpenFlag(runtime, flag === undefined ? 'r' : runtime.toString(flag));
   // File descriptor 0 is standard input.
-  if (args[0] === 0) return runtime.io.openReader('/dev/stdin').readRest();
+  if (args[0] === 0) return runtime.io.stdin.reader.readRest();
   const path = requirePath(runtime, args[0]);
   const stream = withErrors(runtime, 'open', path, () => runtime.io.files.resolveStreamPath(path));
   if (stream && STDIN_PATHS.has(stream)) {
@@ -233,7 +233,7 @@ function checkReadEncoding(runtime: Runtime, options: Value): void {
 
 function readStandardInput(runtime: Runtime, parsed: ParsedOpenFlag): string {
   if (!parsed.readable) throwNodeError(runtime, 'EBADF', 'read');
-  return runtime.io.openReader('/dev/stdin').readRest();
+  return runtime.io.stdin.reader.readRest();
 }
 
 /**
