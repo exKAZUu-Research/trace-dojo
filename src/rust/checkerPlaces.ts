@@ -137,7 +137,7 @@ function takeUnionWrite(c: Checker): boolean {
 // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): Type {
   const writing = takeUnionWrite(c);
-  const operandType = c.settled(c.expr(expr.operand, undefined));
+  const operandType = fieldOperandType(c, expr, writing);
   for (const step of autoderefSteps(c.program, operandType)) {
     const t = normalize(shallow(step.type));
     if (t.kind === 'var')
@@ -170,6 +170,16 @@ export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): 
     compileError(expr.nameSpan, `${expr.name} はメソッドなので、${expr.name}() と書いてください。`);
   }
   return compileError(expr.nameSpan, `${t} にフィールド ${expr.name} がありません。`);
+}
+
+/** The type of a field's operand; a write to a field of a union's field (`u.p.x = 3`) writes into it, unread. */
+function fieldOperandType(c: Checker, expr: Extract<Expr, { kind: 'field' }>, writing: boolean): Type {
+  c.body.writingUnionField = writing && expr.operand.kind === 'field';
+  try {
+    return c.settled(c.expr(expr.operand, undefined));
+  } finally {
+    c.body.writingUnionField = false;
+  }
 }
 
 export function checkFieldVisible(c: Checker, def: AdtDef, field: FieldDef, span: Span): void {

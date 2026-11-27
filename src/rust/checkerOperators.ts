@@ -420,10 +420,7 @@ export function refExpr(c: Checker, expr: Extract<Expr, { kind: 'ref' }>, expect
     c.body.rawBorrowing = false;
   }
   if (expr.mutable) requireMutablePlace(c, expr.operand, '&mut で借りる');
-  const res = placeRoot(c, expr.operand);
-  if (res?.kind === 'const' && res.def.ast.isMutable && !expr.raw) {
-    compileError(expr.span, 'static mut の参照は作れません（&raw const や &raw mut を使ってください）。');
-  }
+  if (!expr.raw) rejectStaticMutBorrow(c, expr.operand, expr.span);
   if (expr.raw) {
     if (!isPlaceExpr(c, expr.operand))
       compileError(expr.operand.span, '&raw の後には、変数やフィールドなどを書いてください。');
@@ -432,11 +429,18 @@ export function refExpr(c: Checker, expr: Extract<Expr, { kind: 'ref' }>, expect
   return ref(type, expr.mutable);
 }
 
-/** What the variable or static at the root of a place (through fields and indexes, not derefs) resolves to. */
-function placeRoot(c: Checker, place: Expr): PathRes | undefined {
+/**
+ * Rejects a borrow of a `static mut` or of a field of one, as rustc 2024's `static_mut_refs` does, whether written
+ * (`&A`, `&T.f`) or made by a formatting macro or a method's autoref. A borrow of an element (`&mut A[0]`) borrows
+ * what the index gives, which rustc accepts.
+ */
+export function rejectStaticMutBorrow(c: Checker, place: Expr, span: Span): void {
   let root = place;
-  while (root.kind === 'field' || root.kind === 'index') root = root.operand;
-  return root.kind === 'path' ? c.annotations.paths.get(root) : undefined;
+  while (root.kind === 'field') root = root.operand;
+  const res: PathRes | undefined = root.kind === 'path' ? c.annotations.paths.get(root) : undefined;
+  if (res?.kind === 'const' && res.def.ast.isMutable) {
+    compileError(span, 'static mut の参照は作れません（&raw const や &raw mut を使ってください）。');
+  }
 }
 
 export function checkCast(c: Checker, expr: Extract<Expr, { kind: 'cast' }>): Type {

@@ -269,9 +269,9 @@ function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }
 function requireRepeatable(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }>, elem: Type): void {
   if (c.solver.isCopy(resolve(elem, true))) return;
   const value = expr.value;
-  const constant =
-    (value.kind === 'block' && value.isConst) ||
-    (value.kind === 'path' && c.annotations.paths.get(value)?.kind === 'const');
+  const res = value.kind === 'path' ? c.annotations.paths.get(value) : undefined;
+  // A `static` is one value, not a constant made anew at each use.
+  const constant = (value.kind === 'block' && value.isConst) || (res?.kind === 'const' && !res.def.ast.isStatic);
   if (!constant) {
     compileError(
       expr.span,

@@ -2,6 +2,7 @@ import type { PathRes, ReceiverAdjust } from './annotations';
 import type { Expr } from './ast';
 import type { Checker } from './checker';
 import { closureSignature } from './checkerClosures';
+import { rejectStaticMutBorrow } from './checkerOperators';
 import {
   applyWrittenFnArgs,
   checkMethodVisible,
@@ -358,6 +359,8 @@ export function checkMethodCall(
   const { fn } = found;
   applyWrittenFnArgs(c, fn, found.typeArgs, expr.turbofish, expr.methodSpan);
   checkReceiverAdjust(c, expr, found.adjust, fn.selfMode);
+  const throughReference = found.adjust.derefs.some((step) => step === 'ref' || step === 'mutRef');
+  if (found.adjust.autoref !== 'none' && !throughReference) rejectStaticMutBorrow(c, expr.receiver, expr.receiver.span);
   const sig = c.instantiate(fn, found.typeArgs, expr.methodSpan);
   if (expr.args.length !== sig.params.length) {
     compileError(

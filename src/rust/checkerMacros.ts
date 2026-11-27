@@ -1,7 +1,7 @@
 import type { FormatArgs, MacroCall, Span } from './ast';
 import type { Checker } from './checker';
 import { checkElements } from './checkerExpr';
-import { checkComparisonOperands } from './checkerOperators';
+import { checkComparisonOperands, rejectStaticMutBorrow } from './checkerOperators';
 import { traitInScope } from './checkerPaths';
 import { checkPattern } from './checkerPatterns';
 import { requireMutablePlace } from './checkerPlaces';
@@ -131,6 +131,8 @@ function formatArgs(c: Checker, format: FormatArgs): void {
     if (typeof piece === 'string') continue;
     const arg = format.args[piece.arg];
     const type = arg.ty ?? c.expr(arg, undefined);
+    // A formatting macro borrows its arguments.
+    rejectStaticMutBorrow(c, arg, arg.span);
     c.requireTrait(type, 'Sized', arg.span);
     const trait = {
       display: 'Display',
