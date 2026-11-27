@@ -15,6 +15,8 @@ import {
   isIntrinsic,
   isTemplateOrStringMapping,
   literalType,
+  type ObjectType,
+  propertyAccessType,
   type Signature,
   simpleProperty,
   stringType,
@@ -66,7 +68,7 @@ export function checkDecorators(c: Checker, classNode: TreeNode, info: ClassInfo
     const isStatic = hasToken(member, 'static');
     const thisType = isStatic ? classType : c.classes.selfType(info);
     const owner = isStatic ? info.staticType : info.instanceType;
-    const valueType = c.structureOf(owner).properties.get(c.classes.propertyKey(nameNode, nameNode))?.type() ?? anyType;
+    const valueType = memberValueType(c, owner, nameNode, kind);
     const context = memberContextType(c, kind, [thisType, valueType], {
       name: contextNameType(c, nameNode),
       isPrivate: nameNode.type === 'private_property_identifier',
@@ -111,6 +113,12 @@ function memberKind(member: TreeNode): DecoratedKind | undefined {
   if (member.type !== 'method_definition') return undefined;
   if (hasToken(member, 'get')) return 'getter';
   return hasToken(member, 'set') ? 'setter' : 'method';
+}
+
+function memberValueType(c: Checker, owner: ObjectType, nameNode: TreeNode, kind: DecoratedKind): Type {
+  const property = c.structureOf(owner).properties.get(c.classes.propertyKey(nameNode, nameNode));
+  if (!property) return anyType;
+  return kind === 'field' ? propertyAccessType(property) : property.type();
 }
 
 /** What a decorator of a member receives first: the method, an accessor function, or the auto-accessor's pair. */

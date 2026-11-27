@@ -298,6 +298,8 @@ export class ClassDeclarationChecker {
     if (name?.type === 'computed_property_name') this.c.expressions.checkComputedPropertyName(name);
     if (hasToken(member, 'abstract') && !info.isAbstract)
       this.c.error(name ?? member, '抽象メンバーは抽象クラスの中でのみ宣言できます。');
+    if (hasToken(member, 'accessor') && hasToken(member, '?'))
+      this.c.error(name ?? member, "'accessor' プロパティはオプションとして宣言できません。");
     if (isClassConstructor(member) && hasToken(member, 'static'))
       this.c.error(member, "'static' 修飾子はコンストラクタの宣言には付けられません。");
   }
