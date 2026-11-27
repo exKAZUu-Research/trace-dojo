@@ -6,7 +6,7 @@ import { floatNumber } from './floatBits';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { iteratorDebug } from './iterDebug';
-import { ioErrorDebug, ioErrorDisplay } from './natives/io';
+import { ioErrorDebug, ioErrorDisplay, ioErrorKindDisplay } from './natives/io';
 import { durationDebug } from './natives/threads';
 import { wrap } from './ops';
 import { FmtFailure } from './runtime';
@@ -718,8 +718,18 @@ function stdErrorDisplay(builtin: string, value: Value): string | undefined {
     case 'IoError': {
       return ioErrorDisplay(value);
     }
+    case 'IoErrorKind': {
+      const kind = value as EnumValue;
+      return ioErrorKindDisplay(kind.def.variants[kind.variant].name);
+    }
     case 'SendError': {
       return 'sending on a closed channel';
+    }
+    case 'RecvError': {
+      return 'receiving on a closed channel';
+    }
+    case 'TryRecvError': {
+      return (value as EnumValue).variant === 0 ? 'receiving on an empty channel' : 'receiving on a closed channel';
     }
     case 'PoisonError': {
       return 'poisoned lock: another task failed inside';

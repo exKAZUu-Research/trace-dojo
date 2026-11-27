@@ -1497,6 +1497,7 @@ pub mod io {
         pub fn other<E: super::fmt::Display>(error: E) -> Error;
         pub fn kind(&self) -> ErrorKind;
     }
+    impl From<ErrorKind> for Error { fn from(kind: ErrorKind) -> Error; }
     pub trait Read {
         fn read_to_string(&mut self, buf: &mut String) -> Result<usize>;
         fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize>;

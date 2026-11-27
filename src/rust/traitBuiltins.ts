@@ -503,9 +503,12 @@ function display({ solver, t, all }: Goal): Answer {
       'EscapeDefault',
       'EscapeUnicode',
       'IoError',
+      'IoErrorKind',
       'SendError',
+      'RecvError',
       'PoisonError',
       'TryLockError',
+      'TryRecvError',
     ].includes(t.def.builtin as string) ||
     ERROR_TYPES.has(t.def.builtin as string)
   )
@@ -666,7 +669,7 @@ function stdError({ t, all }: Goal): Answer {
   // `io::Error` is an error, though unlike the others it is neither `Clone` nor `PartialEq`.
   if (t.kind === 'adt') {
     return ERROR_TYPES.has(t.def.builtin as string) ||
-      ['IoError', 'SendError', 'PoisonError', 'TryLockError'].includes(t.def.builtin ?? '')
+      ['IoError', 'SendError', 'RecvError', 'PoisonError', 'TryLockError', 'TryRecvError'].includes(t.def.builtin ?? '')
       ? 'yes'
       : 'no';
   }

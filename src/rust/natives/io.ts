@@ -59,8 +59,56 @@ export function ioErrorDisplay(value: Value): string {
     const [text, code] = OS_ERRORS[payload.code];
     return `${text} (os error ${code})`;
   }
-  return payload.message ?? payload.kind;
+  return payload.message ?? ioErrorKindDisplay(payload.kind);
 }
+
+/** `io::ErrorKind`'s `Display`, by the variant's name. */
+export function ioErrorKindDisplay(kind: string): string {
+  return ERROR_KIND_TEXT[kind] ?? kind;
+}
+
+const ERROR_KIND_TEXT: Record<string, string> = {
+  NotFound: 'entity not found',
+  PermissionDenied: 'permission denied',
+  ConnectionRefused: 'connection refused',
+  ConnectionReset: 'connection reset',
+  HostUnreachable: 'host unreachable',
+  NetworkUnreachable: 'network unreachable',
+  ConnectionAborted: 'connection aborted',
+  NotConnected: 'not connected',
+  AddrInUse: 'address in use',
+  AddrNotAvailable: 'address not available',
+  NetworkDown: 'network down',
+  BrokenPipe: 'broken pipe',
+  AlreadyExists: 'entity already exists',
+  WouldBlock: 'operation would block',
+  NotADirectory: 'not a directory',
+  IsADirectory: 'is a directory',
+  DirectoryNotEmpty: 'directory not empty',
+  ReadOnlyFilesystem: 'read-only filesystem or storage medium',
+  StaleNetworkFileHandle: 'stale network file handle',
+  InvalidInput: 'invalid input parameter',
+  InvalidData: 'invalid data',
+  TimedOut: 'timed out',
+  WriteZero: 'write zero',
+  StorageFull: 'no storage space',
+  NotSeekable: 'seek on unseekable file',
+  QuotaExceeded: 'quota exceeded',
+  FileTooLarge: 'file too large',
+  ResourceBusy: 'resource busy',
+  ExecutableFileBusy: 'executable file busy',
+  Deadlock: 'deadlock',
+  CrossesDevices: 'cross-device link or rename',
+  TooManyLinks: 'too many links',
+  InvalidFilename: 'invalid filename',
+  ArgumentListTooLong: 'argument list too long',
+  Interrupted: 'operation interrupted',
+  Unsupported: 'unsupported',
+  UnexpectedEof: 'unexpected end of file',
+  OutOfMemory: 'out of memory',
+  Other: 'other error',
+  Uncategorized: 'uncategorized error',
+};
 
 /** `io::Error`'s `Debug`. */
 export function ioErrorDebug(value: Value, indent: number | undefined): string {
@@ -75,6 +123,12 @@ export function ioErrorDebug(value: Value, indent: number | undefined): string {
         ['kind', payload.kind],
         ['error', JSON.stringify(payload.message ?? '')],
       ];
+  // An error made from a kind alone (`io::Error::from(kind)`) shows the kind.
+  if (!payload.code && payload.message === undefined) {
+    return indent === undefined
+      ? `Kind(${payload.kind})`
+      : `Kind(\n${'    '.repeat(indent + 1)}${payload.kind},\n${'    '.repeat(indent)})`;
+  }
   const name = payload.code ? 'Os' : 'Custom';
   if (indent === undefined) return `${name} { ${fields.map(([key, text]) => `${key}: ${text}`).join(', ')} }`;
   const pad = '    '.repeat(indent + 1);
@@ -227,6 +281,8 @@ define({
       kind: ctx.interp.program.adtDef('IoErrorKind').variants[(deref(kind) as EnumValue).variant].name,
       message: ctx.interp.formatter.display(error, ctx.typeArgs[0], DEFAULT_SPEC),
     }),
+  'Error::from': ([kind], ctx) =>
+    ioError(ctx, { kind: ctx.interp.program.adtDef('IoErrorKind').variants[(deref(kind) as EnumValue).variant].name }),
   'Error::other': ([error], ctx) =>
     ioError(ctx, { kind: 'Other', message: ctx.interp.formatter.display(error, ctx.typeArgs[0], DEFAULT_SPEC) }),
   'Error::kind': ([self], ctx) => {

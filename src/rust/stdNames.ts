@@ -135,6 +135,7 @@ export const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   RwLockWriteGuard: 'RwLockWriteGuard',
   Sender: 'Sender',
   SendError: 'SendError',
+  RecvError: 'RecvError',
   PoisonError: 'PoisonError',
   Receiver: 'Receiver',
   JoinHandle: 'JoinHandle',
@@ -174,6 +175,7 @@ export const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
   Infallible: 'Infallible',
   IntErrorKind: 'IntErrorKind',
   TryLockError: 'TryLockError',
+  TryRecvError: 'TryRecvError',
 };
 
 export function builtinStruct(module: Module, name: string): BuiltinAdt | undefined {
