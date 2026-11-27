@@ -235,6 +235,8 @@ const RULES: Record<string, Rule> = {
     t.kind === 'adt' && DEREF_MUT_TYPES.has(t.def.builtin ?? '') ? 'yes' : t.kind === 'ref' && t.mutable ? 'yes' : 'no',
   AsPath: ({ t }) => (isPathLike(t) ? 'yes' : 'no'),
   AsBytes: ({ t }) => (isBytesLike(t) ? 'yes' : 'no'),
+  Index: (goal) => indexes(goal, false),
+  IndexMut: (goal) => indexes(goal, true),
   Neg: ({ t }) => {
     const n = operatorNumber(t);
     return n && (n.kind === 'float' || (n.kind === 'int' && n.name.startsWith('i'))) ? 'yes' : 'no';
@@ -244,6 +246,22 @@ const RULES: Record<string, Rule> = {
     return n && (n.kind === 'int' || n.kind === 'bool') ? 'yes' : 'no';
   },
 };
+
+/**
+ * std's `Index<usize>` (and `IndexMut<usize>`) of arrays, slices, `Vec` and `VecDeque`, and `Index<&K>` of maps,
+ * whose `Output` the projection gives.
+ */
+function indexes({ solver, t, ref }: Goal, mutable: boolean): Answer {
+  const index = ref.args[0] && normalize(shallow(ref.args[0]));
+  const sequence = t.kind === 'array' || t.kind === 'slice' || isBuiltin(t, 'Vec') || isBuiltin(t, 'VecDeque');
+  if (sequence) {
+    if (!index) return 'yes';
+    if (index.kind === 'var') return solver.unifier.tryUnify(index, USIZE) ? 'yes' : 'no';
+    return index.kind === 'int' && index.name === 'usize' ? 'yes' : 'no';
+  }
+  const map = isBuiltin(t, 'HashMap') || isBuiltin(t, 'BTreeMap');
+  return map && !mutable && (!index || index.kind === 'ref' || index.kind === 'var') ? 'yes' : 'no';
+}
 
 /** What names a file: text, a `Path`, or a `PathBuf`, or a reference to one. */
 function isPathLike(type: Type): boolean {

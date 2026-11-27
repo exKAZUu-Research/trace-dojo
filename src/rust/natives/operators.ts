@@ -2,9 +2,19 @@ import { concatStrings } from '../capacity';
 import { floatNumber, negateFloat } from '../floatBits';
 import { normalize } from '../infer';
 import { floatArith, intArith, overflow, wrap } from '../ops';
-import { type IntName, shallow, type Type } from '../types';
-import { isPlace, type Place, textOf, UNIT_VALUE, type Value } from '../values';
-import { define, deref, type NativeContext } from './support';
+import { type IntName, shallow, type Type, typeToString } from '../types';
+import {
+  ElementPlace,
+  isPlace,
+  type Place,
+  sliceBase,
+  sliceLength,
+  SliceView,
+  textOf,
+  UNIT_VALUE,
+  type Value,
+} from '../values';
+import { define, deref, type NativeContext, panic } from './support';
 
 /** The methods of the operator traits for numbers, `bool`, and `String`, which generic code and calls like `a.add(b)` reach. */
 const BINARY: Record<string, string> = {
@@ -73,3 +83,24 @@ for (const [trait, op] of Object.entries(BINARY)) {
   };
 }
 define(natives);
+
+/** `Index::index` and `IndexMut::index_mut` of the sequences std implements them for, which generic code reaches. */
+function indexedPlace(self: Value, index: Value, ctx: NativeContext): Place {
+  const container = deref(self);
+  if (!Array.isArray(container) && !(container instanceof SliceView)) {
+    return panic(
+      ctx,
+      `${typeToString(operandType(ctx.typeArgs[0]))} の添字（Index の境界を通したもの）は、この採点環境では使えません。`
+    );
+  }
+  const length = sliceLength(container);
+  const position = deref(index) as bigint;
+  if (position >= length) panic(ctx, `index out of bounds: the len is ${length} but the index is ${position}`);
+  const { base, start } = sliceBase(container);
+  return new ElementPlace(base, start + Number(position));
+}
+
+define({
+  'Index::index': ([self, index], ctx) => indexedPlace(self, index, ctx).get(),
+  'IndexMut::index_mut': ([self, index], ctx) => indexedPlace(self, index, ctx),
+});
