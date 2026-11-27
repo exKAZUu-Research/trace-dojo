@@ -960,11 +960,11 @@ test('lowers qualified fs import aliases, anonymous abstract default exports, de
   expect(
     executeProgram(
       'typescript',
-      "export default abstract class { abstract m(): void; static { console.log('init'); } }\nconsole.log('done');"
+      "export default abstract class { abstract m(): void; static label = this.name; static { console.log(this.name, this.label); } }\nconsole.log('done');"
     )
   ).toMatchObject({
     kind: 'executed',
-    stdout: 'init\ndone\n',
+    stdout: 'default default\ndone\n',
     uncaughtException: undefined,
   });
 

@@ -88,6 +88,13 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     this.statementConverters[PARAMETER_PROPERTY_ASSIGNMENT] = (node: Node) => this.parameterPropertyAssignment(node);
   }
 
+  override expression(node: Node): Expression {
+    const expression = super.expression(node);
+    const inferredName = inferredTargetNameOf(node);
+    if (inferredName !== undefined && expression.kind !== 'member') applyInferredName(expression, inferredName);
+    return expression;
+  }
+
   private convertMemberNode(node: Node, convertMember: (node: Node) => Expression): Expression {
     const inlined = this.inlinedConstEnumMember(node);
     if (inlined) return inlined;
@@ -376,6 +383,13 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   protected override arrayDestructuringSource(node: Node): IterationSource | undefined {
     return super.arrayDestructuringSource(unwrapParentheses(node));
   }
+}
+
+function applyInferredName(expression: Expression, name: string): void {
+  let inner = expression;
+  while (inner.kind === 'parenthesized') inner = inner.expression;
+  if (inner.kind === 'functionExpression' && inner.fn.name === '') inner.fn.name = name;
+  if (inner.kind === 'classExpression' && inner.cls.name === '') inner.inferredName ??= name;
 }
 
 function enumStatementOf(

@@ -639,21 +639,32 @@ function isTypeOnlySpecifier(
   );
 }
 
+const unnamedDefaultFunctionViewTypes: Record<string, string> = {
+  function_declaration: 'function_expression',
+  generator_function_declaration: 'generator_function',
+};
+
 /**
  * A top-level `export`, which runs as what it declares, or its default value as an expression statement; an export of
  * names declared elsewhere runs nothing.
  */
 function exportView(node: TreeNode, binder: Binder): ViewNode {
   const declaration = node.childForFieldName('declaration');
-  // `export default class { }` declares no name, so its class is only evaluated, as a class expression.
-  if (
-    (declaration?.type === 'class_declaration' || declaration?.type === 'abstract_class_declaration') &&
-    !declaration.childForFieldName('name')
-  )
-    return expressionStatement(node, generic(declaration, 'class', binder));
+  if (declaration && !declaration.childForFieldName('name')) {
+    if (declaration.type === 'class_declaration' || declaration.type === 'abstract_class_declaration') {
+      return expressionStatement(node, withDefaultName(generic(declaration, 'class', binder)));
+    }
+    const fnType = unnamedDefaultFunctionViewTypes[declaration.type];
+    if (fnType) return unstepped(expressionStatement(node, withDefaultName(generic(declaration, fnType, binder))));
+  }
   if (declaration) return view(declaration, binder);
   const value = node.childForFieldName('value');
-  return value ? expressionStatement(node, view(value, binder)) : leaf(node, 'empty_statement');
+  return value ? expressionStatement(node, withDefaultName(view(value, binder))) : leaf(node, 'empty_statement');
+}
+
+function withDefaultName(viewed: ViewNode): ViewNode {
+  if (viewed.type !== 'member_expression' && viewed.type !== 'subscript_expression') viewed.inferredName = 'default';
+  return viewed;
 }
 
 /** `import X = N.Y` as TypeScript compiles it, `var X = N.Y;`, or nothing when `N.Y` has no value. */
@@ -1043,7 +1054,7 @@ export function isHiddenCallFunction(node: Node): boolean {
   return node instanceof ViewNode && node.hidesCallRow;
 }
 
-/** The declared variable name a synthesized namespace-export member target stands for, if any. */
+/** The inferred name a synthesized namespace-export target or anonymous default export carries, if any. */
 export function inferredTargetNameOf(node: Node): string | undefined {
   return node instanceof ViewNode ? node.inferredName : undefined;
 }

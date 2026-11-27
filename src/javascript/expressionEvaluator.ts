@@ -89,7 +89,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return this.createFunction(expression.fn, runtime.frame.scope);
       }
       case 'classExpression': {
-        return this.evaluateClass(expression.cls, undefined, classBinding);
+        return this.evaluateClass(expression.cls, expression.inferredName, classBinding);
       }
       case 'member': {
         return this.member(expression);

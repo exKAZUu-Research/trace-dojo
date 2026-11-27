@@ -227,7 +227,7 @@ export type Expression = Span & {
     | { kind: 'array'; elements: (Argument | undefined)[] }
     | { kind: 'object'; members: ObjectMember[] }
     | { kind: 'functionExpression'; fn: FunctionNode }
-    | { kind: 'classExpression'; cls: ClassNode }
+    | { kind: 'classExpression'; cls: ClassNode; inferredName?: string }
     | MemberExpression
     | {
         kind: 'call';
