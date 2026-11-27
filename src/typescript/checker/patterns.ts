@@ -738,15 +738,12 @@ export class BindingPatterns {
       iterator && this.c.signaturesOf(nonNullableType(this.c, iterator.type()), 'call')[0]?.returnType();
     if (iteratorType?.kind !== 'object') return undefined;
     const next = this.c.propertyOf(iteratorType, 'next');
-    const isLibraryIterator = this.c.functions.isKnownLibraryIterator(iteratorType, method);
     const nextSignature = next && this.c.signaturesOf(next.type(), 'call')[0];
-    if (!nextSignature && !isLibraryIterator) return undefined;
+    if (!nextSignature && !this.c.functions.isKnownLibraryIterator(iteratorType, method)) return undefined;
     const result = nextSignature?.returnType();
-    const nextType = isLibraryIterator
-      ? (iteratorType.typeArguments?.[2] ?? unknownType)
-      : nextSignature
-        ? this.c.functions.iteratorNextParameterType(nextSignature)
-        : unknownType;
+    const nextType = nextSignature
+      ? this.c.functions.iteratorNextParameterType(nextSignature)
+      : (iteratorType.typeArguments?.[2] ?? unknownType);
     const site = node ? { node, kind: 'await' as const } : undefined;
     return {
       iteratorType,

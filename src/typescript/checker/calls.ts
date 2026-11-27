@@ -105,9 +105,8 @@ export class Calls {
     const type = this.c.expressions.check(expression);
     const typeArguments = this.typeArguments.written(node) ?? [];
     if (isAnyLike(type) || type === errorType) return type;
-    const resolved = this.instantiationTarget(type);
-    if (isAnyLike(resolved)) return resolved;
-    const members = resolved.kind === 'union' ? resolved.types : [resolved];
+    const members = this.instantiationMembers(type);
+    if (members.length === 1 && isAnyLike(members[0])) return members[0];
     let hasCallableMember = false;
     const instantiated = members.map((member) => {
       const result = this.instantiateTargetMember(node, member, members.length === 1 ? type : member, typeArguments);
@@ -144,15 +143,18 @@ export class Calls {
     return { type: anonymousObject(() => ({ ...structure, callSignatures, constructSignatures })), callable: true };
   }
 
-  private instantiationTarget(type: Type, seen = new Set<number>()): Type {
+  private instantiationMembers(type: Type, seen = new Set<number>()): Type[] {
+    if (type.kind === 'union') return type.types.flatMap((member) => this.instantiationMembers(member, seen));
     if (type.kind === 'typeParameter') {
-      if (seen.has(type.id)) return unknownType;
+      if (seen.has(type.id)) return [unknownType];
       seen.add(type.id);
       const constraint = this.c.constraintOf(type);
-      return constraint ? this.instantiationTarget(constraint, seen) : unknownType;
+      return constraint ? this.instantiationMembers(constraint, seen) : [unknownType];
     }
-    if (type.kind === 'indexedAccess' || type.kind === 'conditional') return this.c.apparentType(type);
-    return type;
+    if (type.kind === 'indexedAccess' || type.kind === 'conditional') {
+      return this.instantiationMembers(this.c.apparentType(type), seen);
+    }
+    return [type];
   }
 
   private applicableInstantiationSignatures(

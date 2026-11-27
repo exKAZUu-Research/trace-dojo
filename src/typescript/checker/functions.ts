@@ -709,16 +709,19 @@ export class FunctionChecker {
     const parameter = signature.parameters[0];
     if (!parameter) return unknownType;
     if (!parameter.rest) return parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
-    const elements = typeMembers(parameter.type).map((member) => this.restFirstArgumentType(member));
+    const isLibrarySignature = signature.declaration !== undefined && this.c.isLibrary(signature.declaration);
+    const elements = typeMembers(parameter.type).flatMap((member) =>
+      this.restFirstArgumentTypes(member, isLibrarySignature)
+    );
     return elements.length > 0 ? unionOf(elements) : unknownType;
   }
 
-  private restFirstArgumentType(member: Type): Type {
-    if (member.kind !== 'object' || member.objectKind !== 'tuple') return this.c.restElementType(member);
+  private restFirstArgumentTypes(member: Type, isLibrarySignature: boolean): Type[] {
+    if (member.kind !== 'object' || member.objectKind !== 'tuple') return [this.c.restElementType(member)];
     const first = member.tuple?.elements[0];
-    if (!first) return undefinedType;
-    if (first.rest) return this.c.restElementType(first.type);
-    return first.optional ? unionOf([first.type, undefinedType]) : first.type;
+    if (!first) return isLibrarySignature ? [] : [undefinedType];
+    if (first.rest) return [this.c.restElementType(first.type)];
+    return [first.optional ? unionOf([first.type, undefinedType]) : first.type];
   }
 
   isKnownLibraryIterator(type: Type, method: 'iterator' | 'asyncIterator'): boolean {
