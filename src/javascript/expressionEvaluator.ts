@@ -3,7 +3,6 @@ import { LIMITS } from '../interpreter/limits';
 import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
 import { defineFunctionName } from './memberProperties';
-import { loadNodeModule } from './realmNode';
 import { newRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
 import {
@@ -70,7 +69,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return this.readVariable(expression.name);
       }
       case 'importedModule': {
-        return loadNodeModule(runtime, expression.specifier);
+        return runtime.realm.loadNodeModule?.(runtime, expression.specifier);
       }
       case 'this': {
         return this.thisValue();

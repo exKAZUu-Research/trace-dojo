@@ -48,6 +48,7 @@ export interface Realm {
   regExpConstructor?: JsFunction;
   /** Node.js's `fs` module, which `require` returns. */
   fsModule?: JsObject;
+  loadNodeModule?: (runtime: Runtime, name: string) => Value;
   regExpExec?: JsFunction;
   datePrototype: JsObject;
   mapPrototype: JsObject;
