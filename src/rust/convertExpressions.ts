@@ -113,7 +113,7 @@ export abstract class ExpressionConverter extends MacroConverter {
         continue;
       }
       const { attributes, target } = splitAttributes(child);
-      const attrs = this.attributes.read(attributes);
+      const attrs = target && this.attributes.read(attributes, isItem(target));
       if (!attrs || !target) continue;
       // An item keeps its attributes, which the item's conversion reads.
       children.push(
