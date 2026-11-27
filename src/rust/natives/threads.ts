@@ -258,11 +258,20 @@ export function durationDebug(value: Value, precision: number | undefined): stri
         : nanos >= 1000n
           ? ['µs', 1000n]
           : ['ns', 1n];
-  const whole = nanos / scale;
-  const fraction = (nanos % scale).toString().padStart(scale.toString().length - 1, '0');
-  const digits =
-    precision === undefined ? fraction.replace(/0+$/, '') : fraction.slice(0, precision).padEnd(precision, '0');
-  return `${whole}${digits ? `.${digits}` : ''}${unit}`;
+  if (precision === undefined) {
+    const fraction = (nanos % scale)
+      .toString()
+      .padStart(scale.toString().length - 1, '0')
+      .replace(/0+$/, '');
+    return `${nanos / scale}${fraction ? `.${fraction}` : ''}${unit}`;
+  }
+  // The digits past the precision round half to even, as std's `Debug` does.
+  const step = 10n ** BigInt(precision);
+  const kept = (nanos * step) / scale;
+  const twice = 2n * ((nanos * step) % scale);
+  const rounded = twice > scale || (twice === scale && kept % 2n === 1n) ? kept + 1n : kept;
+  const fraction = (rounded % step).toString().padStart(precision, '0');
+  return `${rounded / step}${precision > 0 ? `.${fraction}` : ''}${unit}`;
 }
 
 function threadId(ctx: NativeContext, id: number): Value {
