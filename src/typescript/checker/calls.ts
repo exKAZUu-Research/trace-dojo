@@ -1120,7 +1120,7 @@ export class Calls {
     if (contextual)
       this.c.inference.inferTypes(
         { ...run, priority: InferencePriority.ReturnType },
-        contextual,
+        this.c.inference.expandNestedReturnContext(contextual),
         signature.returnType(),
         true
       );

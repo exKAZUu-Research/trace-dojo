@@ -288,6 +288,8 @@ export interface TypeParameter {
   variance?: 'in' | 'out' | 'in out';
   /** A placeholder substituted for an uninferred outer type parameter when probing a nested call's contextual type. */
   isNonInferrable?: true;
+  /** The outer return-type candidate a nested generic call's return-type inference may expand this placeholder to. */
+  returnCandidate?: Type;
 }
 
 export function thisParameter(type: ObjectType): TypeParameter {

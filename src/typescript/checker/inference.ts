@@ -35,6 +35,7 @@ import {
   type TupleElement,
   type TupleInfo,
   type Type,
+  typeCacheKey,
   typeMembers,
   type TypeParameter,
   undefinedType,
@@ -112,6 +113,7 @@ interface InferencePath {
 export class TypeInference {
   private depth = 0;
   private readonly nonInferrableParameters = new Map<number, TypeParameter>();
+  private readonly returnContextParameters = new Map<string, TypeParameter>();
   constructor(private readonly c: Checker) {}
 
   contextualMapper(
@@ -140,7 +142,7 @@ export class TypeInference {
       const inference = inferences.get(parameter.id);
       const fixed = fixes(parameter);
       const type =
-        this.provisionalType(parameter, inference, fixed) ??
+        this.provisionalType(parameter, parameters, inference, { fixed, useNonInferrable, mapper }) ??
         (useNonInferrable ? this.nonInferrableOf(parameter) : undefined);
       if (!type) continue;
       mapper.set(parameter.id, type);
@@ -154,17 +156,92 @@ export class TypeInference {
 
   private provisionalType(
     parameter: TypeParameter,
+    parameters: TypeParameter[],
     inference: Inference | undefined,
-    fixed: boolean
+    options: { fixed: boolean; useNonInferrable: boolean; mapper: Mapper }
   ): Type | undefined {
+    const { fixed, useNonInferrable, mapper } = options;
     if (inference?.fixed) return inference.fixed;
-    if (!inference || !hasCandidates(inference)) return fixed ? (parameter.constraint?.() ?? unknownType) : undefined;
+    if (!inference || !hasCandidates(inference)) {
+      return fixed
+        ? (this.instantiatedConstraint(parameter, parameters, mapper, useNonInferrable) ?? unknownType)
+        : undefined;
+    }
     if (!fixed && inference.candidates.length === 0) return undefined;
     const type = this.inferredType(parameter, inference, true);
-    if (inference.priority === InferencePriority.ReturnType && isAnyLike(type)) {
-      return fixed ? (parameter.constraint?.() ?? unknownType) : undefined;
+    if (inference.priority !== InferencePriority.ReturnType) return type;
+    return this.returnPriorityProvisionalType(parameter, parameters, type, options);
+  }
+
+  private returnPriorityProvisionalType(
+    parameter: TypeParameter,
+    parameters: TypeParameter[],
+    type: Type,
+    { fixed, useNonInferrable, mapper }: { fixed: boolean; useNonInferrable: boolean; mapper: Mapper }
+  ): Type | undefined {
+    if (!isAnyLike(type)) return this.clampedProvisionalType(parameter, parameters, type, mapper, useNonInferrable);
+    if (!fixed) return useNonInferrable ? this.returnContextOf(parameter, type) : undefined;
+    return (
+      this.instantiatedConstraint(parameter, parameters, mapper, useNonInferrable) ??
+      (useNonInferrable ? type : unknownType)
+    );
+  }
+
+  expandNestedReturnContext(type: Type): Type {
+    if (this.returnContextParameters.size === 0 || !couldContainTypeVariables(type)) return type;
+    const mapper: Mapper = new Map();
+    const pending = [type];
+    const seen = new Set<Type>();
+    for (let current = pending.pop(); current; current = pending.pop()) {
+      this.c.budget.spend();
+      if (seen.has(current)) continue;
+      if (current.kind === 'typeParameter' && current.returnCandidate) {
+        mapper.set(current.id, current.returnCandidate);
+        continue;
+      }
+      seen.add(current);
+      for (const child of nonInferrableChildren(current)) pending.push(child);
     }
-    return type;
+    return mapper.size > 0 ? this.c.instantiate(type, createMapper(mapper)) : type;
+  }
+
+  private returnContextOf(parameter: TypeParameter, candidate: Type): TypeParameter {
+    const key = `${parameter.id}:${typeCacheKey(candidate)}`;
+    let placeholder = this.returnContextParameters.get(key);
+    if (!placeholder) {
+      placeholder = { ...parameter, id: newTypeId(), isNonInferrable: true, returnCandidate: candidate };
+      this.returnContextParameters.set(key, placeholder);
+    }
+    return placeholder;
+  }
+
+  private clampedProvisionalType(
+    parameter: TypeParameter,
+    parameters: TypeParameter[],
+    type: Type,
+    mapper: Mapper,
+    useNonInferrable: boolean
+  ): Type {
+    const constraint = this.instantiatedConstraint(parameter, parameters, mapper, useNonInferrable);
+    if (!constraint || this.c.relations.isAssignable(type, constraint)) return type;
+    return constraint;
+  }
+
+  private instantiatedConstraint(
+    parameter: TypeParameter,
+    parameters: TypeParameter[],
+    mapper: Mapper,
+    useNonInferrable: boolean
+  ): Type | undefined {
+    const constraint = parameter.constraint?.();
+    if (!constraint) return undefined;
+    const context: Mapper = new Map();
+    for (const sibling of parameters) {
+      if (!this.mentions(constraint, sibling)) continue;
+      const mapped = mapper.get(sibling.id) ?? (useNonInferrable ? this.nonInferrableOf(sibling) : undefined);
+      if (mapped) context.set(sibling.id, mapped);
+    }
+    return context.size > 0 ? this.c.instantiate(constraint, createMapper(context)) : constraint;
   }
 
   private nonInferrableOf(parameter: TypeParameter): TypeParameter {
@@ -588,7 +665,11 @@ export class TypeInference {
   }
 
   private containsNonInferrable(type: Type): boolean {
-    if (this.nonInferrableParameters.size === 0 || !couldContainTypeVariables(type)) return false;
+    if (
+      (this.nonInferrableParameters.size === 0 && this.returnContextParameters.size === 0) ||
+      !couldContainTypeVariables(type)
+    )
+      return false;
     const pending = [type];
     const seen = new Set<Type>();
     for (let current = pending.pop(); current; current = pending.pop()) {
