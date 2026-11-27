@@ -4,6 +4,7 @@ import { assert } from 'es-toolkit';
 
 import { isAmbient, isCheckedAmbientDeclaration } from '../namespaceInstantiation';
 import { checkAmbientInitializer } from './ambientDeclarations';
+import { checkAmbientExportAssignment } from './ambientExportAssignment';
 import { checkAmbientExportTarget } from './ambientModuleExports';
 import { checkAwaitPlace } from './awaited';
 import { declaredNames } from './binder';
@@ -221,7 +222,7 @@ export class StatementChecker {
       else this.c.expressions.check(value);
     }
     if (!declaration && !value && assigned && !source && !this.c.isModule && isAmbientModuleBody(node.parent)) {
-      checkAmbientExportTarget(this.c, assigned);
+      checkAmbientExportAssignment(this.c, node, assigned);
     }
   }
 
