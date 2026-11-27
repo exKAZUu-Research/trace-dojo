@@ -49,16 +49,14 @@ export function tokensOf(tree: Node): Token[] {
     lastEnd = end;
   };
   const visit = (node: Node): void => {
-    if (node.type === 'line_comment' || node.type === 'block_comment') return;
+    if (node.type === 'line_comment' || node.type === 'block_comment') {
+      // Comments are not tokens, except the mark of an `expr` variable's parentheses.
+      if (node.text === EXPR_MARK) leaves.push({ kind: 'leaf', text: EXPR_MARK, type: 'block_comment' });
+      return;
+    }
     if (node.childCount === 0 || LEAF_TYPES.has(node.type) || node.type.endsWith('_literal')) {
-      // In a token tree, tree-sitter splits a lifetime (`'a`) into a quote and a name.
-      const previous = leaves.at(-1);
-      if (previous?.type === "'" && /^\w+$/.test(node.text)) {
-        leaves[leaves.length - 1] = { ...previous, text: `'${node.text}`, type: 'lifetime' };
-        lastEnd = node.endIndex;
-        return;
-      }
-      push(node.text, node.type, node.startIndex, node.endIndex);
+      if (!mergedLifetime(leaves, node)) push(node.text, node.type, node.startIndex, node.endIndex);
+      else lastEnd = node.endIndex;
       return;
     }
     let end = node.startIndex;
@@ -79,6 +77,14 @@ export function tokensOf(tree: Node): Token[] {
   return outer?.kind === 'group' ? outer.tokens : grouped;
 }
 
+/** In a token tree, tree-sitter splits a lifetime (`'a`) into a quote and a name, which this joins again. */
+function mergedLifetime(leaves: (Token & { kind: 'leaf' })[], node: Node): boolean {
+  const previous = leaves.at(-1);
+  if (previous?.type !== "'" || !/^\w+$/.test(node.text)) return false;
+  leaves[leaves.length - 1] = { ...previous, text: `'${node.text}`, type: 'lifetime' };
+  return true;
+}
+
 function group(leaves: (Token & { kind: 'leaf' })[], start: number, close?: string): [Token[], number] {
   const tokens: Token[] = [];
   let index = start;
@@ -89,7 +95,16 @@ function group(leaves: (Token & { kind: 'leaf' })[], start: number, close?: stri
     if (closer && leaf.type === leaf.text) {
       const [inner, next] = group(leaves, index + 1, closer);
       const closeSpaced = leaves[next - 1]?.spaced;
-      tokens.push({ kind: 'group', open: leaf.text, close: closer, tokens: inner, spaced: leaf.spaced, closeSpaced });
+      const marked = (inner[0] as { text?: string } | undefined)?.text === EXPR_MARK;
+      tokens.push({
+        kind: 'group',
+        open: leaf.text,
+        close: closer,
+        tokens: marked ? inner.slice(1) : inner,
+        spaced: leaf.spaced,
+        closeSpaced,
+        ...(marked ? { invisible: true as const } : {}),
+      });
       index = next;
       continue;
     }
@@ -503,9 +518,23 @@ function transcribeVar(name: string, bindings: Map<string, Binding>): Token[] {
   return binding.tokens;
 }
 
-/** The source text of tokens, on one line. */
+/**
+ * The source text of tokens, on one line. An `expr` variable's parentheses carry a mark, which keeps them invisible
+ * to `stringify!` when the text reaches another macro.
+ */
 export function tokenText(tokens: Token[]): string {
-  return tokens
-    .map((token) => (token.kind === 'leaf' ? token.text : `${token.open} ${tokenText(token.tokens)} ${token.close}`))
-    .join(' ');
+  let text = '';
+  for (const token of tokens) {
+    const part =
+      token.kind === 'leaf'
+        ? token.text
+        : `${token.open}${token.invisible ? EXPR_MARK : ''}${tokenText(token.tokens)}${token.closeSpaced ? ' ' : ''}${token.close}`;
+    // The spaces the source had stay, which `stringify!` shows, and two words never run together.
+    const apart = token.spaced || (/[\w'"]$/.test(text) && /^[\w'"]/.test(part));
+    text += text && apart ? ` ${part}` : part;
+  }
+  return text;
 }
+
+/** The comment that marks the parentheses an `expr` variable keeps its operand in. */
+const EXPR_MARK = '/*expr*/';
