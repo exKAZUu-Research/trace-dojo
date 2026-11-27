@@ -391,12 +391,12 @@ function some(ctx: NativeContext, value: Value): Value {
 
 /** std's message for options it rejects with `InvalidInput`, before it asks the system. */
 function invalidOptions(options: OpenOptionsValue): string | undefined {
+  // std checks creating and truncating first.
   const writes = options.write || options.append;
-  if (!options.read && !writes) return 'must specify at least one of read, write, or append access';
   if (!writes && (options.create || options.truncate || options.createNew)) {
     return 'creating or truncating a file requires write or append access';
   }
-  return undefined;
+  return !options.read && !writes ? 'must specify at least one of read, write, or append access' : undefined;
 }
 
 /** Writes text to the file a stream writes to, for `write!` and `Write::write_all` on a file. */
