@@ -296,7 +296,9 @@ export class Converter extends ExpressionConverter {
     if (type === 'Self') return { mode: 'value', mutable, span };
     if (/^&('\w+)?Self$/.test(type)) return { mode: 'ref', mutable: false, span };
     if (/^&('\w+)?mutSelf$/.test(type)) return { mode: 'mutRef', mutable: false, span };
-    const wrapper = /^(Box|Rc|Arc)<Self>$/.exec(type)?.[1] ?? (/^Pin<&('\w+)?mutSelf>$/.test(type) ? 'Pin' : undefined);
+    // The wrappers may be written with their std paths (`std::rc::Rc<Self>`, `::std::pin::Pin<&mut Self>`).
+    const bare = type.replace(/^(?:::)?(?:std|core|alloc)::(?:boxed|rc|sync|pin)::/, '');
+    const wrapper = /^(Box|Rc|Arc)<Self>$/.exec(bare)?.[1] ?? (/^Pin<&('\w+)?mutSelf>$/.test(bare) ? 'Pin' : undefined);
     if (wrapper) return { mode: 'value', wrapper: wrapper as SelfWrapper, mutable, span };
     return unavailable(span, `型を書いた self（self: ${type}）`);
   }
