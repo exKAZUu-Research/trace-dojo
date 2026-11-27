@@ -60,7 +60,7 @@ define({
 /** Whether two pointers point to the same place: the same variable, element, or field, or both nowhere. */
 export function samePlace(a: RawPtr, b: RawPtr): boolean {
   if (a === b || a.place === b.place) return true;
-  if (!a.place || !b.place) return false;
+  if (!a.place || !b.place || a.distinct || b.distinct) return false;
   const x = a.place as unknown as Record<string, unknown>;
   const y = b.place as unknown as Record<string, unknown>;
   if (x.constructor !== y.constructor) return false;
