@@ -533,6 +533,11 @@ export abstract class MacroConverter extends PatternConverter {
       const raw = parseRawStringLiteral(formatNode.text);
       if (raw && !raw.prefix) return raw.body;
     }
+    // A macro that makes a string literal (`concat!("a", "{}")`, a program's own `wrap!("{}")`) gives the format string.
+    if (formatNode.type === 'macro_invocation') {
+      const made = this.expr(formatNode);
+      if (made.kind === 'str') return made.value;
+    }
     if (formatNode.type !== 'string_literal' || formatNode.text.startsWith('b')) {
       if (macroName === 'panic' && argCount === 1) {
         syntaxError(span, 'panic! の引数は、書式の文字列にしてください。');
@@ -545,13 +550,22 @@ export abstract class MacroConverter extends PatternConverter {
   }
 }
 
-/** A string literal that a macro's `expr` variable passed on (`println!($fmt)`), which keeps it in marked parentheses. */
+/**
+ * A string literal or macro call that a macro's `expr` variable passed on (`println!($fmt)`), which keeps it in marked
+ * parentheses.
+ */
 function fragmentLiteral(node: Node): Node {
-  const [open, mark, inner] = node.children;
-  const marked = node.type === 'parenthesized_expression' && open.type === '(' && mark?.text === '/*expr*/';
-  if (!marked || !inner) return node;
+  const inner = fragmentInner(node);
+  if (!inner) return node;
   const literal = fragmentLiteral(inner);
-  return literal.type.endsWith('string_literal') ? literal : node;
+  return literal.type.endsWith('string_literal') || literal.type === 'macro_invocation' ? literal : node;
+}
+
+/** The expression in the marked parentheses an `expr` variable keeps its operand in, if `node` is those. */
+function fragmentInner(node: Node): Node | undefined {
+  const [open, mark, inner] = node.children;
+  const marked = node.type === 'parenthesized_expression' && open?.type === '(' && mark?.text === '/*expr*/';
+  return marked ? inner : undefined;
 }
 
 function firstExpression(root: Node): Node | undefined {
@@ -562,11 +576,15 @@ function firstExpression(root: Node): Node | undefined {
 }
 
 /** The text `stringify!` gives tokens: as written, with one space where spaces or newlines separate them. */
+// code-gauge-allow functionCognitiveComplexity -- One walk over the tokens skips comments and expr variables' marks.
 function tokenText(tokens: Node[]): string {
   let text = '';
   let end: number | undefined;
   const visit = (token: Node): void => {
     if (isComment(token)) return;
+    // An `expr` variable's marked parentheses do not show (`assert!($e)` says `x == 6`).
+    const fragment = fragmentInner(token);
+    if (fragment) return visit(fragment);
     if (token.childCount > 0 && !token.type.endsWith('_literal')) {
       for (const child of token.children) visit(child);
       return;
