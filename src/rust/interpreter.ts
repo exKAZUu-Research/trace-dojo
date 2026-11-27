@@ -90,10 +90,14 @@ export class Interpreter implements CallSupport {
     tracing: boolean,
     private readonly beforeConstant?: (def: ConstDef) => void
   ) {
-    this.dropper = new Dropper(program, (fn, typeArgs, args) => {
-      const frame = this.runtime.frames.at(-1) as Frame;
-      return this.callFn(fn, typeArgs, args, undefined, { row: 0, col: 1 }, frame);
-    });
+    this.dropper = new Dropper(
+      program,
+      (fn, typeArgs, args) => {
+        const frame = this.runtime.frames.at(-1) as Frame;
+        return this.callFn(fn, typeArgs, args, undefined, { row: 0, col: 1 }, frame);
+      },
+      (type) => this.revealType(type)
+    );
     this.compiler = new Compiler(program, checker, this, tracing);
     this.formatter = new Formatter({
       userFmt: (trait, type, value, spec, write) => this.userFmt(trait, type, value, spec, write),

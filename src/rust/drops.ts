@@ -35,7 +35,9 @@ export class Dropper {
 
   constructor(
     private readonly program: Program,
-    private readonly call: Call
+    private readonly call: Call,
+    /** The type an `impl Trait` stands for, which is what drops. */
+    private readonly reveal: (type: Type) => Type = (type) => type
   ) {
     this.impls = program.impls.filter((impl) => impl.trait?.trait.builtin === 'Drop' && !isStdImpl(impl));
     this.dropFn = program.builtinTraits.get('Drop')?.methods.get('drop');
@@ -60,7 +62,7 @@ export class Dropper {
    */
   needsDrop(type: Type): boolean {
     if (!this.active) return false;
-    const root = normalize(shallow(type));
+    const root = this.concrete(type);
     const rootKey = typeKey(root);
     const known = this.needs.get(rootKey);
     if (known !== undefined) return known;
@@ -74,7 +76,7 @@ export class Dropper {
         return true;
       }
       for (const part of partsOf(t)) {
-        const next = normalize(shallow(part));
+        const next = this.concrete(part);
         const key = typeKey(next);
         if (visited.has(key)) continue;
         visited.add(key);
@@ -83,6 +85,11 @@ export class Dropper {
     }
     for (const key of visited) this.needs.set(key, false);
     return false;
+  }
+
+  private concrete(type: Type): Type {
+    const t = normalize(shallow(type));
+    return t.kind === 'opaque' ? normalize(shallow(this.reveal(t))) : t;
   }
 
   /** Whether dropping a value of a type does something itself, whatever its parts hold. */
@@ -95,7 +102,7 @@ export class Dropper {
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of owning type.
   drop(value: Value, type: Type): void {
     if (value === MOVED || (value as unknown) === UNASSIGNED || !this.needsDrop(type)) return;
-    const t = normalize(shallow(type));
+    const t = this.concrete(type);
     if (t.kind === 'adt') {
       const impl = this.implFor(t);
       if (impl && this.dropFn) this.call(this.dropFn, [t], [new CellPlace(value)]);
