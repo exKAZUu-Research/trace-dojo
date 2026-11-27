@@ -237,14 +237,7 @@ export class Binder {
     let namespace: Sym | undefined;
     for (const part of namespacePath(name)) {
       const partName = canonicalIdentifier(part.text, part);
-      // `namespace A.B` declared again adds to the `B` (or class/function/enum `B`) that an earlier `A` exports.
-      const namespaceExports = outer.namespace?.namespaceExports;
-      const exported =
-        namespaceExports && !namespaceExports.isClauseOnlyExport(partName, 'value')
-          ? namespaceExports.values.get(partName)
-          : undefined;
-      if (exported && (outer !== scope || isAmbient || isExportedNamespaceRoot(node)) && !outer.values.has(partName))
-        outer.values.set(partName, exported);
+      this.seedMergedNamespacePart(outer, scope, node, partName, isAmbient);
       namespace = outer.declareValue(partName, 'namespace', node, part);
       // The path's first name is exported only by an `export` or an ambient body, which `exportDeclared` handles.
       if (outer !== scope) this.exportFrom(outer, namespace, 'value');
@@ -252,6 +245,23 @@ export class Binder {
       outer = this.newNamespaceBody(node, namespace, isAmbient);
     }
     if (body) this.bindNamespaceBody(body, outer, isAmbient);
+  }
+
+  private seedMergedNamespacePart(
+    outer: Scope,
+    rootScope: Scope,
+    node: TreeNode,
+    partName: string,
+    isAmbient: boolean
+  ): void {
+    // `namespace A.B` declared again adds to the `B` (or class/function/enum `B`) that an earlier `A` exports.
+    const namespaceExports = outer.namespace?.namespaceExports;
+    const exported =
+      namespaceExports && !namespaceExports.isClauseOnlyExport(partName, 'value')
+        ? namespaceExports.values.get(partName)
+        : undefined;
+    if (exported && (outer !== rootScope || isAmbient || isExportedNamespaceRoot(node)) && !outer.values.has(partName))
+      outer.values.set(partName, exported);
   }
 
   /** The statements of a namespace's body, where those of a `declare namespace` are ambient and all exported. */
@@ -293,6 +303,7 @@ export class Binder {
     if (value) exports.exportViaClause(exportedName, value, 'value');
     const type = scope.types.get(localName);
     if (type) exports.exportViaClause(exportedName, type, 'type');
+    if (value || type) exports.recordClauseExport(exportedName, aliasNode, value, type);
   }
 
   /** `declare module "m" { ... }`, whose declarations are the exports an `import` of "m" sees. */
@@ -312,14 +323,17 @@ export class Binder {
     const body = node.childForFieldName('body');
     if (!body) return;
     const bodyScope = this.newNamespaceBody(node, module, true);
-    const exports = module.namespaceExports as Scope;
+    this.copyDeclarationExportsToBody(module.namespaceExports as Scope, bodyScope);
+    this.bindNamespaceBody(body, bodyScope, true);
+  }
+
+  private copyDeclarationExportsToBody(exports: Scope, bodyScope: Scope): void {
     for (const [exportName, exported] of exports.values) {
       if (!exports.isClauseOnlyExport(exportName, 'value')) bodyScope.values.set(exportName, exported);
     }
     for (const [exportName, exported] of exports.types) {
       if (!exports.isClauseOnlyExport(exportName, 'type')) bodyScope.types.set(exportName, exported);
     }
-    this.bindNamespaceBody(body, bodyScope, true);
   }
 
   private get isExternalModule(): boolean {

@@ -111,7 +111,7 @@ export class Namespaces {
   }
 
   private pruneScopeImportAliases(scope: Scope, meaning: 'value' | 'type'): void {
-    const { table, exportTable, entriesOf, declarationsOf, other } = scopeAliasTables(scope, meaning);
+    const { table, entriesOf, declarationsOf, other } = scopeAliasTables(scope, meaning);
     for (const [name, symbol] of table) {
       const entries = entriesOf(symbol);
       const declarations = declarationsOf(symbol);
@@ -122,7 +122,7 @@ export class Namespaces {
       if (keptIndices.length === entries.length) continue;
       if (keptIndices.length === 0) {
         table.delete(name);
-        if (exportTable?.get(name) === symbol) exportTable.delete(name);
+        scope.namespace?.namespaceExports?.deleteClauseExportSymbol(symbol, meaning);
       } else {
         retainIndices(declarations, keptIndices);
         this.restoreKeptSymbolKind(symbol, keptIndices, meaning);
@@ -610,7 +610,6 @@ function retainIndices<T>(items: T[], indices: number[]): void {
 
 interface AliasSpaceTables {
   table: Map<string, Sym>;
-  exportTable: Map<string, Sym> | undefined;
   entriesOf: (symbol: Sym) => { kind: string; name: TreeNode }[];
   declarationsOf: (symbol: Sym) => TreeNode[];
   other: 'value' | 'type';
@@ -620,7 +619,6 @@ function scopeAliasTables(scope: Scope, meaning: 'value' | 'type'): AliasSpaceTa
   if (meaning === 'value') {
     return {
       table: scope.values,
-      exportTable: scope.namespace?.namespaceExports?.values,
       entriesOf: (symbol: Sym) => symbol.valueEntries,
       declarationsOf: (symbol: Sym) => symbol.valueDeclarations,
       other: 'type',
@@ -628,7 +626,6 @@ function scopeAliasTables(scope: Scope, meaning: 'value' | 'type'): AliasSpaceTa
   }
   return {
     table: scope.types,
-    exportTable: scope.namespace?.namespaceExports?.types,
     entriesOf: (symbol: Sym) => symbol.typeEntries,
     declarationsOf: (symbol: Sym) => symbol.typeDeclarations,
     other: 'value',

@@ -13,6 +13,7 @@ import { isAnyLike, isIntrinsic, type Property, type Type, undefinedType, unionO
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
 export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
   checkBuiltinUndefinedDeclaration(c);
+  checkNamespaceClauseExportConflicts(c, scopes);
   const reportedExportMix = new Set<number>();
   for (const symbol of uniqueSymbols(scopes, (scope) => scope.values.values())) {
     if (!symbol.valueEntries.some((entry) => !c.isLibrary(entry.name))) continue;
@@ -25,6 +26,45 @@ export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
     checkMergedTypeExportConsistency(c, symbol, reportedExportMix);
     checkReservedTypeName(c, symbol);
   }
+}
+
+function checkNamespaceClauseExportConflicts(c: Checker, scopes: Scope[]): void {
+  const seen = new Set<Scope>();
+  for (const scope of scopes) {
+    const exports = scope.namespace?.namespaceExports;
+    if (!exports || seen.has(exports)) continue;
+    seen.add(exports);
+    reportScopeClauseExportConflicts(c, exports);
+  }
+}
+
+function reportScopeClauseExportConflicts(c: Checker, exports: Scope): void {
+  const byName = new Map<string, Scope['clauseExportSpecifiers']>();
+  for (const entry of exports.clauseExportSpecifiers) {
+    if (c.isLibrary(entry.site)) continue;
+    const list = byName.get(entry.name) ?? [];
+    list.push(entry);
+    byName.set(entry.name, list);
+  }
+  for (const [name, entries] of byName) {
+    if (entries.length > 1) {
+      for (const entry of entries) c.error(entry.site, `識別子 '${name}' が重複しています。`);
+      continue;
+    }
+    if (clauseExportCollidesWithDeclaration(exports, name, entries[0]))
+      c.error(entries[0].site, `エクスポート宣言が、'${name}' のエクスポートされた宣言と競合しています。`);
+  }
+}
+
+function clauseExportCollidesWithDeclaration(
+  exports: Scope,
+  name: string,
+  entry: Scope['clauseExportSpecifiers'][number]
+): boolean {
+  return (
+    (Boolean(entry.value?.valueEntries.length) && exports.hasDeclarationExport(name, 'value')) ||
+    (Boolean(entry.type?.typeEntries.length) && exports.hasDeclarationExport(name, 'type'))
+  );
 }
 
 function uniqueSymbols(scopes: Scope[], select: (scope: Scope) => Iterable<Sym>): Sym[] {

@@ -86,6 +86,9 @@ export class Scope {
 
   private readonly clauseOnlyValues = new Set<string>();
   private readonly clauseOnlyTypes = new Set<string>();
+  private readonly declarationExportedValues = new Set<string>();
+  private readonly declarationExportedTypes = new Set<string>();
+  readonly clauseExportSpecifiers: { name: string; site: TreeNode; value?: Sym; type?: Sym }[] = [];
   /** The names a `declare global` block declares, which inside it stand for the global symbols of those names. */
   private readonly augmentedNames = new Set<string>();
   /** The nearest function or module scope, where `var` and function declarations live. */
@@ -118,19 +121,38 @@ export class Scope {
 
   exportViaDeclaration(name: string, symbol: Sym, meaning: 'value' | 'type'): void {
     if (meaning === 'value') {
-      this.clauseOnlyValues.delete(name);
-      this.values.set(name, symbol);
+      this.declarationExportedValues.add(name);
+      if (!this.clauseOnlyValues.has(name)) this.values.set(name, symbol);
     } else {
-      this.clauseOnlyTypes.delete(name);
-      this.types.set(name, symbol);
+      this.declarationExportedTypes.add(name);
+      if (!this.clauseOnlyTypes.has(name)) this.types.set(name, symbol);
     }
   }
 
   exportViaClause(name: string, symbol: Sym, meaning: 'value' | 'type'): void {
     const table = meaning === 'value' ? this.values : this.types;
     const clauseOnly = meaning === 'value' ? this.clauseOnlyValues : this.clauseOnlyTypes;
-    if (!table.has(name)) clauseOnly.add(name);
+    if (table.has(name)) return;
+    clauseOnly.add(name);
     table.set(name, symbol);
+  }
+
+  recordClauseExport(name: string, site: TreeNode, value: Sym | undefined, type: Sym | undefined): void {
+    this.clauseExportSpecifiers.push({ name, site, value, type });
+  }
+
+  hasDeclarationExport(name: string, meaning: 'value' | 'type'): boolean {
+    return meaning === 'value' ? this.declarationExportedValues.has(name) : this.declarationExportedTypes.has(name);
+  }
+
+  deleteClauseExportSymbol(symbol: Sym, meaning: 'value' | 'type'): void {
+    const table = meaning === 'value' ? this.values : this.types;
+    const clauseOnly = meaning === 'value' ? this.clauseOnlyValues : this.clauseOnlyTypes;
+    for (const [exportName, exported] of table) {
+      if (exported !== symbol) continue;
+      table.delete(exportName);
+      clauseOnly.delete(exportName);
+    }
   }
 
   isClauseOnlyExport(name: string, meaning: 'value' | 'type'): boolean {
