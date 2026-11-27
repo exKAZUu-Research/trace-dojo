@@ -1,6 +1,15 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { CollectionState } from './realmCollections';
-import { isAccessor, JsArray, JsFunction, JsObject, type Property, Scope, UNINITIALIZED } from './values';
+import {
+  type FunctionBehavior,
+  isAccessor,
+  JsArray,
+  JsFunction,
+  JsObject,
+  type Property,
+  Scope,
+  UNINITIALIZED,
+} from './values';
 
 /** Finds the turtles that `roots` reach, with the number of items scanned to find them. */
 // code-gauge-allow functionCognitiveComplexity -- One worklist loop over every kind of reference, with WeakMap entries waiting for their keys.
@@ -47,7 +56,11 @@ export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleSta
 }
 
 function pushScopeReferences(pending: unknown[], scope: Scope): void {
-  for (const binding of scope.bindings.values()) if (binding.value !== UNINITIALIZED) pending.push(binding.value);
+  for (const binding of scope.bindings.values()) {
+    if (binding.value !== UNINITIALIZED) pending.push(binding.value);
+    if (binding.initializingClass) pending.push(binding.initializingClass);
+    if (binding.declaredClass) pending.push(binding.declaredClass);
+  }
   pending.push(scope.parent);
   // A `using` declaration's value and disposal method stay reachable until its scope ends.
   for (const { value, method } of scope.disposables ?? []) pending.push(value, method);
@@ -80,9 +93,19 @@ function pushObjectReferences(
   if (object.collection) pushCollectionReferences(pending, ephemeron, object.collection);
   if (object instanceof JsFunction) {
     if (object.behavior.kind !== 'native') pending.push(object.behavior.scope, object.behavior.homeObject);
+    if (object.behavior.kind === 'class') pushClassReferences(pending, object.behavior);
     for (const value of object.captured) pending.push(value);
   }
   return object instanceof JsArray ? pushArrayReferences(pending, object) : 0;
+}
+
+function pushClassReferences(pending: unknown[], behavior: Extract<FunctionBehavior, { kind: 'class' }>): void {
+  for (const value of behavior.initializers ?? []) pending.push(value);
+  for (const { property } of behavior.privateMembers) pushProperty(pending, property);
+  for (const field of behavior.fields) {
+    for (const transform of field.transforms ?? []) pending.push(transform);
+    for (const initializer of field.initializers ?? []) pending.push(initializer);
+  }
 }
 
 /** Pushes an array's elements, returning how many there are. */

@@ -213,6 +213,8 @@ export interface Binding {
   value: Value | typeof UNINITIALIZED;
   /** The class object visible to trace snapshots before the declaration finishes initializing its binding. */
   initializingClass?: JsFunction;
+  /** The source class whose static fields trace snapshots keep showing when a class decorator returns a subclass. */
+  declaredClass?: JsFunction;
   isMutable: boolean;
   /** What the TypeError of an assignment to an immutable binding calls it, `constant` unless set. */
   immutableKind?: 'using' | 'await using';

@@ -163,6 +163,7 @@ export abstract class EvaluatorBase {
     if (!binding.isMutable) {
       runtime.throwError('TypeError', `Assignment to ${binding.immutableKind ?? 'constant'} variable.`);
     }
+    if (binding.declaredClass && value !== binding.value) binding.declaredClass = undefined;
     binding.value = value;
     binding.isHoisted = false;
   }

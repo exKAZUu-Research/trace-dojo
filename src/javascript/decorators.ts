@@ -15,9 +15,6 @@ import {
 
 type DecoratedMember = Exclude<ClassMember, { kind: 'staticBlock' }>;
 
-/** The metadata object of each decorated class, which a decorated subclass's metadata inherits from. */
-const metadataOfClass = new WeakMap<JsObject, JsObject>();
-
 /** A member the class defined, with where it lives, which its decorators replace or wrap. */
 export interface MemberDefinition {
   member: DecoratedMember;
@@ -74,35 +71,48 @@ export function evaluateClassDecorators(
  * one written, and then the class's own, all sharing a metadata object that inherits from the nearest decorated base.
  */
 export function decorateClassDefinition(runtime: Runtime, definition: ClassDefinition): DecoratedClass {
-  const metadata = classMetadata(runtime, definition.cls);
+  const symbol = metadataSymbol(runtime);
+  const metadata = classMetadata(runtime, definition.cls, symbol);
   const staticInitializers: Value[] = [];
   const instanceInitializers: Value[] = [];
-  const { members } = definition;
-  const order = [
-    ...members.filter((member) => !isField(member) && member.member.isStatic),
-    ...members.filter((member) => !isField(member) && !member.member.isStatic),
-    ...members.filter((member) => isField(member) && member.member.isStatic),
-    ...members.filter((member) => isField(member) && !member.member.isStatic),
-  ];
-  for (const member of order) {
-    const added = member.member.isStatic ? staticInitializers : instanceInitializers;
-    const decorators = member.decorators ?? [];
-    for (let index = decorators.length - 1; index >= 0; index--)
-      decorateMember(runtime, member, index, added, metadata);
-  }
-  let cls = definition.cls;
   const classInitializers: Value[] = [];
-  for (let index = definition.classDecorators.length - 1; index >= 0; index--) {
-    const context = decoratorContext(runtime, 'class', definition.name, classInitializers, metadata);
-    const decorator = requireCallable(runtime, definition.classDecorators[index]);
-    const result = runtime.call(decorator, undefined, [cls, context], definition.classDecoratorRows[index]);
-    if (result === undefined) continue;
-    if (!(result instanceof JsFunction)) runtime.throwError('TypeError', 'class decorators must return a function');
-    cls = result as JsFunction;
+  const { temporaries } = runtime.frame;
+  const held = temporaries.length;
+  temporaries.push(metadata, definition.cls, ...definition.classDecorators);
+  try {
+    const { members } = definition;
+    const order = [
+      ...members.filter((member) => !isField(member) && member.member.isStatic),
+      ...members.filter((member) => !isField(member) && !member.member.isStatic),
+      ...members.filter((member) => isField(member) && member.member.isStatic),
+      ...members.filter((member) => isField(member) && !member.member.isStatic),
+    ];
+    for (const member of order) {
+      const added = member.member.isStatic ? staticInitializers : instanceInitializers;
+      const decorators = member.decorators ?? [];
+      for (const decorator of decorators) temporaries.push(decorator);
+      for (let index = decorators.length - 1; index >= 0; index--) {
+        decorateMember(runtime, member, index, added, metadata);
+        for (const value of added) temporaries.push(value);
+      }
+    }
+    let cls = definition.cls;
+    for (let index = definition.classDecorators.length - 1; index >= 0; index--) {
+      const context = decoratorContext(runtime, 'class', definition.name, classInitializers, metadata);
+      const decorator = requireCallable(runtime, definition.classDecorators[index]);
+      const result = runtime.call(decorator, undefined, [cls, context], definition.classDecoratorRows[index]);
+      for (const value of classInitializers) temporaries.push(value);
+      if (result === undefined) continue;
+      if (!(result instanceof JsFunction)) runtime.throwError('TypeError', 'class decorators must return a function');
+      cls = result as JsFunction;
+      temporaries.push(cls);
+    }
+    defineMetadataProperty(runtime, definition.cls, symbol, metadata);
+    if (cls !== definition.cls) defineMetadataProperty(runtime, cls, symbol, metadata);
+    return { cls, staticInitializers, instanceInitializers, classInitializers };
+  } finally {
+    temporaries.length = held;
   }
-  // A subclass of the class the class decorators returned inherits this metadata too.
-  metadataOfClass.set(cls, metadata);
-  return { cls, staticInitializers, instanceInitializers, classInitializers };
 }
 
 /** Whether a member is a field without `accessor`, whose decorators apply after those of methods and accessors. */
@@ -110,17 +120,34 @@ function isField(member: MemberDefinition): boolean {
   return member.member.kind === 'field' && !member.member.isAutoAccessor;
 }
 
+function metadataSymbol(runtime: Runtime): symbol {
+  const { symbolRegistry } = runtime.realm;
+  let symbol = symbolRegistry.get('Symbol.metadata');
+  if (!symbol) {
+    runtime.allocate(1);
+    symbol = Symbol('Symbol.metadata');
+    symbolRegistry.set('Symbol.metadata', symbol);
+  }
+  return symbol;
+}
+
 /**
  * The metadata object a class's decorators share, which inherits from that of the nearest decorated superclass, as
  * `context.metadata` does under the standard.
  */
-function classMetadata(runtime: Runtime, cls: JsFunction): JsObject {
-  let parent: JsObject | null = cls.proto;
-  while (parent && !metadataOfClass.has(parent)) parent = parent.proto;
+function classMetadata(runtime: Runtime, cls: JsFunction, symbol: symbol): JsObject {
+  const inherited = cls.proto && runtime.hasProperty(cls.proto, symbol) ? runtime.get(cls.proto, symbol) : undefined;
   // oxlint-disable-next-line unicorn/no-null -- The metadata object of a class without a decorated base has no prototype.
-  const metadata = runtime.newObject(parent ? (metadataOfClass.get(parent) ?? null) : null);
-  metadataOfClass.set(cls, metadata);
-  return metadata;
+  return runtime.newObject(isObject(inherited) ? inherited : null);
+}
+
+function defineMetadataProperty(runtime: Runtime, target: JsFunction, symbol: symbol, metadata: JsObject): void {
+  runtime.defineProperty(target, symbol, {
+    value: metadata,
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
 }
 
 /** Runs the functions decorators added, with `thisValue` as `this`. */

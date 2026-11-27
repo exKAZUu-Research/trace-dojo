@@ -32,6 +32,10 @@ class ViewNode implements Node {
   hidesCallRow = false;
   /** The variable name a synthesized namespace-export member target stands for, for anonymous function/class naming. */
   inferredName?: string;
+  /** Generated helper binding names allocated for this program, omitted from learner trace snapshots. */
+  hiddenNames?: ReadonlySet<string>;
+  /** A collision-free alias bound to an enum's object when a member initializer shadows the enum's source name. */
+  enumAlias?: string;
   readonly startIndex: number;
   readonly endIndex: number;
   readonly startPosition: { row: number; column: number };
@@ -93,6 +97,60 @@ const modifiedTypes = new Set([
   'abstract_class_declaration',
 ]);
 
+interface NamespaceReceiver {
+  symbol: Sym | undefined;
+  receiver: string;
+}
+
+class ViewContext {
+  readonly usedNames: Set<string>;
+  readonly hiddenNames = new Set<string>();
+  readonly bodyReceivers = new Map<number, NamespaceReceiver[]>();
+  readonly enumAliases = new Map<number, string>();
+  private nextId = 0;
+
+  constructor(root: TreeNode, budget: ExecutionBudget) {
+    this.usedNames = collectIdentifierNames(root, budget);
+  }
+
+  freshHelperName(base: string): string {
+    const clean = base.replaceAll(/[^\w$]/g, '_') || 'ns';
+    let candidate = `$ns_${clean}`;
+    while (this.usedNames.has(candidate)) candidate = `$ns_${clean}_${++this.nextId}`;
+    this.usedNames.add(candidate);
+    this.hiddenNames.add(candidate);
+    return candidate;
+  }
+}
+
+const viewContexts = new WeakMap<Binder, ViewContext>();
+
+function contextOf(binder: Binder): ViewContext {
+  const context = viewContexts.get(binder);
+  if (!context) throw new Error('Missing ViewContext for Binder');
+  return context;
+}
+
+function collectIdentifierNames(root: TreeNode, budget: ExecutionBudget): Set<string> {
+  const names = new Set<string>();
+  const stack: TreeNode[] = [root];
+  for (let current = stack.pop(); current; current = stack.pop()) {
+    budget.spend();
+    if (current.type.includes('identifier')) {
+      names.add(current.text);
+      if (current.text.includes('\\')) {
+        try {
+          names.add(nameOf(current));
+        } catch {
+          // Invalid escapes are reported later during conversion/checking.
+        }
+      }
+    }
+    for (const child of current.namedChildren) if (child) stack.push(child);
+  }
+  return names;
+}
+
 /**
  * Views a TypeScript tree as the JavaScript tree that erasing its types leaves, so that the JavaScript converter can
  * convert it: types, type-only declarations, and type assertions disappear, parameters become their patterns, and
@@ -100,13 +158,17 @@ const modifiedTypes = new Set([
  */
 export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node {
   const binder = new Binder(root, new Scope('global', undefined, undefined), { budget, skipAssignmentAnalysis: true });
+  const context = new ViewContext(root, budget);
+  viewContexts.set(binder, context);
   for (const scope of binder.allScopes)
     for (const symbol of scope.values.values()) {
       budget.spend();
       const name = symbol.valueEntries[0]?.name;
       if (name) scope.values.set(nameOf(name), symbol);
     }
-  return view(root, binder);
+  const viewed = view(root, binder);
+  if (context.hiddenNames.size > 0) viewed.hiddenNames = context.hiddenNames;
+  return viewed;
 }
 
 /** The TypeScript declarations that compile to code of their own, and the names a namespace's exports change. */
@@ -155,6 +217,11 @@ function view(node: TreeNode, binder: Binder): ViewNode {
     case 'identifier': {
       return identifierView(node, binder);
     }
+    case 'enum_declaration': {
+      const viewed = generic(node, node.type, binder);
+      viewed.enumAlias = contextOf(binder).enumAliases.get(node.id);
+      return viewed;
+    }
     default: {
       return erasedStatementTypes.has(node.type) ? leaf(node, 'empty_statement') : generic(node, node.type, binder);
     }
@@ -185,10 +252,10 @@ function shorthandPropertyView(node: TreeNode, binder: Binder): ViewNode {
 function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode | undefined {
   if (node.parent?.childForFieldName('name')?.id === node.id) return undefined;
   const symbol = binder.lookupValue(node, nameOf(node));
-  const namespace = namespaceOfReference(node, symbol);
+  const namespace = namespaceOfReference(node, symbol, binder);
   if (namespace) return memberReference(node, namespace, nameOf(node));
   // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
-  if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode);
+  if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode, binder);
   return undefined;
 }
 
@@ -197,14 +264,22 @@ function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode 
  * its declarations read, as is any export that another declaration of the namespace reads, where the name has no
  * binding of its own.
  */
-function namespaceOfReference(node: TreeNode, symbol: Sym | undefined): string | undefined {
+function namespaceOfReference(node: TreeNode, symbol: Sym | undefined, binder: Binder): string | undefined {
   if (!symbol?.exportedFrom) return undefined;
   const currentBodyId = namespaceBodyOf(node)?.id;
   const hasLocalBinding = symbol.valueDeclarations.some((declaration) =>
     declaresLocalBindingInBody(declaration, symbol, currentBodyId)
   );
   const isProperty = exportedVariableKinds.has(symbol.valueKind ?? '') || !hasLocalBinding;
-  return isProperty ? symbol.exportedFrom.name : undefined;
+  return isProperty ? activeNamespaceReceiver(node, symbol.exportedFrom, contextOf(binder)) : undefined;
+}
+
+function activeNamespaceReceiver(node: TreeNode, targetNamespace: Sym, context: ViewContext): string {
+  for (let body = namespaceBodyOf(node); body; body = namespaceBodyOf(body.parent)) {
+    const entry = context.bodyReceivers.get(body.id)?.find((candidate) => candidate.symbol === targetNamespace);
+    if (entry) return entry.receiver;
+  }
+  return targetNamespace.name;
 }
 
 function declaresLocalBindingInBody(declaration: TreeNode, symbol: Sym, currentBodyId: number | undefined): boolean {
@@ -228,7 +303,7 @@ function declaresLocalBindingInBody(declaration: TreeNode, symbol: Sym, currentB
 }
 
 /** The body of the namespace declaration a node is in, whose function binds the names it declares. */
-function namespaceBodyOf(node: TreeNode | undefined): TreeNode | undefined {
+function namespaceBodyOf(node: TreeNode | null | undefined): TreeNode | undefined {
   for (let current = node?.parent; current; current = current.parent)
     if (
       current.type === 'statement_block' &&
@@ -309,8 +384,28 @@ function leaf(node: TreeNode, type: string, text = node.text, isNamed = true): V
 }
 
 /** `E.A` for a member `A` of the enum `E`, which the identifier `A` in an initializer of `E` stands for. */
-function enumMemberReference(node: TreeNode, member: TreeNode): ViewNode {
-  return memberReference(node, member.parent?.parent?.childForFieldName('name')?.text ?? '', nameOf(node));
+function enumMemberReference(node: TreeNode, member: TreeNode, binder: Binder): ViewNode {
+  const declaration = member.parent?.parent;
+  const nameNode = declaration?.childForFieldName('name');
+  const enumName = nameNode ? nameOf(nameNode) : '';
+  if (!declaration || !enumName) return memberReference(node, enumName, nameOf(node));
+  const enumSymbol = binder.lookupValue(declaration, enumName);
+  if (binder.lookupValue(node, enumName) === enumSymbol) return memberReference(node, enumName, nameOf(node));
+  const targetEnum = enclosingEnumOf(node) ?? declaration;
+  const context = contextOf(binder);
+  let alias = context.enumAliases.get(targetEnum.id);
+  if (!alias) {
+    alias = context.freshHelperName(enumName);
+    context.enumAliases.set(targetEnum.id, alias);
+  }
+  return memberReference(node, alias, nameOf(node));
+}
+
+function enclosingEnumOf(node: TreeNode): TreeNode | undefined {
+  for (let current = node.parent; current; current = current.parent) {
+    if (current.type === 'enum_declaration') return current;
+  }
+  return undefined;
 }
 
 function exportedMemberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
@@ -346,12 +441,12 @@ function namespaceView(node: TreeNode, binder: Binder): ViewNode {
   const body = node.childForFieldName('body');
   if (!name || !body || name.type === 'string' || !blockHasRuntimeCode(body)) return leaf(node, 'empty_statement');
   const path = namespacePathOf(name);
-  const statements = nestedNamespaceStatements(node, body, path, binder);
-  const outermost = path[0].text;
-  const call = namespaceCall(node, outermost, statements, orEmptyObject(node, outermost));
+  const { statements, outermostReceiver, outermostSymbol } = buildNamespacePath(node, body, path, binder);
+  const outermost = nameOf(path[0]);
+  const call = namespaceCall(node, outermostReceiver, statements, orEmptyObject(node, outermost));
   // Every block passes the object the blocks before it made, or a new one, so no block needs to know whether it is
   // first; a class, function, or enum declared before the namespace already declares its name.
-  const isNamespaceFirst = declaresNamespaceVar(binder.lookupValue(node, outermost));
+  const isNamespaceFirst = declaresNamespaceVar(outermostSymbol);
   return isNamespaceFirst ? varDeclaration(node, outermost, call) : expressionStatement(node, call);
 }
 
@@ -465,11 +560,11 @@ function importAliasView(node: TreeNode, binder: Binder): ViewNode {
   const rootName = nameOf(path[0]);
   const root = binder.lookupValue(target, rootName);
   if (!root || !resolveImportAliasValue(path, binder)) return leaf(node, 'empty_statement');
-  const namespace = namespaceOfReference(path[0], root);
+  const namespace = namespaceOfReference(path[0], root, binder);
   let value = namespace
     ? memberReference(path[0], namespace, rootName)
     : root.valueKind === 'enumMember'
-      ? enumMemberReference(path[0], root.valueDeclaration as TreeNode)
+      ? enumMemberReference(path[0], root.valueDeclaration as TreeNode, binder)
       : leaf(path[0], 'identifier', rootName);
   let text = value.text;
   for (const part of path.slice(1)) {
@@ -516,16 +611,42 @@ function resolveImportAliasValue(path: TreeNode[], binder: Binder, seen = new Se
 }
 
 /** The statements of the first namespace of a path `A.B.C`, which declare the next ones down to the body's. */
-function nestedNamespaceStatements(node: TreeNode, body: TreeNode, path: TreeNode[], binder: Binder): ViewNode[] {
-  let statements = namespaceBodyStatements(body, path.at(-1)?.text ?? '', binder);
+function buildNamespacePath(
+  node: TreeNode,
+  body: TreeNode,
+  path: TreeNode[],
+  binder: Binder
+): { statements: ViewNode[]; outermostReceiver: string; outermostSymbol: Sym | undefined } {
+  const context = contextOf(binder);
+  const symbols = namespacePathSymbols(node, body, path, binder);
+  const receivers = path.map((part) => context.freshHelperName(nameOf(part)));
+  context.bodyReceivers.set(
+    body.id,
+    path.map((_, index) => ({ symbol: symbols[index], receiver: receivers[index] })).toReversed()
+  );
+  let statements = namespaceBodyStatements(body, receivers.at(-1) as string, binder);
   for (let index = path.length - 1; index > 0; index--) {
-    const isNamespaceFirst = declaresNamespaceVar(binder.lookupValue(path[index], path[index].text));
-    statements = exportedNamespaceStatements(node, path[index].text, path[index - 1].text, statements, {
-      isPathPart: true,
-      isNamespaceFirst,
-    });
+    const isNamespaceFirst = declaresNamespaceVar(symbols[index]);
+    statements = exportedNamespaceStatements(
+      node,
+      { name: nameOf(path[index]), receiver: receivers[index], outerReceiver: receivers[index - 1] },
+      statements,
+      { isPathPart: true, isNamespaceFirst }
+    );
   }
-  return statements;
+  return { statements, outermostReceiver: receivers[0], outermostSymbol: symbols[0] };
+}
+
+function namespacePathSymbols(node: TreeNode, body: TreeNode, path: TreeNode[], binder: Binder): (Sym | undefined)[] {
+  const symbols: (Sym | undefined)[] = [];
+  let current = binder.lookupValue(node, nameOf(path[0]));
+  symbols.push(current);
+  for (const part of path.slice(1)) {
+    current = current?.namespaceExports?.values.get(nameOf(part));
+    symbols.push(current);
+  }
+  symbols[path.length - 1] ??= binder.ownScope(body)?.namespace;
+  return symbols;
 }
 
 function namespaceBodyStatements(body: TreeNode, namespaceName: string, binder: Binder): ViewNode[] {
@@ -572,17 +693,19 @@ function exportStatements(declaration: TreeNode, namespaceName: string, binder: 
   return statements;
 }
 
-function exportedNamespace(node: TreeNode, outerName: string, binder: Binder): ViewNode[] {
+function exportedNamespace(node: TreeNode, outerReceiver: string, binder: Binder): ViewNode[] {
   const name = node.childForFieldName('name');
   const body = node.childForFieldName('body');
   if (!name || !body || !blockHasRuntimeCode(body)) return [];
   const path = namespacePathOf(name);
-  const statements = nestedNamespaceStatements(node, body, path, binder);
-  const isNamespaceFirst = declaresNamespaceVar(binder.lookupValue(name, path[0].text));
-  return exportedNamespaceStatements(node, path[0].text, outerName, statements, {
-    isPathPart: false,
-    isNamespaceFirst,
-  });
+  const { statements, outermostReceiver, outermostSymbol } = buildNamespacePath(node, body, path, binder);
+  const isNamespaceFirst = declaresNamespaceVar(outermostSymbol);
+  return exportedNamespaceStatements(
+    node,
+    { name: nameOf(path[0]), receiver: outermostReceiver, outerReceiver },
+    statements,
+    { isPathPart: false, isNamespaceFirst }
+  );
 }
 
 /** `export const a = 1, b = 2;` as `N.a = 1, N.b = 2;`, whose variables are only the namespace's properties. */
@@ -645,19 +768,18 @@ function exportedPattern(node: TreeNode, namespaceName: string, binder: Binder):
   );
 }
 
-/** `var B = ((B) => { ... })(B = A.B || (A.B = {}));` for a namespace `B` that the namespace `A` exports. */
+/** `var B = (($ns_B) => { ... })(B = $ns_A.B || ($ns_A.B = {}));` for a namespace `B` that `A` exports. */
 function exportedNamespaceStatements(
   node: TreeNode,
-  name: string,
-  outerName: string,
+  { name, receiver, outerReceiver }: { name: string; receiver: string; outerReceiver: string },
   statements: ViewNode[],
   { isPathPart, isNamespaceFirst }: { isPathPart: boolean; isNamespaceFirst: boolean }
 ): ViewNode[] {
-  const exported = orEmptyObject(node, `${outerName}.${name}`, () => memberReference(node, outerName, name));
+  const exported = orEmptyObject(node, `${outerReceiver}.${name}`, () => memberReference(node, outerReceiver, name));
   const argument = isNamespaceFirst
     ? parenthesized(node, assignment(node, leaf(node, 'identifier', name), exported))
     : exported;
-  const call = namespaceCall(node, name, statements, argument);
+  const call = namespaceCall(node, receiver, statements, argument);
   const statement = isNamespaceFirst ? varDeclaration(node, name, call) : expressionStatement(node, call);
   return [isPathPart ? unstepped(statement) : statement];
 }
@@ -781,6 +903,16 @@ export function isHiddenCallFunction(node: Node): boolean {
 /** The declared variable name a synthesized namespace-export member target stands for, if any. */
 export function inferredTargetNameOf(node: Node): string | undefined {
   return node instanceof ViewNode ? node.inferredName : undefined;
+}
+
+/** Generated helper binding names allocated for a viewed program, omitted from learner trace snapshots. */
+export function hiddenNamesOf(node: Node): ReadonlySet<string> | undefined {
+  return node instanceof ViewNode ? node.hiddenNames : undefined;
+}
+
+/** The collision-free alias bound to an enum's object when a member initializer shadows the enum's name. */
+export function enumAliasOf(node: Node): string | undefined {
+  return node instanceof ViewNode ? node.enumAlias : undefined;
 }
 
 function namespacePathOf(name: TreeNode): TreeNode[] {

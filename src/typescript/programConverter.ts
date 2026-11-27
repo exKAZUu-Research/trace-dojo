@@ -15,6 +15,8 @@ import { decodeStringLiteral } from '../javascript/literals';
 import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
 import { countedEnumValue, type EnumsInScope, type FoldedValue, foldEnumValue, memberKeyName } from './enumFolding';
 import {
+  enumAliasOf,
+  hiddenNamesOf,
   IMPORTED_MODULE,
   inferredTargetNameOf,
   isHiddenCallFunction,
@@ -125,16 +127,21 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     const isFirstInBlock = isBlockScoped && this.isFirstEnumInScope(currentScope, name, node);
     if (!isBlockScoped) this.declareVariable(nameNode, name, 'var');
     else if (isFirstInBlock) this.declareVariable(nameNode, name, 'let');
+    const alias = enumAliasOf(node);
+    if (alias) this.declareVariable(nameNode, alias, 'var');
     const enumObject = (): Expression => ({ kind: 'identifier', name, row });
     const folded = currentScope ? this.foldedMapFor(currentScope, name) : new Map<string, FoldedValue>();
     const assignments = this.enumMemberAssignments(node, name, folded, row);
-    const created: Expression = {
+    const baseCreated: Expression = {
       kind: 'assign',
       operator: '=',
       target: { kind: 'identifier', name, row },
       value: { kind: 'logical', operator: '||', left: enumObject(), right: { kind: 'object', members: [], row }, row },
       row,
     };
+    const created: Expression = alias
+      ? { kind: 'assign', operator: '=', target: { kind: 'identifier', name: alias, row }, value: baseCreated, row }
+      : baseCreated;
     const init: Expression = { kind: 'sequence', expressions: [created, ...assignments, enumObject()], row };
     return enumStatementOf(name, init, this.stepRowOf(node), row, isBlockScoped, isFirstInBlock);
   }
@@ -193,6 +200,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       hasCommonJsReceiver: true,
       rejectsFunctionText: true,
       rejectsUnavailableMembers: true,
+      hiddenNames: hiddenNamesOf(root),
     };
   }
 

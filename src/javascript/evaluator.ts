@@ -652,6 +652,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
     this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
     if (!decorated) return fn;
+    if (binding && decorated.cls !== fn) binding.declaredClass = fn;
     runInitializers(runtime, decorated.classInitializers, decorated.cls);
     return decorated.cls;
   }

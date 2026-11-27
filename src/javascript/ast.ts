@@ -16,6 +16,8 @@ export interface Program {
   rejectsFunctionText?: boolean;
   /** Whether reading a library member the realm leaves out ends the program, as for TypeScript, which rejects it. */
   rejectsUnavailableMembers?: boolean;
+  /** Generated helper bindings (such as namespace/enum receivers) omitted from learner variable snapshots. */
+  hiddenNames?: ReadonlySet<string>;
 }
 
 /** The names a function body or block declares, which its scope creates before running its statements. */
