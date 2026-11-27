@@ -1,7 +1,6 @@
 import { type BuiltinAdt, outputStream } from '../types';
-import { decodeUtf8 } from '../utf8';
 import { type BufferedWriter, sliceItems, type SliceView, StructValue, UNIT_VALUE, type Value } from '../values';
-import { writeTarget, writeToStream } from './io';
+import { writeTarget, writeToStream, writtenText } from './io';
 import { define, deref, err, type NativeContext, ok } from './support';
 
 define({
@@ -28,11 +27,9 @@ function write(ctx: NativeContext, input: Value, target: Value, written: Value):
   ctx.runtime.allocateString(bytes.length);
   const kind = writeTarget(ctx.typeArgs[0]);
   if (kind) {
-    const text = decodeUtf8(Uint8Array.from(bytes, (byte) => Number(byte as bigint)));
+    const text = writtenText(bytes, ctx.span);
     const error =
-      kind === 'buffered'
-        ? (deref(target) as BufferedWriter).write(text)
-        : writeToStream(ctx.interp.program, target, text);
+      kind === 'buffered' ? (deref(target) as BufferedWriter).write(text) : writeToStream(target, text, ctx.span);
     return error ? err(ctx, error) : ok(ctx, written);
   }
   const stream = outputStream(ctx.typeArgs[0]);

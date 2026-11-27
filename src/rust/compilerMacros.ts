@@ -117,7 +117,7 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
   const stream = outputStream(inner);
   if (stream) return writeStream(c, macro, target, format, stream, newline);
   const written = writeTarget(inner);
-  if (written) return writeFile(c.program, target, format, newline, written === 'buffered');
+  if (written) return writeFile(c.program, target, format, newline, written === 'buffered', macro.target.span);
   const { program } = c;
   return (frame) => {
     let formatter = target(frame);
@@ -133,11 +133,18 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
 }
 
 /** `write!` to a file, or to a `BufWriter`'s buffer. */
-function writeFile(program: Program, target: Eval, format: FormatEval, newline: string, buffered: boolean): Eval {
+function writeFile(
+  program: Program,
+  target: Eval,
+  format: FormatEval,
+  newline: string,
+  buffered: boolean,
+  span: Span
+): Eval {
   return (frame) => {
     const error = buffered
       ? writeBuffered(derefAll(target(frame)) as BufferedWriter, format, frame, newline)
-      : writeToStream(program, target(frame), formatPartly(format, frame).text + newline);
+      : writeToStream(target(frame), formatPartly(format, frame).text + newline, span);
     return error ? new EnumValue(program.adtDef('Result'), 1, [error]) : writeResult(program, false);
   };
 }

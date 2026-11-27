@@ -1,7 +1,8 @@
 import { FileSystemError, type FileSystemErrorCode, type TextReader } from '../../interpreter/programIo';
+import type { Span } from '../ast';
 import { DEFAULT_SPEC } from '../fmt';
 import { normalize } from '../infer';
-import type { Program } from '../items';
+import { RustPanic } from '../runtime';
 import { outputStream, shallow } from '../types';
 import { decodeUtf8 } from '../utf8';
 import {
@@ -19,7 +20,7 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { define, deref, err, type NativeContext, ok, placeOf } from './support';
+import { define, deref, err, type NativeContext, ok, panic, placeOf } from './support';
 
 /** The options of `OpenOptions`, which `open` reads. */
 class OpenOptionsValue {
@@ -38,12 +39,10 @@ export interface IoErrorPayload {
   message?: string;
 }
 
-/** A file system's failure, or a write to a handle opened only for reading (`EBADF`). */
-type OsErrorCode = FileSystemErrorCode | 'EBADF';
+type OsErrorCode = FileSystemErrorCode;
 
 /** The text, the code, and the kind of each error, as Rust reports them on macOS. */
 const OS_ERRORS: Record<OsErrorCode, [string, number, string]> = {
-  EBADF: ['Bad file descriptor', 9, 'Uncategorized'],
   ENOENT: ['No such file or directory', 2, 'NotFound'],
   EEXIST: ['File exists', 17, 'AlreadyExists'],
   EISDIR: ['Is a directory', 21, 'IsADirectory'],
@@ -158,11 +157,10 @@ function pathOf(value: Value): string {
 }
 
 /** Bytes or text to write, as text: what `&str`, `String`, `&[u8]`, and `Vec<u8>` hold. */
-function textToWrite(value: Value): string {
+function textToWrite(value: Value, span: Span): string {
   const target = deref(value);
   if (typeof target === 'string' || target instanceof StringValue) return textOf(target);
-  const bytes = sliceItems(target as Value[] | SliceView);
-  return decodeUtf8(Uint8Array.from(bytes, (byte) => Number(byte as bigint)));
+  return writtenText(sliceItems(target as Value[] | SliceView), span);
 }
 
 function stream(value: Value): IoStream {
@@ -189,24 +187,25 @@ function readLine(ctx: NativeContext, reader: TextReader): string | undefined {
   return line;
 }
 
-/**
- * `BufRead::lines`: each line without its `\n` (or `\r\n`), as `Ok`; from a file opened only for writing, an `Err` at
- * every call, as each read fails.
- */
+/** `BufRead::lines`: each line without its `\n` (or `\r\n`), as `Ok`. */
 function linesOf(ctx: NativeContext, source: Value): IterValue {
-  const { reader } = stream(source);
+  const reader = readerOf(ctx, source);
   return new IterValue(() => {
-    if (!reader) return err(ctx, badDescriptor(ctx.interp.program));
     const line = readLine(ctx, reader);
     if (line === undefined) return DONE;
     return ok(ctx, line.endsWith('\r\n') ? line.slice(0, -2) : line.endsWith('\n') ? line.slice(0, -1) : line);
   });
 }
 
-/** Reads from a stream, giving `Ok` of what `read` gives, or the `Err` of a file opened only for writing. */
+/** Reads from a stream, giving `Ok` of what `read` gives. */
 function reading(ctx: NativeContext, source: Value, read: (reader: TextReader) => Value): Value {
+  return ok(ctx, read(readerOf(ctx, source)));
+}
+
+/** What a stream reads from; a file opened only for writing is read only by programs that fail, which stop here. */
+function readerOf(ctx: NativeContext, source: Value): TextReader {
   const { reader } = stream(source);
-  return reader ? ok(ctx, read(reader)) : err(ctx, badDescriptor(ctx.interp.program));
+  return reader ?? panic(ctx, '書き込み用に開いたファイルからの読み込みは、この採点環境では使えません。');
 }
 
 function readLineInto(ctx: NativeContext, reader: TextReader, buf: Value): Value {
@@ -214,19 +213,30 @@ function readLineInto(ctx: NativeContext, reader: TextReader, buf: Value): Value
   return BigInt(line === undefined ? 0 : appendText(ctx, buf, line));
 }
 
-/** The `io::Error` of a read from a file opened only for writing, or of a write to one opened only for reading. */
-function badDescriptor(program: Program): Value {
-  return new StructValue(program.adtDef('IoError'), [{ code: 'EBADF', kind: 'Uncategorized' } as unknown as Value]);
-}
-
+/**
+ * Opens a file for reading or for writing, as `OpenOptions` says: std's `InvalidInput` errors for options that ask for
+ * neither, or for creating or truncating without writing; a file read and written through one handle is not supported.
+ */
 function openFile(ctx: NativeContext, path: string, options: OpenOptionsValue): Value {
+  const writes = options.write || options.append;
+  const invalid =
+    !options.read && !writes
+      ? 'must specify at least one of read, write, or append access'
+      : !writes && (options.create || options.truncate || options.createNew)
+        ? 'creating or truncating a file requires write or append access'
+        : undefined;
+  if (invalid) return err(ctx, ioError(ctx, { kind: 'InvalidInput', message: invalid }));
+  if (options.read && writes) {
+    panic(
+      ctx,
+      '読み込みと書き込みの両方ができるファイル（OpenOptions の read と write・append）は、この採点環境では使えません。'
+    );
+  }
   return attempt(ctx, () => {
-    const { files } = ctx.runtime.io;
-    const writes = options.write || options.append;
     if (!writes) return new IoStream(ctx.runtime.io.openReader(path), undefined, fileInfo(ctx, path));
     const create = options.createNew ? 'exclusive' : options.create ? 'always' : 'never';
-    const handle = files.open(path, { create, truncate: options.truncate, append: options.append });
-    return new IoStream(options.read ? ctx.runtime.io.openReader(path) : undefined, handle, fileInfo(ctx, path));
+    const handle = ctx.runtime.io.files.open(path, { create, truncate: options.truncate, append: options.append });
+    return new IoStream(undefined, handle, fileInfo(ctx, path));
   });
 }
 
@@ -272,11 +282,10 @@ define({
   'BufWriter<_>::new': ([inner], ctx) => {
     // Its drop passes on what it holds.
     ctx.interp.dropper.activate();
-    const { program } = ctx.interp;
-    const { runtime } = ctx;
+    const { runtime, span } = ctx;
     const stream = outputStream(ctx.typeArgs[0]);
     return new BufferedWriter((text) => {
-      if (!stream) return writeToStream(program, inner, text);
+      if (!stream) return writeToStream(inner, text, span);
       runtime.write(stream, text);
       return;
     });
@@ -323,7 +332,7 @@ define({
     attempt(ctx, () => {
       ctx.runtime.io.files
         .open(pathOf(path), { create: 'always', truncate: true, append: false })
-        .write(textToWrite(contents));
+        .write(textToWrite(contents, ctx.span));
       return UNIT_VALUE;
     }),
   'std::fs::remove_file': ([path], ctx) =>
@@ -403,17 +412,22 @@ function option(ctx: NativeContext, value: Value | undefined): Value {
     : new EnumValue(ctx.interp.program.adtDef('Option'), 1, [value]);
 }
 
-/**
- * Writes text to a file a stream writes to, for `write!` and `Write::write_all` on a file, giving the `io::Error` of a
- * file opened only for reading.
- */
-export function writeToStream(program: Program, target: Value, text: string): Value | undefined {
+/** Writes text to the file a stream writes to, for `write!` and `Write::write_all` on a file. */
+export function writeToStream(target: Value, text: string, span: Span): undefined {
   const { writer } = stream(target);
-  // Writing nothing makes no call to the system, so it cannot fail.
-  if (text === '') return undefined;
-  if (!writer) return badDescriptor(program);
+  if (!writer) throw new RustPanic('読み込み用に開いたファイルへの書き込みは、この採点環境では使えません。', span);
   writer.write(text);
   return undefined;
+}
+
+/** The text bytes stand for, which must be UTF-8 as the file system holds text. */
+export function writtenText(bytes: readonly Value[], span: Span): string {
+  const array = Uint8Array.from(bytes, (byte) => Number(byte as bigint));
+  try {
+    return decodeUtf8(array, true);
+  } catch {
+    throw new RustPanic('UTF-8 でないバイト列をファイルに書くことは、この採点環境では使えません。', span);
+  }
 }
 
 /** How a type's `Write` impl writes: to a file, through a `BufWriter`'s buffer, or not at all. */
