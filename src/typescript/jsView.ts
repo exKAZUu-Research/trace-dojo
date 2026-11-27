@@ -158,27 +158,33 @@ function view(node: TreeNode, binder: Binder): ViewNode {
 }
 
 function identifierView(node: TreeNode, binder: Binder): ViewNode {
+  const rewritten = rewrittenIdentifierReference(node, binder);
+  if (rewritten) return rewritten;
   const symbol = binder.lookupValue(node, nameOf(node));
-  const namespace = namespaceOfReference(node, symbol);
-  if (namespace) return memberReference(node, namespace, nameOf(node));
-  // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
-  if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode);
   // esbuild only lowers the unbound global to void 0; local bindings retain their values and assignment targets.
   return nameOf(node) === 'undefined' && !symbol
     ? leaf(node, 'undefined', '(void 0)')
     : generic(node, node.type, binder);
 }
 
-/** `{ x }` naming a namespace's export, as `{ x: N.x }`, which reads it from the namespace's object. */
+/** `{ x }` naming a namespace's export or an enum's member, as `{ x: N.x }` or `{ A: E.A }`. */
 function shorthandPropertyView(node: TreeNode, binder: Binder): ViewNode {
-  const name = nameOf(node);
-  const namespace = namespaceOfReference(node, binder.lookupValue(node, name));
-  if (!namespace) return generic(node, node.type, binder);
+  const value = rewrittenIdentifierReference(node, binder);
+  if (!value) return generic(node, node.type, binder);
   return assemble(node, 'pair', [
-    { node: leaf(node, 'property_identifier', name), fieldName: 'key' },
+    { node: leaf(node, 'property_identifier', nameOf(node)), fieldName: 'key' },
     { node: token(node, ':'), fieldName: undefined },
-    { node: memberReference(node, namespace, name), fieldName: 'value' },
+    { node: value, fieldName: 'value' },
   ]);
+}
+
+function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode | undefined {
+  const symbol = binder.lookupValue(node, nameOf(node));
+  const namespace = namespaceOfReference(node, symbol);
+  if (namespace) return memberReference(node, namespace, nameOf(node));
+  // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
+  if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode);
+  return undefined;
 }
 
 /**
