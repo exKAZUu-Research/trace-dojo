@@ -1,6 +1,6 @@
 import { pointee } from '../compilerPlaces';
 import { copyValue } from '../ops';
-import { ElementPlace, RawPtr, UNIT_VALUE } from '../values';
+import { ElementPlace, RawPtr, sliceLength, UNIT_VALUE } from '../values';
 import { define, deref, type NativeContext, none, panic, some } from './support';
 
 function pointer(value: unknown): RawPtr {
@@ -28,6 +28,10 @@ define({
   'MutPtr<_>::sub': ([p, n], ctx) => moved(p, -Number(n as bigint), ctx),
   'ConstPtr<_>::offset': ([p, n], ctx) => moved(p, Number(n as bigint), ctx),
   'MutPtr<_>::offset': ([p, n], ctx) => moved(p, Number(n as bigint), ctx),
+  'ConstPtr<[_]>::len': ([p], ctx) => BigInt(sliceLength(pointee(pointer(p), ctx.span).get())),
+  'MutPtr<[_]>::len': ([p], ctx) => BigInt(sliceLength(pointee(pointer(p), ctx.span).get())),
+  'ConstPtr<[_]>::is_empty': ([p], ctx) => sliceLength(pointee(pointer(p), ctx.span).get()) === 0,
+  'MutPtr<[_]>::is_empty': ([p], ctx) => sliceLength(pointee(pointer(p), ctx.span).get()) === 0,
   'std::ptr::null': () => new RawPtr(undefined),
   'std::ptr::null_mut': () => new RawPtr(undefined),
   'std::ptr::eq': ([a, b]) => samePlace(pointer(a), pointer(b)),

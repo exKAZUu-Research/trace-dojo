@@ -919,6 +919,8 @@ pub mod ptr {
         pub unsafe fn as_ref(self) -> Option<&T>;
         pub unsafe fn as_mut(self) -> Option<&mut T>;
     }
+    impl<T> ConstPtr<[T]> { pub fn len(self) -> usize; pub fn is_empty(self) -> bool; }
+    impl<T> MutPtr<[T]> { pub fn len(self) -> usize; pub fn is_empty(self) -> bool; }
 }
 pub mod rc {
     pub struct Rc<T>;
