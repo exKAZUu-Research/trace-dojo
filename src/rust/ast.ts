@@ -227,7 +227,8 @@ export type TypeAst =
   | { kind: 'impl'; bounds: BoundAst[]; span: Span }
   | { kind: 'fnBound'; bound: BoundAst & { kind: 'fn' }; span: Span }
   /** A value given to a const parameter (`3` of `Matrix<2, 3>`, `{ N + 1 }`). */
-  | { kind: 'constArg'; value: Expr; span: Span }
+  /** `type`: the const parameter's type, which the value must have, once the parameter it is given to is known. */
+  | { kind: 'constArg'; value: Expr; span: Span; type?: TypeAst }
   /** A raw pointer type (`*const T`, `*mut T`). */
   | { kind: 'pointer'; mutable: boolean; target: TypeAst; span: Span }
   /** A function pointer type (`fn(i32) -> i32`). */

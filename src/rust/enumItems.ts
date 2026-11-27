@@ -1,6 +1,7 @@
 import type { EnumItem } from './ast';
-import { compileError } from './items';
-import { intMax, intMin } from './types';
+import { constInteger } from './constExpressions';
+import { compileError, type TypeScope } from './items';
+import { intMax, intMin, intType } from './types';
 
 /** The variant that `#[derive(Default)]` makes, marked `#[default]`, checked as rustc does. */
 export function defaultVariant(item: EnumItem): number | undefined {
@@ -29,8 +30,8 @@ export function checkVariantNames(item: EnumItem): void {
   }
 }
 
-/** The variants' discriminants, known before the bodies, since they are literals in learning programs. */
-export function discriminants(item: EnumItem): bigint[] {
+/** The variants' discriminants: each written one a constant `isize` expression, the others one more than the last. */
+export function discriminants(item: EnumItem, scope: TypeScope): bigint[] {
   let next = 0n;
   const seen = new Set<bigint>();
   const hasPayloadVariant = item.variants.some((variant) => variant.shape !== 'unit');
@@ -38,7 +39,11 @@ export function discriminants(item: EnumItem): bigint[] {
     if (variant.discriminant && hasPayloadVariant) {
       compileError(variant.discriminant.span, 'フィールドを持つ列挙型の列挙子には、値を書けません。');
     }
-    const discriminant = variant.discriminant ? literalDiscriminant(variant.discriminant) : next;
+    const written = variant.discriminant;
+    const discriminant = written ? constInteger(written, scope, intType('isize')) : next;
+    if (discriminant === undefined) {
+      return compileError(written!.span, '列挙子の値には、isize の定数の式を書いてください。');
+    }
     if (discriminant < intMin('isize') || discriminant > intMax('isize')) {
       compileError(variant.discriminant?.span ?? variant.span, `列挙子 ${variant.name} の値が isize の範囲外です。`);
     }
@@ -49,10 +54,4 @@ export function discriminants(item: EnumItem): bigint[] {
     next = discriminant + 1n;
     return discriminant;
   });
-}
-
-function literalDiscriminant(literal: NonNullable<EnumItem['variants'][number]['discriminant']>): bigint {
-  if (literal.kind === 'int') return literal.value;
-  if (literal.kind === 'unary' && literal.op === '-' && literal.operand.kind === 'int') return -literal.operand.value;
-  return compileError(literal.span, '列挙子の値には、整数のリテラルを書いてください。');
 }

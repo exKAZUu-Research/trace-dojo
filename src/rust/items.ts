@@ -460,13 +460,15 @@ export class ItemCollector {
     this.declareType(module, item.name, { kind: 'adt', def }, item.vis, item.span);
     def.defaultVariant = defaultVariant(item);
     checkVariantNames(item);
-    for (const [index, discriminant] of discriminants(item).entries()) {
-      const variant = item.variants[index];
-      def.variants.push({ name: variant.name, index, shape: variant.shape, fields: [], discriminant });
+    for (const [index, variant] of item.variants.entries()) {
+      def.variants.push({ name: variant.name, index, shape: variant.shape, fields: [], discriminant: BigInt(index) });
     }
     this.adtDefaults(def, module, item.generics);
     this.lowering.push(() => {
       const scope = this.adtScope(def, module, item.generics);
+      // The discriminants are constant expressions, which can name constants declared anywhere in the program.
+      for (const [index, discriminant] of discriminants(item, scope).entries())
+        def.variants[index].discriminant = discriminant;
       for (const [index, variant] of item.variants.entries()) {
         def.variants[index].fields = variant.fields.map((field) => ({
           name: field.name,

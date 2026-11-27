@@ -1,7 +1,7 @@
 import type { Expr, TypeAst } from './ast';
-import { constInteger } from './constExpressions';
+import { constInteger, constScalarValue } from './constExpressions';
 import { compileError, lowerType, type TypeScope } from './items';
-import { type AdtDef, arrayOfLength, constValueType, substitute, type Type, type TypeParam } from './types';
+import { type AdtDef, arrayOfLength, constValueType, substitute, type Type, type TypeParam, USIZE } from './types';
 
 /** `[T; N]`, whose length is a constant or a const parameter. */
 export function lowerArrayType(ast: Extract<TypeAst, { kind: 'array' }>, scope: TypeScope): Type {
@@ -22,8 +22,9 @@ export function lowerConstArg(ast: Extract<TypeAst, { kind: 'constArg' }>, scope
   const expr =
     ast.value.kind === 'block' && ast.value.stmts.length === 0 && ast.value.tail ? ast.value.tail : ast.value;
   if (expr.kind === 'bool' || expr.kind === 'char') return constValueType(expr.value);
-  const value = constInteger(expr, scope);
-  if (value === undefined) compileError(ast.span, '定数の型引数には、整数のリテラルか定数の式を書いてください。');
+  // The value has the type of the const parameter it is given to (`usize` where that is not known yet).
+  const value = constScalarValue(expr, scope, ast.type ? lowerType(ast.type, scope) : USIZE);
+  if (value === undefined) compileError(ast.span, '定数の型引数には、リテラルか定数の式を書いてください。');
   return constValueType(value);
 }
 
@@ -32,10 +33,11 @@ export function lowerConstArg(ast: Extract<TypeAst, { kind: 'constArg' }>, scope
  * which the parser cannot tell from a type.
  */
 export function argumentFor(arg: TypeAst, param: TypeParam | undefined): TypeAst {
-  if (!param?.constType || arg.kind !== 'path' || arg.path.segments.length !== 1 || arg.path.segments[0].args) {
-    return arg;
-  }
-  return { kind: 'constArg', value: { kind: 'path', path: arg.path, span: arg.span } as Expr, span: arg.span };
+  if (!param?.constType) return arg;
+  if (arg.kind === 'constArg') return { ...arg, type: param.constType };
+  if (arg.kind !== 'path' || arg.path.segments.length !== 1 || arg.path.segments[0].args) return arg;
+  const value = { kind: 'path', path: arg.path, span: arg.span } as Expr;
+  return { kind: 'constArg', value, span: arg.span, type: param.constType };
 }
 
 export function withDefaultArgs(def: AdtDef, written: Type[]): Type[] {
