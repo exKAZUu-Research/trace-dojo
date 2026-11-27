@@ -397,7 +397,11 @@ export class Formatter {
       case 'Mutex':
       case 'RwLock': {
         const cell = v as CellBox;
-        const data: DebugPart = (inner, sink) => this.debug(cell.value, t.args[0], spec, inner, sink);
+        // A lock held where std's `Debug` cannot take it shows no data (std quotes it for `Mutex` alone).
+        const locked = def.builtin === 'Mutex' ? cell.borrows !== 0 : cell.borrows < 0;
+        const data: DebugPart = locked
+          ? (_inner, sink) => emit(def.builtin === 'Mutex' ? '"<locked>"' : '<locked>', sink)
+          : (inner, sink) => this.debug(cell.value, t.args[0], spec, inner, sink);
         return structText(
           def.builtin,
           [
@@ -410,7 +414,8 @@ export class Formatter {
         );
       }
       case 'Duration': {
-        return padString(durationDebug(v, spec.precision), spec, write);
+        // The precision is the number of fraction digits, which the text already has.
+        return padString(durationDebug(v, spec.precision), { ...spec, precision: undefined }, write);
       }
       case 'CStr': {
         return padString(`"${(v as bigint[]).map((byte) => escapeAscii(Number(byte))).join('')}"`, spec, write);
