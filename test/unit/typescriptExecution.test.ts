@@ -1105,11 +1105,11 @@ test('enforces variance, thenable, import-query, optional-assertion, ambient-mod
 
   const descriptorCollision = executeProgram(
     'typescript',
-    "const a: string = 'x', b: string = 'x';\nfunction wrap(value: any, _ctx: any) { console.log(typeof value); return () => 3; }\nclass C { @wrap [a]() { return 1; } get [b]() { return 2; } }"
+    "const a: string = 'x', b: string = 'x';\nfunction first(v: any) { console.log('first', typeof v); return v; }\nfunction second(v: any) { console.log('second', typeof v); return () => 3; }\nclass C { @first @second [a]() { return 1; } get [b]() { return 2; } }"
   );
   expect(descriptorCollision).toMatchObject({
     kind: 'executed',
-    stdout: 'undefined\n',
+    stdout: 'second undefined\nfirst function\n',
   });
   expect(descriptorCollision.kind === 'executed' ? descriptorCollision.uncaughtException : '').toContain(
     'TypeError: Invalid property descriptor'

@@ -1,7 +1,6 @@
 import type { ClassMember, Expression } from './ast';
 import type { Runtime } from './runtime';
 import {
-  type AccessorProperty,
   type ClassField,
   isAccessor,
   isCallable,
@@ -107,10 +106,13 @@ function applyMemberDecorators(
   for (const member of order) {
     const added = member.member.isStatic ? staticInitializers : instanceInitializers;
     const decorators = member.decorators ?? [];
+    if (decorators.length === 0) continue;
     for (const decorator of decorators) temporaries.push(decorator);
+    const working = openWorkingDescriptor(member);
     for (let index = decorators.length - 1; index >= 0; index--) {
-      decorateMember(runtime, member, index, added, metadata);
+      decorateMember(runtime, member, index, added, metadata, working);
     }
+    if (working) installWorkingDescriptor(runtime, member, working);
   }
 }
 
@@ -181,12 +183,81 @@ export function runInitializers(runtime: Runtime, initializers: Value[], thisVal
   for (const initializer of initializers) runtime.call(initializer, thisValue, []);
 }
 
+interface WorkingDescriptor {
+  hasValue: boolean;
+  value: Value;
+  writable: boolean | undefined;
+  hasAccessor: boolean;
+  get: JsFunction | undefined;
+  set: JsFunction | undefined;
+  enumerable: boolean;
+  configurable: boolean;
+}
+
+const INVALID_DESCRIPTOR_MESSAGE =
+  'Invalid property descriptor. Cannot both specify accessors and a value or writable attribute, #<Object>';
+
+function openWorkingDescriptor({
+  member,
+  target,
+  key,
+  isPrivate,
+  property,
+}: MemberDefinition): WorkingDescriptor | undefined {
+  if (member.kind === 'field' && !member.isAutoAccessor) return undefined;
+  const base = isPrivate || member.kind === 'field' ? property : (target.properties.get(key) ?? property);
+  if (!base) return undefined;
+  if (isAccessor(base)) {
+    return {
+      hasValue: false,
+      value: undefined,
+      writable: undefined,
+      hasAccessor: true,
+      get: base.get,
+      set: base.set,
+      enumerable: base.enumerable,
+      configurable: base.configurable,
+    };
+  }
+  return {
+    hasValue: true,
+    value: base.value,
+    writable: base.writable,
+    hasAccessor: false,
+    get: undefined,
+    set: undefined,
+    enumerable: base.enumerable,
+    configurable: base.configurable,
+  };
+}
+
+function installWorkingDescriptor(
+  runtime: Runtime,
+  { target, key, isPrivate }: MemberDefinition,
+  working: WorkingDescriptor
+): void {
+  if (working.hasAccessor && (working.hasValue || working.writable !== undefined)) {
+    runtime.throwError('TypeError', INVALID_DESCRIPTOR_MESSAGE);
+  }
+  if (isPrivate) return;
+  const installed: Property = working.hasAccessor
+    ? { get: working.get, set: working.set, enumerable: working.enumerable, configurable: working.configurable }
+    : {
+        value: working.value,
+        writable: working.writable ?? true,
+        enumerable: working.enumerable,
+        configurable: working.configurable,
+      };
+  target.properties.set(key, installed);
+}
+
 function decorateMember(
   runtime: Runtime,
   definition: MemberDefinition,
   index: number,
   initializers: Value[],
-  metadata: JsObject
+  metadata: JsObject,
+  working: WorkingDescriptor | undefined
 ): void {
   const { member, field } = definition;
   const callRow = member.decorators?.[index]?.row;
@@ -201,88 +272,81 @@ function decorateMember(
     if (initializer !== undefined) addTransform(field, requireCallable(runtime, initializer));
     return;
   }
-  decorateInstalledMember(runtime, definition, kind, { callable, context, callRow });
-}
-
-const INVALID_DESCRIPTOR_MESSAGE =
-  'Invalid property descriptor. Cannot both specify accessors and a value or writable attribute, #<Object>';
-
-function decorateInstalledMember(
-  runtime: Runtime,
-  { target, key, isPrivate, property, field }: MemberDefinition,
-  kind: 'method' | 'getter' | 'setter' | 'accessor',
-  invocation: { callable: Value; context: DecoratorContextHandle; callRow: number | undefined }
-): void {
-  const active = isPrivate || kind === 'accessor' ? property : (target.properties.get(key) ?? property);
-  if (!active) return;
-  if (kind === 'accessor' && isAccessor(active)) {
-    decorateAutoAccessor(runtime, {
-      property: active,
-      field,
-      decorator: invocation.callable,
-      context: invocation.context,
-      callRow: invocation.callRow,
-    });
-    if (!isPrivate) target.properties.set(key, active);
+  if (!working) return;
+  if (kind === 'accessor') {
+    decorateAutoAccessor(runtime, { working, definition, decorator: callable, context, callRow });
     return;
   }
-  if (replaceMemberSlot(runtime, active, kind, invocation) && !isPrivate) {
-    target.properties.set(key, active);
-  }
+  applyMethodOrAccessorDecorator(runtime, working, definition, kind, { callable, context, callRow });
 }
 
-function replaceMemberSlot(
+function applyMethodOrAccessorDecorator(
   runtime: Runtime,
-  active: Property,
-  kind: 'method' | 'getter' | 'setter' | 'accessor',
+  working: WorkingDescriptor,
+  { isPrivate, property }: MemberDefinition,
+  kind: 'method' | 'getter' | 'setter',
   { callable, context, callRow }: { callable: Value; context: DecoratorContextHandle; callRow: number | undefined }
-): boolean {
+): void {
   if (kind === 'getter' || kind === 'setter') {
     const slot = kind === 'getter' ? 'get' : 'set';
-    const result = callDecorator(runtime, callable, isAccessor(active) ? active[slot] : undefined, context, callRow);
-    if (result === undefined) return false;
+    const result = callDecorator(runtime, callable, working[slot], context, callRow);
+    if (result === undefined) return;
     const replacement = requireFunction(runtime, result);
-    if (!isAccessor(active)) runtime.throwError('TypeError', INVALID_DESCRIPTOR_MESSAGE);
-    active[slot] = replacement;
-    return true;
+    working.hasAccessor = true;
+    working[slot] = replacement;
+    if (isPrivate && property && isAccessor(property)) property[slot] = replacement;
+    return;
   }
-  const result = callDecorator(runtime, callable, isAccessor(active) ? undefined : active.value, context, callRow);
-  if (result === undefined) return false;
+  const result = callDecorator(runtime, callable, working.value, context, callRow);
+  if (result === undefined) return;
   const replacement = requireFunction(runtime, result);
-  if (isAccessor(active)) runtime.throwError('TypeError', INVALID_DESCRIPTOR_MESSAGE);
-  active.value = replacement;
-  return true;
+  working.hasValue = true;
+  working.value = replacement;
+  if (isPrivate && property && !isAccessor(property)) property.value = replacement;
 }
 
 /** An auto-accessor's decorator, which may replace its getter and setter and transform its initial value. */
 function decorateAutoAccessor(
   runtime: Runtime,
   {
-    property,
-    field,
+    working,
+    definition: { isPrivate, property, field },
     decorator,
     context,
     callRow,
   }: {
-    property: AccessorProperty;
-    field?: ClassField;
+    working: WorkingDescriptor;
+    definition: MemberDefinition;
     decorator: Value;
     context: DecoratorContextHandle;
     callRow?: number;
   }
 ): void {
   const target = runtime.newObject();
-  runtime.createDataProperty(target, 'get', property.get);
-  runtime.createDataProperty(target, 'set', property.set);
+  runtime.createDataProperty(target, 'get', working.get);
+  runtime.createDataProperty(target, 'set', working.set);
   const result = callDecorator(runtime, decorator, target, context, callRow);
   if (result === undefined) return;
   if (!isObject(result)) runtime.throwError('TypeError', 'accessor decorators must return an object');
   const get = runtime.get(result, 'get');
   const set = runtime.get(result, 'set');
   const init = runtime.get(result, 'init');
-  if (get !== undefined) property.get = requireFunction(runtime, get);
-  if (set !== undefined) property.set = requireFunction(runtime, set);
+  if (get !== undefined)
+    updateAccessorSlot(working, isPrivate ? property : undefined, 'get', requireFunction(runtime, get));
+  if (set !== undefined)
+    updateAccessorSlot(working, isPrivate ? property : undefined, 'set', requireFunction(runtime, set));
   if (init !== undefined) addTransform(field, requireCallable(runtime, init));
+}
+
+function updateAccessorSlot(
+  working: WorkingDescriptor,
+  privateProperty: Property | undefined,
+  slot: 'get' | 'set',
+  fn: JsFunction
+): void {
+  working.hasAccessor = true;
+  working[slot] = fn;
+  if (privateProperty && isAccessor(privateProperty)) privateProperty[slot] = fn;
 }
 
 function requireFunction(runtime: Runtime, value: Value): JsFunction {
