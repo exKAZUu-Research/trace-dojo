@@ -1,3 +1,4 @@
 (1,11): error TS2434: A namespace declaration cannot be located prior to a class or function with which it is merged.
 (4,10): error TS2393: Duplicate function implementation.
 (5,10): error TS2393: Duplicate function implementation.
+(14,11): error TS2434: A namespace declaration cannot be located prior to a class or function with which it is merged.

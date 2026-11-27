@@ -13,7 +13,7 @@ import {
   erasedStatementTypes,
   erasedTypeNodes,
 } from './erasedSyntax';
-import { blockHasRuntimeCode, isInstantiatedNamespace } from './namespaceInstantiation';
+import { blockHasRuntimeCode, isAmbient, isInstantiatedNamespace } from './namespaceInstantiation';
 
 /**
  * The type of a synthesized statement that copies a constructor's parameter properties to `this`, which the
@@ -310,8 +310,19 @@ function namespaceView(node: TreeNode, binder: Binder): ViewNode {
   const call = namespaceCall(node, outermost, statements, orEmptyObject(node, outermost));
   // Every block passes the object the blocks before it made, or a new one, so no block needs to know whether it is
   // first; a class, function, or enum declared before the namespace already declares its name.
-  const isNamespaceFirst = binder.lookupValue(node, outermost)?.valueEntries[0]?.kind === 'namespace';
+  const isNamespaceFirst = declaresNamespaceVar(binder.lookupValue(node, outermost));
   return isNamespaceFirst ? varDeclaration(node, outermost, call) : expressionStatement(node, call);
+}
+
+/**
+ * Whether a namespace block declares `var N`: never when a non-ambient class or function declares `N`, and otherwise
+ * when a non-ambient namespace precedes any enum of the same name.
+ */
+function declaresNamespaceVar(symbol: Sym | undefined): boolean {
+  if (!symbol) return true;
+  const nonAmbient = symbol.valueEntries.filter((entry) => !isAmbient(entry.name));
+  if (nonAmbient.some((entry) => entry.kind === 'class' || entry.kind === 'function')) return false;
+  return nonAmbient[0]?.kind === 'namespace';
 }
 
 /**
@@ -421,7 +432,7 @@ function importAliasView(node: TreeNode, binder: Binder): ViewNode {
 function nestedNamespaceStatements(node: TreeNode, body: TreeNode, path: TreeNode[], binder: Binder): ViewNode[] {
   let statements = namespaceBodyStatements(body, path.at(-1)?.text ?? '', binder);
   for (let index = path.length - 1; index > 0; index--) {
-    const isNamespaceFirst = binder.lookupValue(path[index], path[index].text)?.valueEntries[0]?.kind === 'namespace';
+    const isNamespaceFirst = declaresNamespaceVar(binder.lookupValue(path[index], path[index].text));
     statements = exportedNamespaceStatements(node, path[index].text, path[index - 1].text, statements, {
       isPathPart: true,
       isNamespaceFirst,
@@ -464,7 +475,7 @@ function exportedNamespace(node: TreeNode, outerName: string, binder: Binder): V
   if (!name || !body || !blockHasRuntimeCode(body)) return [];
   const path = namespacePathOf(name);
   const statements = nestedNamespaceStatements(node, body, path, binder);
-  const isNamespaceFirst = binder.lookupValue(name, path[0].text)?.valueEntries[0]?.kind === 'namespace';
+  const isNamespaceFirst = declaresNamespaceVar(binder.lookupValue(name, path[0].text));
   return exportedNamespaceStatements(node, path[0].text, outerName, statements, {
     isPathPart: false,
     isNamespaceFirst,

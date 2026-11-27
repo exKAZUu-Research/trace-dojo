@@ -11,4 +11,8 @@ function g() {}
 namespace g {
   export const y = 2;
 }
-console.log(M.a, g.y);
+namespace Cl {
+  export class P {}
+}
+class Cl {}
+console.log(M.a, g.y, typeof Cl);
