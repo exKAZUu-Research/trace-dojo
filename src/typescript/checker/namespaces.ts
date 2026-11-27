@@ -466,11 +466,9 @@ export class Namespaces {
       else if (
         name &&
         exported &&
+        !(exported === 'default' && this.hasDefaultExport(module)) &&
         (!exports ||
-          (!exports.values.has(exported) &&
-            !exports.types.has(exported) &&
-            !exports.namespaces.has(exported) &&
-            !this.isSyntheticDefault(module, exported)))
+          (!exports.values.has(exported) && !exports.types.has(exported) && !exports.namespaces.has(exported)))
       )
         this.reportMissingImport(name, exports, moduleName);
     }

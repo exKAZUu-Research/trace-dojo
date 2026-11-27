@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { checkAmbientExportTarget, exportEqualsTargetOf } from './ambientModuleExports';
 import type { Checker } from './checker';
-import type { Sym } from './scopes';
+import { canonicalIdentifier, type Sym } from './scopes';
 import { hasToken, named, stringValue } from './syntax';
 
 /** Checks `export = Target` inside an ambient module declaration, including TS2300 and TS2309 module-wide conflicts. */
@@ -30,8 +30,11 @@ function countAmbientExportAssignments(module: Sym): number {
   return count;
 }
 
-function hasOtherAmbientValueExports(c: Checker, module: Sym): boolean {
-  return hasDirectValueExports(c, module) || hasReExportedValues(c, module);
+function hasOtherAmbientValueExports(c: Checker, module: Sym, visited = new Set<Sym>()): boolean {
+  if (visited.has(module)) return false;
+  visited.add(module);
+  c.budget.spend();
+  return hasDirectValueExports(c, module) || hasReExportedValues(c, module, visited);
 }
 
 function hasDirectValueExports(c: Checker, module: Sym): boolean {
@@ -50,18 +53,18 @@ function isExportedValueSymbol(c: Checker, member: Sym): boolean {
   return true;
 }
 
-function hasReExportedValues(c: Checker, module: Sym): boolean {
+function hasReExportedValues(c: Checker, module: Sym, visited: Set<Sym>): boolean {
   for (const declaration of module.valueDeclarations) {
     const body = declaration.childForFieldName('body');
     if (!body) continue;
     for (const child of named(body)) {
-      if (child.type === 'export_statement' && statementReExportsValue(c, child)) return true;
+      if (child.type === 'export_statement' && statementReExportsValue(c, child, visited)) return true;
     }
   }
   return false;
 }
 
-function statementReExportsValue(c: Checker, child: TreeNode): boolean {
+function statementReExportsValue(c: Checker, child: TreeNode, visited: Set<Sym>): boolean {
   const source = child.childForFieldName('source');
   if (!source || hasToken(child, 'type')) return false;
   const dep = c.namespaces.moduleNamed(stringValue(source));
@@ -71,7 +74,7 @@ function statementReExportsValue(c: Checker, child: TreeNode): boolean {
   if (named(child).some((part) => part.type === 'namespace_export')) return true;
   return dep.exportEquals
     ? Boolean(c.namespaces.exportEqualsSymbol(dep, 'value'))
-    : hasOtherAmbientValueExports(c, dep);
+    : hasOtherAmbientValueExports(c, dep, visited);
 }
 
 function clauseReExportsValue(c: Checker, clause: TreeNode, dep: Sym): boolean {
@@ -79,7 +82,8 @@ function clauseReExportsValue(c: Checker, clause: TreeNode, dep: Sym): boolean {
     if (hasToken(specifier, 'type')) continue;
     const nameNode = specifier.childForFieldName('name');
     if (!nameNode) continue;
-    const exportName = nameNode.type === 'string' ? stringValue(nameNode) : nameNode.text;
+    const exportName =
+      nameNode.type === 'string' ? stringValue(nameNode) : canonicalIdentifier(nameNode.text, nameNode);
     if (depExportsValueNamed(c, dep, exportName)) return true;
   }
   return false;

@@ -119,12 +119,13 @@ export class Binder {
     for (const { node, scope, exports } of this.pendingAmbientDefaults) {
       bindAmbientDefaultValueExport(node, scope, exports, (site) => this.scopeOf(site), this.options?.budget);
     }
-    resolveAmbientModuleReExports(
-      this.ambientModules,
-      this.options?.existingModules,
-      this.scopes,
-      this.options?.budget
-    );
+    resolveAmbientModuleReExports({
+      ambientModules: this.ambientModules,
+      existingModules: this.options?.existingModules,
+      ownScopes: this.scopes,
+      scopeOf: (site) => this.scopeOf(site),
+      budget: this.options?.budget,
+    });
     this.markAssignments();
   }
 
@@ -223,16 +224,19 @@ export class Binder {
 
   private bindClassDeclaration(node: TreeNode, scope: Scope): void {
     const name = node.childForFieldName('name');
-    if (name) {
-      scope.declareValue(name.text, 'class', node, name);
-      scope.declareType(name.text, 'class', node, name);
-    }
+    if (name) scope.declareValue(name.text, 'class', node, name);
+    if (isDefaultExportDeclaration(node)) scope.declareDefaultType(name?.text, 'class', node, name ?? node);
+    else if (name) scope.declareType(name.text, 'class', node, name);
     this.bindClass(node, scope);
   }
 
   private bindTypeDeclaration(node: TreeNode, scope: Scope, kind: 'interface' | 'alias'): void {
     const name = node.childForFieldName('name');
-    if (name) scope.declareType(name.text, kind, node, name);
+    if (kind === 'interface' && isDefaultExportDeclaration(node)) {
+      scope.declareDefaultType(name?.text, 'interface', node, name ?? node);
+    } else if (name) {
+      scope.declareType(name.text, kind, node, name);
+    }
     this.bindTypeParameterOwner(node, scope);
   }
 
@@ -336,8 +340,10 @@ export class Binder {
     const exportedName =
       aliasNode.type === 'string' ? stringValue(aliasNode) : canonicalIdentifier(aliasNode.text, aliasNode);
     const typeOnly = stmtTypeOnly || specifier.children.some((part) => !part.isNamed && part.type === 'type');
-    const value = !typeOnly ? scope.values.get(localName) : undefined;
+    const rawValue = scope.values.get(localName);
+    const value = !typeOnly ? rawValue : undefined;
     if (value) exports.exportViaClause(exportedName, value, 'value');
+    else if (typeOnly && rawValue) exports.exportTypeOnlyValue(exportedName, rawValue);
     const type = scope.types.get(localName);
     if (type) exports.exportViaClause(exportedName, type, 'type');
     const namespace = scope.namespaces.get(localName);
@@ -775,6 +781,14 @@ function namespacePath(name: TreeNode): TreeNode[] {
   const object = name.childForFieldName('object');
   const property = name.childForFieldName('property');
   return [...(object ? namespacePath(object) : []), ...(property ? [property] : [])];
+}
+
+function isDefaultExportDeclaration(node: TreeNode): boolean {
+  const outer = node.parent?.type === 'ambient_declaration' ? node.parent : node;
+  return (
+    outer.parent?.type === 'export_statement' &&
+    outer.parent.children.some((child) => !child.isNamed && child.type === 'default')
+  );
 }
 
 function isExportedNamespaceRoot(node: TreeNode): boolean {

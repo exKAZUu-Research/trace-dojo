@@ -38,6 +38,7 @@ export interface ClassDefinition {
   classDecorators: Value[];
   /** The rows the class's decorators are written on, which call them. */
   classDecoratorRows: number[];
+  instanceInitializers?: Value[];
 }
 
 /** The class a definition's decorators give, and the functions their `addInitializer` added, by when they run. */
@@ -74,7 +75,7 @@ export function decorateClassDefinition(runtime: Runtime, definition: ClassDefin
   const symbol = metadataSymbol(runtime);
   const metadata = classMetadata(runtime, definition.cls, symbol);
   const staticInitializers: Value[] = [];
-  const instanceInitializers: Value[] = [];
+  const instanceInitializers = definition.instanceInitializers ?? [];
   const classInitializers: Value[] = [];
   const { temporaries } = runtime.frame;
   const held = temporaries.length;

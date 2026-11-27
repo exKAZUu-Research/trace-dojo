@@ -29,13 +29,17 @@ export function bindAnonymousDefaultDeclaration(
   exportNamed: (exportName: string, symbol: Sym, meaning: MeaningSpace) => void
 ): void {
   if (declaration.type === 'class_declaration' || declaration.type === 'abstract_class_declaration') {
-    const symbol = new Sym('default', scope);
+    const symbol = scope.defaultTypeSymbol ?? new Sym('default', scope);
     symbol.valueKind = 'class';
-    symbol.valueDeclarations.push(declaration);
-    symbol.valueEntries.push({ kind: 'class', name: declaration });
+    if (!symbol.valueDeclarations.includes(declaration)) {
+      symbol.valueDeclarations.push(declaration);
+      symbol.valueEntries.push({ kind: 'class', name: declaration });
+    }
     symbol.typeKind = 'class';
-    symbol.typeDeclarations.push(declaration);
-    symbol.typeEntries.push({ kind: 'class', name: declaration });
+    if (!symbol.typeDeclarations.includes(declaration)) {
+      symbol.typeDeclarations.push(declaration);
+      symbol.typeEntries.push({ kind: 'class', name: declaration });
+    }
     exportNamed('default', symbol, 'value');
     exportNamed('default', symbol, 'type');
     return;
@@ -64,19 +68,30 @@ export function bindAmbientDefaultValueExport(
 ): void {
   if (!node.children.some((part) => !part.isNamed && part.type === 'default')) return;
   const value = node.childForFieldName('value');
-  const path = value ? entityNamePath(value) : undefined;
-  if (!value || !path) return;
-  const lookup: DefaultExportLookup = { scope, exports, scopeOf, budget };
-  const resolved =
-    path.length === 1
-      ? resolveSingleDefaultTarget(path[0], lookup)
-      : resolveQualifiedDefaultTarget(node, value, path, lookup);
+  if (!value) return;
+  const resolved = resolveAmbientEntityInBinder(node, value, scope, exports, scopeOf, budget);
   if (resolved.value) exports.exportViaClause('default', resolved.value, 'value');
   if (resolved.type) exports.exportViaClause('default', resolved.type, 'type');
   if (resolved.namespace) exports.exportViaClause('default', resolved.namespace, 'namespace');
   if (resolved.value || resolved.type || resolved.namespace) {
     exports.recordClauseExport('default', value, resolved);
   }
+}
+
+export function resolveAmbientEntityInBinder(
+  node: TreeNode,
+  target: TreeNode,
+  scope: Scope,
+  exports: Scope,
+  scopeOf: (site: TreeNode) => Scope,
+  budget?: ExecutionBudget
+): DefaultExportSymbols {
+  const path = entityNamePath(target);
+  if (!path) return {};
+  const lookup: DefaultExportLookup = { scope, exports, scopeOf, budget };
+  return path.length === 1
+    ? resolveSingleDefaultTarget(path[0], lookup)
+    : resolveQualifiedDefaultTarget(node, target, path, lookup);
 }
 
 function resolveSingleDefaultTarget(ident: TreeNode, lookup: DefaultExportLookup): DefaultExportSymbols {

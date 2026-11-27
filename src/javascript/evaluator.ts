@@ -661,6 +661,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
       // As tsx compiles a decorated class, its own name inside its body stays the class the decorators were given.
       if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
       const name = decoratorClassName(cls, inferredName);
+      const instanceInitializers: Value[] = [];
+      if (classDecorators) behavior.initializers = instanceInitializers;
       const decorated =
         classDecorators &&
         decorateClassDefinition(runtime, {
@@ -669,11 +671,12 @@ export class Evaluator extends SuspendableStatementEvaluator {
           members: definitions,
           classDecorators,
           classDecoratorRows: (cls.decorators ?? []).map((decorator) => decorator.row),
+          instanceInitializers,
         });
       if (decorated) {
         runtime.frame.temporaries.push(decorated.cls);
         behavior.pendingInitializerQueues = [decorated.staticInitializers, decorated.classInitializers];
-        if (decorated.instanceInitializers.length > 0) behavior.initializers = decorated.instanceInitializers;
+        if (decorated.instanceInitializers.length === 0) behavior.initializers = undefined;
         if (decorated.staticInitializers.length > 0)
           staticInitializers.unshift(() => runInitializers(runtime, decorated.staticInitializers, fn, true));
       }

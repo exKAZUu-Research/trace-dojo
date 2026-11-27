@@ -290,9 +290,10 @@ export class StatementChecker {
     const all = named(node.parent)
       .filter((child) => child.type === 'export_statement')
       .flatMap(exportedNames);
+    const scope = this.c.scopeOf(node);
     for (const own of exportedNames(node)) {
       const others = all.filter((other) => other.name === own.name && other.site.id !== own.site.id);
-      const message = duplicateExportMessage(own, others);
+      const message = duplicateExportMessage(scope, own, others);
       if (message) this.c.error(own.site, message);
     }
   }
@@ -1245,6 +1246,14 @@ const valueDeclarationTypes = new Set([
   'abstract_class_declaration',
 ]);
 
+interface ExportedNameEntry {
+  name: string;
+  site: TreeNode;
+  declaration?: TreeNode;
+  specifier?: TreeNode;
+  stmtTypeOnly?: boolean;
+}
+
 const defaultMergeableTypes = new Set([
   'interface_declaration',
   'class_declaration',
@@ -1253,13 +1262,10 @@ const defaultMergeableTypes = new Set([
   'generator_function_declaration',
 ]);
 
-function duplicateExportMessage(
-  own: { name: string; site: TreeNode; declaration?: TreeNode },
-  others: { name: string; site: TreeNode; declaration?: TreeNode }[]
-): string | undefined {
+function duplicateExportMessage(scope: Scope, own: ExportedNameEntry, others: ExportedNameEntry[]): string | undefined {
   if (others.length === 0) return undefined;
   if (own.name === 'default') {
-    return canMergeDefaultExports([own, ...others])
+    return canMergeDefaultExports(scope, [own, ...others])
       ? undefined
       : 'モジュールに複数の既定のエクスポートを含めることはできません。';
   }
@@ -1270,13 +1276,29 @@ function duplicateExportMessage(
     : `識別子 '${own.name}' が重複しています。`;
 }
 
-function canMergeDefaultExports(entries: { declaration?: TreeNode }[]): boolean {
-  let valueCount = 0;
-  for (const { declaration } of entries) {
-    if (!declaration || !defaultMergeableTypes.has(declaration.type)) return false;
-    if (declaration.type !== 'interface_declaration') valueCount++;
+function canMergeDefaultExports(scope: Scope, entries: ExportedNameEntry[]): boolean {
+  let inlineValueCount = 0;
+  const clauses: ExportedNameEntry[] = [];
+  for (const entry of entries) {
+    if (entry.specifier) {
+      clauses.push(entry);
+      continue;
+    }
+    if (!entry.declaration || !defaultMergeableTypes.has(entry.declaration.type)) return false;
+    if (entry.declaration.type !== 'interface_declaration') inlineValueCount++;
   }
-  return valueCount <= 1;
+  if (clauses.length === 0) return inlineValueCount <= 1;
+  return clauses.length === 1 && inlineValueCount === 0 && isPureValueDefaultClause(scope, clauses[0]);
+}
+
+function isPureValueDefaultClause(scope: Scope, clause: ExportedNameEntry): boolean {
+  const specifier = clause.specifier;
+  if (!specifier || clause.stmtTypeOnly || hasToken(specifier, 'type')) return false;
+  const nameNode = specifier.childForFieldName('name');
+  if (!nameNode) return false;
+  const localName = decodedExportSpecifier(nameNode);
+  if (scope.lookupType(localName)) return false;
+  return Boolean(scope.lookupValue(localName) ?? scope.lookupNamespace(localName));
 }
 
 export function globalAugmentationPlacementMessage(node: TreeNode): string {
@@ -1318,7 +1340,7 @@ function isInAmbientContext(node: TreeNode): boolean {
  * The names an export statement exports, with the node naming each and the declaration declaring it, if any. An
  * overload signature exports nothing of its own: its implementation exports the name.
  */
-function exportedNames(node: TreeNode): { name: string; site: TreeNode; declaration?: TreeNode }[] {
+function exportedNames(node: TreeNode): ExportedNameEntry[] {
   const declaration = node.childForFieldName('declaration') ?? undefined;
   if (node.childForFieldName('source') || declaration?.type === 'function_signature') return [];
   if (node.children.some((child) => child?.type === 'default'))
@@ -1329,10 +1351,11 @@ function exportedNames(node: TreeNode): { name: string; site: TreeNode; declarat
       site: name,
       declaration,
     }));
+  const stmtTypeOnly = hasToken(node, 'type');
   const clause = named(node).find((child) => child.type === 'export_clause');
   return (clause ? named(clause) : []).flatMap((specifier) => {
     const exported = specifier.childForFieldName('alias') ?? specifier.childForFieldName('name');
-    return exported ? [{ name: decodedExportSpecifier(exported), site: exported }] : [];
+    return exported ? [{ name: decodedExportSpecifier(exported), site: exported, specifier, stmtTypeOnly }] : [];
   });
 }
 

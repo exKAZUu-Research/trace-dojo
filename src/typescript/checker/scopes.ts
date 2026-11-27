@@ -92,6 +92,8 @@ export class Scope {
   readonly values = new Map<string, Sym>();
   readonly types = new Map<string, Sym>();
   readonly namespaces = new Map<string, Sym>();
+  readonly typeOnlyValues = new Map<string, Sym>();
+  defaultTypeSymbol?: Sym;
 
   private readonly clauseOnlyValues = new Set<string>();
   private readonly clauseOnlyTypes = new Set<string>();
@@ -100,6 +102,7 @@ export class Scope {
   private readonly declarationExportedTypes = new Set<string>();
   private readonly declarationExportedNamespaces = new Set<string>();
   readonly clauseExportSpecifiers: { name: string; site: TreeNode; value?: Sym; type?: Sym; namespace?: Sym }[] = [];
+  readonly ambiguousStarExports: { site: TreeNode; firstModule: string; name: string }[] = [];
   /** The names a `declare global` block declares, which inside it stand for the global symbols of those names. */
   private readonly augmentedNames = new Set<string>();
   /** The nearest function or module scope, where `var` and function declarations live. */
@@ -167,7 +170,34 @@ export class Scope {
   }
 
   recordClauseExport(name: string, site: TreeNode, symbols: { value?: Sym; type?: Sym; namespace?: Sym }): void {
+    const existing = this.clauseExportSpecifiers.find((entry) => entry.site.id === site.id);
+    if (existing) {
+      existing.value ??= symbols.value;
+      existing.type ??= symbols.type;
+      existing.namespace ??= symbols.namespace;
+      return;
+    }
     this.clauseExportSpecifiers.push({ name, site, ...symbols });
+  }
+
+  exportTypeOnlyValue(name: string, symbol: Sym): void {
+    if (!this.values.has(name) && !this.typeOnlyValues.has(name)) this.typeOnlyValues.set(name, symbol);
+  }
+
+  removeStarExport(name: string): void {
+    for (const meaning of ['value', 'type', 'namespace'] as const) {
+      const { table, clauseOnly, declarationExported } = this.spaceSets(meaning);
+      if (!declarationExported.has(name)) {
+        table.delete(name);
+        clauseOnly.delete(name);
+      }
+    }
+    this.typeOnlyValues.delete(name);
+  }
+
+  recordAmbiguousStarExport(site: TreeNode, firstModule: string, name: string): void {
+    if (this.ambiguousStarExports.some((entry) => entry.site.id === site.id && entry.name === name)) return;
+    this.ambiguousStarExports.push({ site, firstModule, name });
   }
 
   hasDeclarationExport(name: string, meaning: MeaningSpace): boolean {
@@ -269,6 +299,57 @@ export class Scope {
     symbol.typeDeclarations.push(declaration);
     symbol.typeEntries.push({ kind, name: nameNode });
     return symbol;
+  }
+
+  declareDefaultType(
+    rawName: string | undefined,
+    kind: 'interface' | 'class',
+    declaration: TreeNode,
+    nameNode: TreeNode
+  ): Sym {
+    const shared = this.defaultTypeSymbol;
+    const canMerge =
+      shared !== undefined &&
+      (shared.typeKind === 'interface' || (shared.typeKind === 'class' && kind === 'interface'));
+    if (!canMerge) {
+      const symbol = rawName
+        ? this.declareType(rawName, kind, declaration, nameNode)
+        : this.newAnonymousDefaultType(kind, declaration, nameNode);
+      this.defaultTypeSymbol ??= symbol;
+      return symbol;
+    }
+    this.mergeIntoDefaultType(shared, rawName, kind, declaration, nameNode);
+    return shared;
+  }
+
+  private newAnonymousDefaultType(kind: 'interface' | 'class', declaration: TreeNode, nameNode: TreeNode): Sym {
+    const symbol = new Sym('default', this);
+    symbol.typeKind = kind;
+    symbol.typeDeclarations.push(declaration);
+    symbol.typeEntries.push({ kind, name: nameNode });
+    return symbol;
+  }
+
+  private mergeIntoDefaultType(
+    shared: Sym,
+    rawName: string | undefined,
+    kind: 'interface' | 'class',
+    declaration: TreeNode,
+    nameNode: TreeNode
+  ): void {
+    if (rawName) {
+      const name = canonicalIdentifier(rawName, nameNode);
+      const local = this.types.get(name);
+      if (local && local !== shared && (local.typeKind === 'interface' || local.typeKind === 'class')) {
+        if (local.typeKind === 'class' && shared.typeKind === 'interface') shared.typeKind = 'class';
+        shared.typeDeclarations.push(...local.typeDeclarations);
+        shared.typeEntries.push(...local.typeEntries);
+      }
+      this.types.set(name, shared);
+    }
+    if (kind === 'class' && shared.typeKind === 'interface') shared.typeKind = 'class';
+    shared.typeDeclarations.push(declaration);
+    shared.typeEntries.push({ kind, name: nameNode });
   }
 
   private forwardAugmented(name: string, declare: (augments: Scope) => Sym): Sym {

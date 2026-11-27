@@ -59,6 +59,13 @@ function reportScopeClauseExportConflicts(c: Checker, exports: Scope): void {
     if (clauseExportCollidesWithDeclaration(exports, name, entries[0]))
       c.error(entries[0].site, `エクスポート宣言が、'${name}' のエクスポートされた宣言と競合しています。`);
   }
+  for (const { site, firstModule, name } of exports.ambiguousStarExports) {
+    if (c.isLibrary(site)) continue;
+    c.error(
+      site,
+      `モジュール "${firstModule}" は既に '${name}' という名前のメンバーをエクスポートしています。あいまいさを解決するため、明示的にもう一度エクスポートすることを検討してください。`
+    );
+  }
 }
 
 function clauseExportCollidesWithDeclaration(

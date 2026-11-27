@@ -50,12 +50,22 @@ function readImportTypeMemberQuery(c: Checker, node: TreeNode, object: TreeNode,
   const receiver = c.namespaces.importTypeQuery(object);
   if (receiver === errorType) return errorType;
   if (!module.exportEquals && receiver.kind === 'object' && !c.propertyOf(receiver, property.text)) {
+    const typeOnlyVal = module.namespaceExports?.typeOnlyValues.get(property.text);
+    if (typeOnlyVal) return readTypeOnlyExportValueQuery(c, typeOnlyVal);
     const nsExport = module.namespaceExports?.namespaces.get(property.text);
     if (nsExport && c.namespaces.isInstantiated(nsExport)) return c.namespaces.objectType(nsExport);
     c.error(property, `名前空間 '"${module.name}"' にエクスポートされたメンバー '${property.text}' がありません。`);
     return errorType;
   }
   return c.members.propertyAccess(node, object, property, receiver, property.text);
+}
+
+function readTypeOnlyExportValueQuery(c: Checker, symbol: Sym): Type {
+  const resolved =
+    symbol.valueKind === 'import' || symbol.valueKind === 'importAlias'
+      ? (c.namespaces.imported(symbol, 'value') ?? symbol)
+      : symbol;
+  return c.expressions.valueTypeOf(resolved);
 }
 
 function queryEntry(c: Checker, key: string, capture: boolean): FlowEntry | undefined {
