@@ -8,7 +8,6 @@ define({
   'AsyncFuture<_>::poll': pollFuture,
   'Ready<_>::poll': pollFuture,
   'Pending<_>::poll': pollFuture,
-  'PollFn<_, _>::poll': pollFuture,
   // A `Box<F>` (or a `Pin<Box<F>>`) is the future it holds, which a pinned reference to it refers to.
   'Box<_>::poll': ([pinned, context], ctx) => pollInner(ctx, pinned, context),
   'Pin<Box<_>>::poll': ([pinned, context], ctx) => pollInner(ctx, pinned, context),
@@ -23,14 +22,6 @@ define({
     });
   },
   'std::future::pending': () => new FutureValue(() => PENDING),
-  'std::future::poll_fn': ([f], ctx) =>
-    new FutureValue(
-      (context) => {
-        const result = deref(call(ctx, f, [context])) as EnumValue;
-        return result.variant === 0 ? result.fields[0] : PENDING;
-      },
-      [f]
-    ),
   'Poll<_>::is_ready': ([value]) => (deref(value) as EnumValue).variant === 0,
   'Poll<_>::is_pending': ([value]) => (deref(value) as EnumValue).variant === 1,
   'Poll<_>::map': ([value, f], ctx) => {
@@ -60,7 +51,7 @@ define({
   'std::pin::pin_value': ([value]) => new CellPlace(value),
 });
 
-/** Polls a future the library makes: an `async` block's, or `ready`'s, `pending`'s, or `poll_fn`'s. */
+/** Polls a future the library makes: an `async` block's, or `ready`'s or `pending`'s. */
 function pollFuture([pinned, context]: Value[], ctx: NativeContext): Value {
   return poll(ctx, (deref(pinned) as FutureValue).poll(context));
 }

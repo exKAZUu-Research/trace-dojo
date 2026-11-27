@@ -470,7 +470,7 @@ export class ThreadHandle {
 
 export const PENDING: unique symbol = Symbol('pending');
 
-/** A future of the standard library (an `async` block's or function's, `ready`, `pending`, `poll_fn`). */
+/** A future of the standard library (an `async` block's or function's, `ready`, `pending`). */
 export class FutureValue {
   constructor(
     /** Polls the future: its output, or `PENDING`. */
