@@ -175,6 +175,7 @@ function operatorOutput(builtin: string, self: Type, args: Type[]): Type | undef
 /** Whether an operand is a number literal whose type is not known yet, of the kind of the number on the left. */
 function untypedNumber(type: Type, left: Type): boolean {
   const t = normalize(shallow(type));
+  if (t.kind === 'ref') return untypedNumber(t.target, left);
   return t.kind === 'var' && t.v.literal !== undefined && t.v.literal === left.kind;
 }
 

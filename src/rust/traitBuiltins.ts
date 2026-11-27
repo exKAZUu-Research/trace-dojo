@@ -290,7 +290,14 @@ function numericOperator({ solver, t, ref }: Goal, name: string, assign: boolean
   if (!left || !numberTakes(left, name)) return 'no';
   if (!rhs || rhs.kind === 'var') {
     if (name === 'Shl' || name === 'Shr') return 'unknown';
+    // A right side that is not a number literal (the argument of `a.add(&b)`) may still be a reference.
+    if (rhs && !rhs.v.literal) return 'unknown';
     return rhs ? (solver.unifier.tryUnify(rhs, left) ? 'yes' : 'no') : 'yes';
+  }
+  const target = rhs.kind === 'ref' && !rhs.mutable ? normalize(shallow(rhs.target)) : undefined;
+  // `&` of a number literal (`1i32.add(&2)`) takes the left side's type.
+  if (target?.kind === 'var' && target.v.literal && name !== 'Shl' && name !== 'Shr') {
+    return solver.unifier.tryUnify(target, left) ? 'yes' : 'no';
   }
   const right = operatorNumber(rhs);
   if (!right) return 'no';
