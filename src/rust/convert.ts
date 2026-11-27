@@ -291,11 +291,12 @@ export class Converter extends ExpressionConverter {
   /** `self: Self`, `self: &Self`, `self: &mut Self`, `self: Box<Self>`, `self: Rc<Self>`, `self: Arc<Self>`, or `self: Pin<&mut Self>`. */
   private typedSelfParam(node: Node): SelfParam {
     const span = this.span(node);
-    const type = this.field(node, 'type').text.replaceAll(/\s+/g, '');
+    const written = this.field(node, 'type').text;
+    const type = written.replaceAll(/\s+/g, '');
     const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
     if (type === 'Self') return { mode: 'value', mutable, span };
-    if (/^&('\w+)?Self$/.test(type)) return { mode: 'ref', mutable: false, span };
-    if (/^&('\w+)?mutSelf$/.test(type)) return { mode: 'mutRef', mutable: false, span };
+    const reference = /^&\s*('[\p{L}\p{N}_]+)?\s*(mut\s+)?Self$/u.exec(written.trim());
+    if (reference) return { mode: reference[2] ? 'mutRef' : 'ref', mutable: false, lifetime: reference[1], span };
     // The wrappers may be written with their std paths (`std::rc::Rc<Self>`, `::std::pin::Pin<&mut Self>`).
     const bare = type.replace(/^(?:::)?(?:std|core|alloc)::(?:boxed|rc|sync|pin)::/, '');
     const wrapper = /^(Box|Rc|Arc)<Self>$/.exec(bare)?.[1] ?? (/^Pin<&('\w+)?mutSelf>$/.test(bare) ? 'Pin' : undefined);

@@ -960,10 +960,7 @@ export function lookupAssociatedConst(
 export function resolveImports(module: Module): void {
   for (const entry of module.imports.values()) resolveImport(module, entry);
   for (const entry of module.anonymousImports) resolveImport(module, entry);
-  for (const glob of module.globs) {
-    const target = resolveTypePath(glob.path, module, glob.span);
-    if (target.kind === 'mod' && target.module.isStd) checkUnavailableStd(['std', ...glob.path.slice(1)], glob.span);
-  }
+  for (const glob of module.globs) resolveTypePath(glob.path, module, glob.span);
   for (const child of module.children) if (!child.lexicalParent) resolveImports(child);
 }
 
@@ -1281,6 +1278,7 @@ export function resolveTypePath(segments: string[], module: Module, span: Span):
       if (first === 'rand' || first === 'regex' || first === 'serde' || first === 'chrono') {
         compileError(span, `外部のクレート ${first} は、この採点環境では使えません。`);
       }
+      reportUnavailableGlobs(module, first, span);
       compileError(span, `${first} が見つかりません。`);
     }
   }
@@ -1304,6 +1302,20 @@ export function resolveTypePath(segments: string[], module: Module, span: Span):
     current = entry.binding;
   }
   return current;
+}
+
+/**
+ * Reports a type a program could have meant from a glob import of an std module whose other items are unavailable
+ * (`Instant` of `std::time::*`).
+ */
+function reportUnavailableGlobs(module: Module, name: string, span: Span): void {
+  if (!/^\p{Lu}/u.test(name)) return;
+  for (let scope: Module | undefined = module; scope; scope = scope.lexicalParent) {
+    for (const glob of scope.globs) {
+      const target = resolveTypePath(glob.path, scope, glob.span);
+      if (target.kind === 'mod' && target.module.isStd) checkUnavailableStd(['std', ...glob.path.slice(1)], span);
+    }
+  }
 }
 
 export function resolveTraitPath(path: PathAst, scope: TypeScope, self?: Type): TraitRef {

@@ -1118,7 +1118,7 @@ export class Checker {
     );
   }
 
-  /** `Box<[T; N]>` → `Box<[T]>` and `Box<T>` → `Box<dyn Trait>`, also inside a `Pin`; false when none applies. */
+  /** `Box<[T; N]>` → `Box<[T]>` and `Box<T>` → `Box<dyn Trait>`, and so for `Rc` and `Arc`, also inside a `Pin`; false when none applies. */
   private coerceBox(expr: Expr, a: Type, t: Type): boolean {
     if (a.kind !== 'adt' || t.kind !== 'adt' || a.def.builtin !== t.def.builtin) return false;
     if (a.def.builtin === 'Pin') {
@@ -1129,7 +1129,7 @@ export class Checker {
     if (a.def.builtin !== 'Box' && !shared) return false;
     let target = shallow(t.args[0]);
     let array = normalize(shallow(a.args[0]));
-    if (!shared && target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem))
+    if (target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem))
       return true;
     // A `RefCell` or `Mutex` in between unsizes too (`Rc<RefCell<dyn Trait>>`).
     const cell =

@@ -101,9 +101,11 @@ export class TraitSolver {
     if (answer === 'no' || !assoc) return answer;
     let result: Answer = answer;
     for (const [name, expected] of assoc) {
-      const declared = ref.trait.assocTypes.get(name)?.projection;
-      if (!declared) continue;
-      const actual = normalize(adt(declared, [t, ...ref.args]));
+      // The associated type may be a supertrait's (`Sub<Out = u8>` where `trait Sub: Super` and `Super` has `Out`).
+      const owner = allSupertraits([rest], t).find((candidate) => candidate.trait.assocTypes.has(name));
+      const declared = owner?.trait.assocTypes.get(name)?.projection;
+      if (!owner || !declared) continue;
+      const actual = normalize(adt(declared, [t, ...owner.args]));
       if (actual.kind === 'adt' && actual.def === declared) {
         result = 'unknown';
         continue;

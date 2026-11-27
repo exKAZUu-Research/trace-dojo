@@ -40,10 +40,14 @@ function lifetimePlaces(type: Type, onlyElided: boolean): number {
   return places;
 }
 
-/** The types that the bounds of a trait object or an `impl Trait` name: their arguments and the `Item` they set. */
+/** The types that the bounds of a trait object or an `impl Trait` name: their arguments and the associated types they set. */
 function boundTypes(t: Extract<Type, { kind: 'dyn' | 'opaque' }>): Type[] {
   const bounds = t.kind === 'dyn' ? [t.trait] : t.opaque.bounds;
-  return bounds.flatMap((bound) => (bound.item ? [...bound.args, bound.item] : bound.args));
+  return bounds.flatMap((bound) => [
+    ...bound.args,
+    ...(bound.item ? [bound.item] : []),
+    ...(bound.assoc?.values() ?? []),
+  ]);
 }
 
 function childTypesOf(t: Type): Type[] {

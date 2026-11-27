@@ -77,7 +77,9 @@ export abstract class ExpressionConverter extends MacroConverter {
     if (!this.attributes.read(attributes) || !target) return undefined;
     const expr = this.expr(target);
     const terminated = semi || child.lastChild?.type === ';';
-    if (isLast && !terminated && (expr.kind === 'macro' || isBlockLike(expr))) return expr;
+    // An `async { .. }` block ends with a block as well, so the grammar reads a final one as a statement.
+    const asyncBlock = expr.kind === 'closure' && expr.isAsync === 'block';
+    if (isLast && !terminated && (expr.kind === 'macro' || asyncBlock || isBlockLike(expr))) return expr;
     stmts.push({ kind: 'expr', expr, semi: terminated, span: this.span(target) });
     return undefined;
   }

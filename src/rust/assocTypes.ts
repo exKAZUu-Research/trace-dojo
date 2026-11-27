@@ -99,9 +99,11 @@ function assocParam(owner: TypeParam, bound: TraitRef, assoc: AssocTypeDef, asso
   const param = newTypeParam(`${owner.name}::${name}`);
   assocParams.push(param);
   (bound as { assoc?: Map<string, Type> }).assoc = new Map([...(bound.assoc ?? []), [name, { kind: 'param', param }]]);
-  param.bounds = assoc.bounds.map((ref) =>
-    substituteTraitRef(ref, new Map([[bound.trait.self, { kind: 'param', param: owner }]]))
-  );
+  const subst = new Map<TypeParam, Type>([
+    [bound.trait.self, { kind: 'param', param: owner }],
+    ...bound.trait.params.map((traitParam, index): [TypeParam, Type] => [traitParam, bound.args[index]]),
+  ]);
+  param.bounds = assoc.bounds.map((ref) => substituteTraitRef(ref, subst));
   return { kind: 'param', param };
 }
 

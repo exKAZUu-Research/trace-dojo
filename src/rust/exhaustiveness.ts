@@ -3,6 +3,7 @@ import type { Annotations } from './annotations';
 import type { Pattern } from './ast';
 import type { Known } from './constLint';
 import { normalize } from './infer';
+import { compileError } from './items';
 import { intMax, intMin, shallow, type Type } from './types';
 
 /**
@@ -99,6 +100,14 @@ function lowerRange(pattern: Extract<Pattern, { kind: 'range' }>, annotations: A
   const lo = pattern.start ? endValue(pattern.start, annotations) : domain[0][0];
   let hi = pattern.end ? endValue(pattern.end, annotations) : (domain.at(-1) as [bigint, bigint])[1];
   if (lo === undefined || hi === undefined) return { kind: 'ctor', ctor: 'const', args: [] };
+  if (pattern.start && pattern.end && (pattern.inclusive ? lo > hi : lo >= hi)) {
+    compileError(
+      pattern.span,
+      pattern.inclusive
+        ? '範囲のパターンの始まりは、終わり以下にしてください（E0030）。'
+        : '終わりを含まない範囲のパターンの始まりは、終わりより小さくしてください（E0579）。'
+    );
+  }
   if (pattern.end && !pattern.inclusive) hi -= 1n;
   return lo > hi ? EMPTY_RANGE : { kind: 'range', lo, hi };
 }

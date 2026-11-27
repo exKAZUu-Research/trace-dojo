@@ -387,15 +387,13 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
   // A closure holds what it captures by reference as `&T` or `&mut T`, which need `T: Sync` and `T: Send` to send.
   if (t.kind === 'closure') return all(capturedTypes(t));
   // `Rc` shares its count between threads unsynchronized, and `Cell`, `RefCell`, and their guards may not be shared.
-  if (t.kind === 'adt' && ['Rc', 'Weak'].includes(t.def.builtin ?? '')) return 'no';
-  if (t.kind === 'adt' && t.def.builtin === 'Arc') {
-    // `Arc<T>` shares `T` between threads, which needs it both `Send` and `Sync`.
-    const sync = solver.implements(t.args[0], { trait: solver.program.traitDef('Sync'), args: [] });
-    const send = solver.implements(t.args[0], { trait: solver.program.traitDef('Send'), args: [] });
-    return sync === 'no' || send === 'no' ? 'no' : sync === 'yes' && send === 'yes' ? 'yes' : 'unknown';
-  }
+  if (t.kind === 'adt' && ['Rc', 'Weak', 'ConstPtr', 'MutPtr'].includes(t.def.builtin ?? '')) return 'no';
+  // `Arc<T>` shares `T` between threads, which needs it both `Send` and `Sync`.
+  if (t.kind === 'adt' && t.def.builtin === 'Arc') return implementsAll(solver, t.args[0], ['Send', 'Sync']);
   if (t.kind === 'adt' && ['Mutex', 'RwLock'].includes(t.def.builtin ?? '')) {
-    return solver.implements(t.args[0], { trait: solver.program.traitDef('Send'), args: [] });
+    // `RwLock<T>` lends `&T` to several threads at once, so sharing it also needs `T: Sync`.
+    const bounds = name === 'Sync' && t.def.builtin === 'RwLock' ? ['Send', 'Sync'] : ['Send'];
+    return implementsAll(solver, t.args[0], bounds);
   }
   if (
     t.kind === 'adt' &&
@@ -679,10 +677,16 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
   if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse', 'Rc', 'RefCell', 'Arc'].includes(builtin)) {
     return name === 'Hash' && builtin === 'RefCell' ? 'no' : all(t.args);
   }
-  if (builtin === 'Cell')
-    return name === 'PartialEq' || name === 'Eq' || name === 'PartialOrd' || name === 'Ord' ? all(t.args) : 'no';
+  if (builtin === 'Cell') return cellComparison(goal, t);
   if (RANGE_TYPES.has(builtin)) return equality || name === 'Hash' ? all(t.args) : 'no';
   return 'no';
+}
+
+/** `Cell<T>` compares the values it holds, which it copies out, so `T` must be `Copy`. */
+function cellComparison({ solver, name, all }: Goal, t: AdtType): Answer {
+  if (name !== 'PartialEq' && name !== 'Eq' && name !== 'PartialOrd' && name !== 'Ord') return 'no';
+  const copy = implementsAll(solver, t.args[0], ['Copy']);
+  return copy === 'yes' ? all(t.args) : copy;
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Arrays and boxed values have distinct Default bounds.
@@ -1068,4 +1072,9 @@ function isIterator(type: Type): boolean {
   if (t.kind === 'param' || t.kind === 'opaque') return true;
   if (isUserIterator(t)) return true;
   return t.kind === 'adt' && ITERATOR_BUILTINS.has(t.def.builtin as string);
+}
+
+function implementsAll(solver: TraitSolver, type: Type, traits: string[]): Answer {
+  const answers = traits.map((trait) => solver.implements(type, { trait: solver.program.traitDef(trait), args: [] }));
+  return answers.includes('no') ? 'no' : answers.every((answer) => answer === 'yes') ? 'yes' : 'unknown';
 }
