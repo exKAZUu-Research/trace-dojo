@@ -607,12 +607,7 @@ export class Compiler {
         };
       }
       case 'dyn': {
-        if (coercion.throughCell) {
-          const type = runtimeType(coercion.type);
-          const shared = coercion.shared === true;
-          return (frame) => cellDyn(derefAll(read(frame)), type(frame), shared);
-        }
-        return dynCoercion(read, runtimeType(coercion.type), coercion.mutable, coercion.shared === true);
+        return dynCoercion(read, runtimeType(coercion.type), coercion);
       }
       case 'intoIter': {
         const from = runtimeType(coercion.from);
@@ -1012,7 +1007,12 @@ function dynView<T extends { value: Value }>(object: T, type: Type): T {
   });
 }
 
-function dynCoercion(read: Eval, type: (frame: Frame) => Type, mutable: boolean, shared: boolean): Eval {
+function dynCoercion(
+  read: Eval,
+  type: (frame: Frame) => Type,
+  { mutable, shared, throughCell }: { mutable: boolean; shared?: boolean; throughCell?: boolean }
+): Eval {
+  if (throughCell) return (frame) => cellDyn(derefAll(read(frame)), type(frame), shared === true);
   if (shared) return (frame) => sharedDyn(derefAll(read(frame)) as SharedBox, type(frame));
   if (!mutable) return (frame) => new DynValue(type(frame), derefAll(read(frame)));
   return (frame) => {
