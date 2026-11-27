@@ -270,11 +270,12 @@ export class Namespaces {
 
   /** What a name of a path names in the namespace or enum before it, or why it names nothing there. */
   private pathMember(container: Sym, name: string, meaning: MeaningSpace): { symbol?: Sym; error?: string } {
-    const symbol = container.namespaceExports
-      ? this.exportedMember(container, name, meaning)
-      : meaning === 'value'
+    const exported = container.namespaceExports ? this.exportedMember(container, name, meaning) : undefined;
+    const enumMember =
+      container.valueKind === 'enum' && (meaning === 'value' || meaning === 'type')
         ? container.enumMembers?.values.get(name)
         : undefined;
+    const symbol = exported ?? enumMember;
     return symbol ? { symbol } : this.missingPathMember(container, name);
   }
 
