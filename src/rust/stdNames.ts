@@ -254,3 +254,15 @@ export function checkUnavailableStd(segments: string[], span: Span): void {
     compileError(span, `外部のプロセス（std::process::${name}）は、この採点環境では使えません。`);
   }
 }
+
+/** The helpers that macro expansions call (`pin!`, C string literals), which are not part of std for programs. */
+export const INTERNAL_STD_HELPERS = new Set(['pin_value', 'c_str_literal']);
+
+/** Whether a value binding is one of std's internal helpers, which a program cannot name or import. */
+export function isInternalStdHelper(binding: { kind: string; def: { name: string; module?: unknown } }): boolean {
+  return (
+    binding.kind === 'fn' &&
+    INTERNAL_STD_HELPERS.has(binding.def.name) &&
+    (binding.def.module as { isStd?: boolean } | undefined)?.isStd === true
+  );
+}

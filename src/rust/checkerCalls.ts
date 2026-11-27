@@ -1,5 +1,5 @@
 import type { PathRes, ReceiverAdjust } from './annotations';
-import type { Expr, Span } from './ast';
+import type { Expr } from './ast';
 import type { Checker } from './checker';
 import { closureSignature } from './checkerClosures';
 import {
@@ -7,6 +7,7 @@ import {
   checkMethodVisible,
   checkTraitInScope,
   isStandardType,
+  rejectDropCall,
   resolveValuePath,
   traitInScope,
   typeOfRes,
@@ -58,12 +59,6 @@ export function checkCall(c: Checker, expr: Extract<Expr, { kind: 'call' }>, exp
 }
 
 /** rustc rejects calling `Drop::drop` in any form, which would drop the value a second time. */
-function rejectDropCall(fn: FnDef, span: Span): void {
-  if (fn.trait?.builtin === 'Drop' || fn.impl?.trait?.trait.builtin === 'Drop') {
-    compileError(span, 'drop メソッドは直接呼べません（std::mem::drop(x) を使ってください。E0040）。');
-  }
-}
-
 function callFn(
   c: Checker,
   expr: Extract<Expr, { kind: 'call' }>,

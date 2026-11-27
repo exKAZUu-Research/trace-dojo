@@ -34,6 +34,7 @@ import {
   BUILTIN_ENUMS,
   builtinStruct,
   checkUnavailableStd,
+  isInternalStdHelper,
   isStdMacroPath,
   renderTypeKey,
   REQUIRED_STD_METHODS,
@@ -1189,7 +1190,9 @@ function resolveImportedName(
   }
   if (parent.kind === 'mod') {
     const typeEntry = ownType(parent.module, last, span, new Set());
-    const valueEntry = ownValue(parent.module, last, span, new Set());
+    const found = ownValue(parent.module, last, span, new Set());
+    // The helpers that only macro expansions call are not std's for a program to import.
+    const valueEntry = found && isInternalStdHelper(found.binding) ? undefined : found;
     if (!typeEntry && !valueEntry && parent.module.isStd && !isStdMacroPath(path))
       unavailableStdItem([...parent.module.path.split('::'), last], span);
     checkVisible(typeEntry, module, last, span);
@@ -1305,10 +1308,10 @@ export function resolveTypePath(segments: string[], module: Module, span: Span):
 }
 
 /**
- * Reports a type a program could have meant from a glob import of an std module whose other items are unavailable
- * (`Instant` of `std::time::*`).
+ * Reports a type or constant a program could have meant from a glob import of an std module whose other items are
+ * unavailable (`Instant` and `UNIX_EPOCH` of `std::time::*`).
  */
-function reportUnavailableGlobs(module: Module, name: string, span: Span): void {
+export function reportUnavailableGlobs(module: Module, name: string, span: Span): void {
   if (!/^\p{Lu}/u.test(name)) return;
   for (let scope: Module | undefined = module; scope; scope = scope.lexicalParent) {
     for (const glob of scope.globs) {

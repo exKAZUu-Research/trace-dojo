@@ -52,6 +52,15 @@ const CLONE_CONTAINERS = new Set([
 ]);
 
 const DEBUG_TYPES = new Set([
+  'Stdin',
+  'StdinLock',
+  'Stdout',
+  'StdoutLock',
+  'Stderr',
+  'StderrLock',
+  'BufReader',
+  'BufWriter',
+  'OpenOptions',
   'CStr',
   'Pin',
   'Arc',
@@ -303,10 +312,13 @@ function operatorNumber(type: Type | undefined): (Type & { kind: 'int' | 'float'
  * std's impls of the arithmetic, bitwise, and shift operators (and their assignments) for numbers: both sides of one
  * type (through `&` too), except shifts, which take any integer on the right; `String + &str` and `String += &str`.
  */
+// code-gauge-allow functionCognitiveComplexity -- Follows std's operator impls for numbers and String case by case.
 function numericOperator({ solver, t, ref }: Goal, name: string, assign: boolean): Answer {
   if (assign && t.kind === 'ref') return 'no';
   const rhs = ref.args[0] && normalize(shallow(ref.args[0]));
   if (t.kind === 'adt' && t.def.builtin === 'String' && name === 'Add') return stringAdd(solver, rhs);
+  const literal = untypedLeft(solver, t, rhs, name);
+  if (literal) return literal;
   const left = operatorNumber(t);
   if (!left || !numberTakes(left, name)) return 'no';
   const untyped = untypedRight(solver, left, rhs, name);
@@ -328,6 +340,19 @@ function untypedRight(solver: TraitSolver, left: Type, rhs: Type | undefined, na
   if (target.kind !== 'var') return undefined;
   if (shift || !target.v.literal) return rhs.kind === 'var' || !shift ? 'unknown' : undefined;
   return solver.unifier.tryUnify(target, left) ? 'yes' : 'no';
+}
+
+/**
+ * The answer for an untyped number on the left, or `&` of one (`Add::add(&2, x)`): it takes the type of a number of
+ * its kind on the right, as std's impls take one type on both sides; a shift's right side tells nothing. Undefined
+ * for a left side known.
+ */
+function untypedLeft(solver: TraitSolver, t: Type, rhs: Type | undefined, name: string): Answer | undefined {
+  const target = t.kind === 'ref' && !t.mutable ? normalize(shallow(t.target)) : t;
+  if (target.kind !== 'var' || !target.v.literal) return undefined;
+  const right = operatorNumber(rhs);
+  if (!right || right.kind !== target.v.literal || name === 'Shl' || name === 'Shr') return 'unknown';
+  return solver.unifier.tryUnify(target, right) ? 'yes' : 'no';
 }
 
 /** `String + &str`, which settles a right side not known yet as `&str`. */

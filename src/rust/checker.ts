@@ -24,6 +24,7 @@ import { dynIteratorTarget, intoIterItem, intoIterShape } from './iterTypes';
 import { checkElidedReturnLifetime, checkFieldLifetimes } from './lifetimeElision';
 import { autoderefSteps, derefOnce } from './methods';
 import { orderHint } from './orderingDiagnostics';
+import { pointerCoercion } from './pointerCoercions';
 import { TraitSolver } from './traits';
 import {
   type AdtDef,
@@ -1172,28 +1173,11 @@ export class Checker {
     return true;
   }
 
-  /** `&T` → `*const T`, `&mut T` → `*mut T`, and `*mut T` → `*const T`; false when none applies. */
+  /** `&T` → `*const T`, `&mut T` → `*mut T`, `*mut T` → `*const T`, and to slices; false when none applies. */
   private coercePointer(expr: Expr, a: Type, t: Type): boolean {
-    if (t.kind !== 'adt' || (t.def.builtin !== 'ConstPtr' && t.def.builtin !== 'MutPtr')) return false;
-    if (a.kind === 'ref' && (t.def.builtin === 'ConstPtr' || a.mutable) && this.unifier.tryUnify(a.target, t.args[0])) {
-      this.setCoercion(expr, { kind: 'rawPtr' });
-      return true;
-    }
-    // `&[T; N]` → `*const [T]`, unsizing as a reference does.
-    const array = a.kind === 'ref' ? normalize(shallow(a.target)) : undefined;
-    const slice = normalize(shallow(t.args[0]));
-    if (
-      a.kind === 'ref' &&
-      (t.def.builtin === 'ConstPtr' || a.mutable) &&
-      array?.kind === 'array' &&
-      slice.kind === 'slice' &&
-      this.unifier.tryUnify(array.elem, slice.elem)
-    ) {
-      this.setCoercion(expr, { kind: 'rawPtr' });
-      return true;
-    }
-    const mutToConst = a.kind === 'adt' && a.def.builtin === 'MutPtr' && t.def.builtin === 'ConstPtr';
-    return mutToConst && this.unifier.tryUnify(a.args[0], t.args[0]);
+    const coercion = pointerCoercion(this.unifier, a, t);
+    if (coercion === 'fromRef') this.setCoercion(expr, { kind: 'rawPtr' });
+    return coercion !== undefined;
   }
 
   /** `&T` → `&U` through derefs, `&mut T` → `&T`, and `&T` → `&dyn Trait`; false when none applies. */

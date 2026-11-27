@@ -489,7 +489,7 @@ pub mod char {
         pub const fn to_ascii_lowercase(&self) -> char;
         pub fn make_ascii_uppercase(&mut self);
         pub fn make_ascii_lowercase(&mut self);
-        pub fn eq_ignore_ascii_case(&self, other: &char) -> bool;
+        pub const fn eq_ignore_ascii_case(&self, other: &char) -> bool;
         pub fn to_uppercase(self) -> CaseIter;
         pub fn to_lowercase(self) -> CaseIter;
         pub fn escape_default(self) -> EscapeDefault;
@@ -937,6 +937,8 @@ pub mod rc {
         pub fn as_ref(&self) -> &T;
     }
     impl<'a> From<&'a str> for Rc<str> { fn from(text: &str) -> Rc<str>; }
+    impl From<String> for Rc<str> { fn from(text: String) -> Rc<str>; }
+    impl<T> From<Vec<T>> for Rc<[T]> { fn from(items: Vec<T>) -> Rc<[T]>; }
     pub struct Weak<T>;
     impl<T> Weak<T> {
         pub fn new() -> Weak<T>;
@@ -1724,6 +1726,8 @@ pub mod sync {
         pub fn as_ref(&self) -> &T;
     }
     impl<'a> From<&'a str> for Arc<str> { fn from(text: &str) -> Arc<str>; }
+    impl From<String> for Arc<str> { fn from(text: String) -> Arc<str>; }
+    impl<T> From<Vec<T>> for Arc<[T]> { fn from(items: Vec<T>) -> Arc<[T]>; }
     pub struct Mutex<T>;
     impl<T> Mutex<T> {
         pub fn new(value: T) -> Mutex<T>;

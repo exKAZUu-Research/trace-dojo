@@ -183,10 +183,11 @@ export class TraitSolver {
     if (ref.trait.builtin === 'PartialEq' || ref.trait.builtin === 'PartialOrd') {
       return this.literalCompares(t, literal, ref, rhs);
     }
-    // With a number of its kind on the right of an arithmetic trait (`Add::add(2, x)`), it is of that number's type,
-    // as std implements these traits only for two numbers of one type.
-    if (rhs.kind !== literal || !SAME_TYPE_OPERATORS.has(ref.trait.builtin ?? '')) return undefined;
-    return this.unifier.tryUnify(t, rhs) ? 'yes' : 'no';
+    // With a number of its kind on the right of an arithmetic trait (`Add::add(2, x)`, `Add::add(2, &x)`), it is of
+    // that number's type, as std implements these traits only for two numbers of one type.
+    const number = rhs.kind === 'ref' && !rhs.mutable ? normalize(shallow(rhs.target)) : rhs;
+    if (number.kind !== literal || !SAME_TYPE_OPERATORS.has(ref.trait.builtin ?? '')) return undefined;
+    return this.unifier.tryUnify(t, number) ? 'yes' : 'no';
   }
 
   /** Whether an untyped number compares with a value of another type, which settles the number's type. */

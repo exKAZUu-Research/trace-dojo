@@ -14,6 +14,7 @@ import {
   lookupType,
   lookupValue,
   type Module,
+  reportUnavailableGlobs,
   resolveTraitPath,
   resolveTypePath,
   type TypeBinding,
@@ -22,7 +23,7 @@ import {
   visibleFrom,
 } from './items';
 import { boundsOf, lookupAssociated } from './methods';
-import { unavailableStdItem } from './stdNames';
+import { INTERNAL_STD_HELPERS, isInternalStdHelper, unavailableStdItem } from './stdNames';
 import {
   adt,
   type AdtDef,
@@ -44,10 +45,19 @@ import {
 export function pathExpr(c: Checker, expr: Extract<Expr, { kind: 'path' }>, expected: Type | undefined): Type {
   const res = resolveValuePath(c, expr.path, expr.span);
   c.annotations.paths.set(expr, res);
+  // A destructor is not a value either (`let f = D::drop;`).
+  if (res.kind === 'fn') rejectDropCall(res.fn, expr.span);
   if (res.kind === 'const' && res.def.ast.isMutable && !c.body.rawBorrowing) {
     c.requireUnsafe(expr.span, 'static mut を使うこと');
   }
   return typeOfRes(c, res, expr.span, expected);
+}
+
+/** Rejects naming a `Drop` impl's `drop`, which rustc calls only itself (E0040). */
+export function rejectDropCall(fn: FnDef, span: Span): void {
+  if (fn.trait?.builtin === 'Drop' || fn.impl?.trait?.trait.builtin === 'Drop') {
+    compileError(span, 'drop メソッドは直接呼べません（std::mem::drop(x) を使ってください。E0040）。');
+  }
 }
 
 export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type | undefined): Type {
@@ -189,17 +199,18 @@ function singleNameRes(c: Checker, segment: PathAst['segments'][number], span: S
   if (constParam?.constType) return { kind: 'constParam', param: constParam, type: c.lowerType(constParam.constType) };
   if (name === 'self') compileError(span, 'self は、self を引数に取るメソッドの中にだけ書けます。');
   if (name === 'Self') return selfCtor(c, span);
-  const binding = lookupValue(c.body.module, name, span);
+  const found = lookupValue(c.body.module, name, span);
+  // A glob of `std::pin` brings no helper that only macro expansions call.
+  const binding = found && isInternalStdHelper(found) ? undefined : found;
   if (!binding) {
     if (lookupType(c.body.module, name, span)) {
       compileError(span, `${name} は型の名前で、値ではありません。`);
     }
+    reportUnavailableGlobs(c.body.module, name, span);
     compileError(span, `${name} が見つかりません。`);
   }
   return valueBindingRes(c, binding, segment.args, span, name);
 }
-
-const INTERNAL_STD_HELPERS = new Set(['pin_value', 'c_str_literal']);
 
 function moduleValueRes(
   c: Checker,
@@ -371,8 +382,10 @@ function resolvePrefix(
     if (!c.body.selfType) compileError(span, 'Self は、impl やトレイトの中にだけ書けます。');
     return { kind: 'type', type: c.body.selfType };
   }
-  // An associated type of `Self` or a type parameter (`Self::Out::default()`), as it is in a type's place.
-  if (names.length === 2 && (names[0] === 'Self' || c.body.typeParams.has(names[0]))) {
+  // An associated type of `Self`, a type parameter, or a qualified type (`Self::Out::default()`,
+  // `<S as Tr>::Out::default()`), as it is in a type's place.
+  const projected = names[0] === 'Self' || c.body.typeParams.has(names[0]) || prefix[0].qualified !== undefined;
+  if (names.length === 2 && projected) {
     return { kind: 'type', type: c.lowerType({ kind: 'path', path: { segments: prefix, span }, span }) };
   }
   const binding = resolveTypePath(names, c.body.module, span);

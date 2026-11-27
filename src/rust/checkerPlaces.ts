@@ -9,11 +9,13 @@ import { autoderefSteps, derefOnce, lookupMethod } from './methods';
 import { RANGE_TYPES } from './traits';
 import {
   type AdtDef,
+  allSupertraits,
   type DerefKind,
   type FieldDef,
   freshVar,
   ref,
   resolve,
+  sameType,
   shallow,
   STR,
   substitute,
@@ -206,6 +208,13 @@ function userIndex(c: Checker, expr: Extract<Expr, { kind: 'index' }>, t: Type, 
   if (t.kind !== 'param' && !(t.kind === 'adt' && !t.def.builtin)) return undefined;
   const trait = c.program.traitDef('Index');
   const indexType = c.expr(expr.index, undefined);
+  // A parameter's bounds, with their supertraits (`IndexMut<usize>` brings `Index<usize>`), may name one index type.
+  if (t.kind === 'param') {
+    const indexes = allSupertraits(t.param.bounds, t).filter((bound) => bound.trait === trait);
+    const [first] = indexes;
+    if (first && indexes.every((bound) => sameType(bound.args[0], first.args[0])))
+      c.unifier.tryUnify(indexType, first.args[0]);
+  }
   const ref = { trait, args: [indexType] };
   if (c.solver.implements(t, ref) === 'no') return undefined;
   c.require(t, ref, expr.span);
