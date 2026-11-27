@@ -1120,15 +1120,16 @@ export class Checker {
       this.coerce(expr, a.args[0], t.args[0]);
       return true;
     }
-    if (a.def.builtin !== 'Box') return false;
+    const shared = a.def.builtin === 'Rc' || a.def.builtin === 'Arc';
+    if (a.def.builtin !== 'Box' && !shared) return false;
     const target = shallow(t.args[0]);
     const array = normalize(shallow(a.args[0]));
-    if (target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem))
+    if (!shared && target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem))
       return true;
     if (target.kind !== 'dyn') return false;
     this.requireDyn(a.args[0], target, expr.span);
     if (array.kind !== 'dyn')
-      this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false, trait: target.trait });
+      this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false, trait: target.trait, shared });
     return true;
   }
 
@@ -1225,7 +1226,7 @@ export class Checker {
         compileError(span, `${typeToString(arg)} にトレイト ${bound.trait.name} が実装されていません。`);
       }
     }
-    const unsizedArgs = ['Box', 'Rc', 'Weak', 'RefCell', 'Ref', 'RefMut', 'Cell', 'ConstPtr', 'MutPtr'];
+    const unsizedArgs = ['Box', 'Rc', 'Arc', 'Weak', 'RefCell', 'Ref', 'RefMut', 'Cell', 'ConstPtr', 'MutPtr'];
     if (!unsizedArgs.includes(t.def.builtin ?? '')) {
       for (const [index, arg] of t.args.entries()) {
         if (t.def.params[index]?.maybeUnsized) continue;

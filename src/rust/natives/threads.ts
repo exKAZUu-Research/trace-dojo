@@ -10,6 +10,7 @@ import {
   IterValue,
   SharedBox,
   StructValue,
+  textOf,
   ThreadHandle,
   UNIT_VALUE,
   type Value,
@@ -308,6 +309,10 @@ define({
   'std::thread::current': (_args, ctx) => scheduler(ctx).running.at(-1) ?? 1,
   'Thread::id': ([thread], ctx) => threadId(ctx, Number(deref(thread))),
   'Thread::name': ([thread], ctx) => (deref(thread) === 1 ? some(ctx, 'main') : none(ctx)),
+  'Arc<str>::from': ([text], ctx) => {
+    ctx.interp.dropper.activate();
+    return new SharedBox(textOf(deref(text)));
+  },
   'Arc<_>::new': ([value], ctx) => {
     ctx.interp.dropper.activate();
     return new SharedBox(value);

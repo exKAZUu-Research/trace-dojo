@@ -1,7 +1,17 @@
 import { normalize } from '../infer';
 import { cloneValue, copyValue } from '../ops';
 import { shallow, type Type } from '../types';
-import { BorrowGuard, CellBox, CellPlace, type Place, SharedBox, UNIT_VALUE, type Value, WeakRef } from '../values';
+import {
+  BorrowGuard,
+  CellBox,
+  CellPlace,
+  type Place,
+  SharedBox,
+  textOf,
+  UNIT_VALUE,
+  type Value,
+  WeakRef,
+} from '../values';
 import { defaultValue } from './core';
 import { call, define, deref, err, type NativeContext, none, ok, panic, placeOf, some } from './support';
 
@@ -39,6 +49,10 @@ function dropValue(ctx: NativeContext, value: Value, type: Type): void {
 }
 
 define({
+  'Rc<str>::from': ([text], ctx) => {
+    ctx.interp.dropper.activate();
+    return new SharedBox(textOf(deref(text)));
+  },
   'Rc<_>::new': ([value], ctx) => {
     ctx.interp.dropper.activate();
     return new SharedBox(value);

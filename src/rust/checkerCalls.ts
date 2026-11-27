@@ -244,7 +244,8 @@ function callValue(
   expected: Type | undefined
 ): Type {
   let t = normalize(shallow(calleeType));
-  while (t.kind === 'ref' || (t.kind === 'adt' && t.def.builtin === 'Box')) {
+  // A closure behind a reference or a pointer that owns or shares it (`Box`, `Rc`, `Arc`) is called through it.
+  while (t.kind === 'ref' || (t.kind === 'adt' && ['Box', 'Rc', 'Arc'].includes(t.def.builtin ?? ''))) {
     t = normalize(shallow(t.kind === 'ref' ? t.target : t.args[0]));
   }
   let params: Type[];

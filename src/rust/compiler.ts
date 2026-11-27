@@ -30,6 +30,8 @@ import { concreteType, runtimeType } from './runtimeTypes';
 import { markExtendedTemporaries } from './temporaryScopes';
 import { trackCollectionStorage } from './turtleTypes';
 import { constArgValue, type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
+import type {
+  SharedBox} from './values';
 import {
   AccessorPlace,
   CellPlace,
@@ -605,6 +607,10 @@ export class Compiler {
         };
       }
       case 'dyn': {
+        if (coercion.shared) {
+          const type = runtimeType(coercion.type);
+          return (frame) => sharedDyn(derefAll(read(frame)) as SharedBox, type(frame));
+        }
         return dynCoercion(read, runtimeType(coercion.type), coercion.mutable);
       }
       case 'intoIter': {
@@ -977,6 +983,18 @@ function readFloat(_c: Compiler, expr: ExprOf<'float'>): Eval {
 function readLiteral(_c: Compiler, expr: ExprOf<'bool' | 'char' | 'str'>): Eval {
   const value = expr.value;
   return () => value;
+}
+
+/**
+ * An `Rc` or `Arc` of a trait object made from one of a concrete type: the same allocation and counts, whose value
+ * shows as the trait object.
+ */
+function sharedDyn(box: SharedBox, type: Type): SharedBox {
+  return new Proxy(box, {
+    get: (target, key) => (key === 'value' ? new DynValue(type, target.value) : Reflect.get(target, key)),
+    set: (target, key, value) =>
+      Reflect.set(target, key, key === 'value' && value instanceof DynValue ? value.value : value),
+  });
 }
 
 function dynCoercion(read: Eval, type: (frame: Frame) => Type, mutable: boolean): Eval {

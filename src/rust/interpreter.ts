@@ -55,6 +55,7 @@ import {
   IterValue,
   type Place,
   type RangeValue,
+  SharedBox,
   StringValue,
   StructValue,
   textOf,
@@ -308,7 +309,7 @@ export class Interpreter implements CallSupport {
 
   callValue(callee: Value, args: Value[], callRow: number | undefined): Value {
     let fn = callee;
-    while (isPlace(fn)) fn = fn.get();
+    while (isPlace(fn) || fn instanceof SharedBox) fn = (fn instanceof SharedBox ? fn.value : fn.get()) as Value;
     if (fn instanceof DynValue) fn = fn.value;
     return (fn as FnValue).call(args, callRow);
   }

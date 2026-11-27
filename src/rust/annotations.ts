@@ -78,7 +78,8 @@ export type Coercion =
   /** References that reach the same value: `&String` → `&str`, `&Box<T>` → `&T`, `&&T` → `&T`. */
   | { kind: 'deref'; derefs: DerefKind[]; fromMut: boolean; toStr: boolean }
   /** A value becomes a trait object of the type it has. */
-  | { kind: 'dyn'; type: Type; mutable: boolean; trait: TraitRef }
+  /** `shared`: an `Rc` or `Arc` becomes one of a trait object, sharing its counts. */
+  | { kind: 'dyn'; type: Type; mutable: boolean; trait: TraitRef; shared?: boolean }
   /** A collection becomes an iterator, as `IntoIterator` makes it. */
   | { kind: 'intoIter'; from: Type }
   /** A reference becomes a raw pointer to what it refers to. */
