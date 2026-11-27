@@ -66,12 +66,12 @@ declare class Turtle {
   constructor(x: number, y: number, color: string);
 ${turtleMethods}
 }
-declare function setTimeout(handler: any, timeout?: number, ...arguments: any[]): number;
-declare function setInterval(handler: any, timeout?: number, ...arguments: any[]): number;
+declare function setTimeout(handler: TimerHandler, timeout?: number, ...arguments: any[]): number;
+declare function setInterval(handler: TimerHandler, timeout?: number, ...arguments: any[]): number;
 declare function clearTimeout(id: number | undefined): void;
 declare function clearInterval(id: number | undefined): void;
-declare function queueMicrotask(callback: () => void): void;
-declare function structuredClone<T = any>(value: T, options?: any): T;
+declare function queueMicrotask(callback: VoidFunction): void;
+declare function structuredClone<T = any>(value: T, options?: StructuredSerializeOptions): T;
 declare function fetch(input: any, init?: any): Promise<any>;
 declare function alert(message?: any): void;
 declare function prompt(message?: string, _default?: string): string | null;

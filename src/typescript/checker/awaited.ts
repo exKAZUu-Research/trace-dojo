@@ -49,16 +49,24 @@ export function awaitedType(c: Checker, type: Type, site?: AwaitedErrorSite, dep
     return mayBeThenableGeneric(c, type, depth) ? c.globalTypeAlias('Awaited', [type]) : type;
   }
   if (type.kind !== 'object' && type.kind !== 'intersection') return type;
-  if (type.kind === 'object' && (c.isLibraryType(type, 'Promise') || c.isLibraryType(type, 'PromiseLike')))
-    return awaitedType(c, type.typeArguments?.[0] ?? unknownType, site, depth + 1);
+  if (isLibraryPromiseType(c, type)) return awaitedType(c, type.typeArguments?.[0] ?? unknownType, site, depth + 1);
   const step = inspectThenable(c, type);
   if (step.kind === 'nonThenable') return type;
   if (step.kind === 'valid') return awaitedType(c, step.value, site, depth + 1);
-  if (site && !site.reported) {
+  return reportInvalidThenable(c, site);
+}
+
+function isLibraryPromiseType(c: Checker, type: Type): type is Extract<Type, { kind: 'object' }> {
+  return type.kind === 'object' && (c.isLibraryType(type, 'Promise') || c.isLibraryType(type, 'PromiseLike'));
+}
+
+function reportInvalidThenable(c: Checker, site: AwaitedErrorSite | undefined): Type {
+  if (!site) return neverType;
+  if (!site.reported) {
     site.reported = true;
     c.error(site.node, invalidThenableMessage(site.kind));
   }
-  return site ? errorType : neverType;
+  return errorType;
 }
 
 /** Unwraps `Awaited<T>` back to `T` when wrapping an async function's inferred return type in `Promise<...>`. */
