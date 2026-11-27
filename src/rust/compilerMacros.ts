@@ -135,12 +135,22 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
 /** `write!` to a file, or to a `BufWriter`'s buffer. */
 function writeFile(program: Program, target: Eval, format: FormatEval, newline: string, buffered: boolean): Eval {
   return (frame) => {
-    const { text } = formatPartly(format, frame);
     const error = buffered
-      ? (derefAll(target(frame)) as BufferedWriter).write(text + newline)
-      : writeToStream(program, target(frame), text + newline);
+      ? writeBuffered(derefAll(target(frame)) as BufferedWriter, format, frame, newline)
+      : writeToStream(program, target(frame), formatPartly(format, frame).text + newline);
     return error ? new EnumValue(program.adtDef('Result'), 1, [error]) : writeResult(program, false);
   };
+}
+
+/** Writes to a `BufWriter` piece by piece, as `write_fmt` does, which decides when its buffer fills. */
+function writeBuffered(writer: BufferedWriter, format: FormatEval, frame: Frame, newline: string): Value | undefined {
+  let error: Value | undefined;
+  const write = (chunk: string): void => {
+    if (chunk !== '') error ??= writer.write(chunk);
+  };
+  formatPartly(format, frame, write);
+  write(newline);
+  return error;
 }
 
 function writeStream(
