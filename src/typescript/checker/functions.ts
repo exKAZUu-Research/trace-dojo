@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- Keeps function signatures, body checking, and parameter flow together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { awaitedType } from './awaited';
+import { awaitedType, unwrapAwaitedType } from './awaited';
 import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { FlowState, type State } from './flow';
@@ -576,7 +576,8 @@ export class FunctionChecker {
       ]);
     }
     if (context.declaredReturn) return context.declaredReturn;
-    if (context.isAsync) return this.c.globalType('Promise', [this.inferredReturnOf(context)]);
+    if (context.isAsync)
+      return this.c.globalType('Promise', [unwrapAwaitedType(this.c, this.inferredReturnOf(context))]);
     return this.inferredReturnOf(context);
   }
 

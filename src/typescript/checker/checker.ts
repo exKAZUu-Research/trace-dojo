@@ -285,6 +285,16 @@ export class Checker {
     return this.reference(declared, typeArguments);
   }
 
+  globalTypeAlias(name: string, typeArguments: Type[] = []): Type {
+    const symbol = this.libraryBinder.moduleScope.lookupType(name);
+    if (!symbol) throw new Error(`The library declares no type ${name}`);
+    const declared = this.typeNodes.declaredTypeOf(symbol);
+    const parameters = this.signatures.typeParametersOfSymbol(symbol);
+    if (parameters.length === 0) return declared;
+    const filled = this.fillTypeArguments(parameters, typeArguments);
+    return this.instantiate(declared, new Map(parameters.map((parameter, index) => [parameter.id, filled[index]])));
+  }
+
   globalValue(name: string): Type {
     const symbol = this.libraryBinder.moduleScope.lookupValue(name);
     if (!symbol) throw new Error(`The library declares no value ${name}`);

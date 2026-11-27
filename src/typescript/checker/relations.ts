@@ -383,14 +383,15 @@ export class Relations {
     return constraint !== s && this.isRelated(constraint, t, relation, 0, EXPANDING_SOURCE);
   }
 
-  /** The library's `Awaited<T>` of a type parameter, which TypeScript relates to `T` as what awaiting a `T` gives. */
+  /** The library's `Awaited<T>` of a generic type, which TypeScript relates to `T` as what awaiting a `T` gives. */
   private isAwaitedOf(source: Type, target: Type): boolean {
+    const inner =
+      source.kind === 'conditional' && source.aliasArguments?.length === 1 ? source.aliasArguments[0] : undefined;
     return (
       source.kind === 'conditional' &&
-      target.kind === 'typeParameter' &&
+      inner !== undefined &&
       source.aliasName === 'Awaited' &&
-      source.aliasArguments?.length === 1 &&
-      source.aliasArguments[0] === target &&
+      (inner === target || (inner.kind === target.kind && this.sameGeneric(inner, target))) &&
       this.isLibraryDeclared(source.root ?? source)
     );
   }
