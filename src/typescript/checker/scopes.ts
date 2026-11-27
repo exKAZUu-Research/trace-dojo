@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
+import { nameOf } from '../../javascript/convertNodes';
 import type { ClassInfo, Type, TypeParameter, UnionType } from './types';
 
 export type ValueKind =
@@ -120,7 +121,8 @@ export class Scope {
     symbol.valueEntries.at(-1)!.kind = kind;
   }
 
-  declareValue(name: string, kind: ValueKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
+  declareValue(rawName: string, kind: ValueKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
+    const name = canonicalIdentifier(rawName, nameNode);
     if (this.augments) {
       this.augmentedNames.add(name);
       return this.augments.declareValue(name, kind, declaration, nameNode);
@@ -138,7 +140,8 @@ export class Scope {
     return symbol;
   }
 
-  declareType(name: string, kind: TypeKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
+  declareType(rawName: string, kind: TypeKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
+    const name = canonicalIdentifier(rawName, nameNode);
     if (this.augments) {
       this.augmentedNames.add(name);
       return this.augments.declareType(name, kind, declaration, nameNode);
@@ -166,6 +169,15 @@ export class Scope {
     if (!exported) return undefined;
     (meaning === 'value' ? this.values : this.types).set(name, exported);
     return exported;
+  }
+}
+
+export function canonicalIdentifier(name: string, nameNode: TreeNode): string {
+  if (!name.includes('\\')) return name;
+  try {
+    return nameOf(nameNode);
+  } catch {
+    return name;
   }
 }
 

@@ -4,7 +4,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { ExecutionBudget } from '../../interpreter/limits';
 import { memberNameOf } from './enums';
 import { fsImportMeanings } from './nodeLibrary';
-import { Scope, Sym, type ValueKind } from './scopes';
+import { canonicalIdentifier, Scope, Sym, type ValueKind } from './scopes';
 import { assignmentKind, isWithin, named, patternIdentifiers, stringValue } from './syntax';
 
 export const functionLikeTypes = new Set([
@@ -218,11 +218,12 @@ export class Binder {
     let outer = scope;
     let namespace: Sym | undefined;
     for (const part of namespacePath(name)) {
+      const partName = canonicalIdentifier(part.text, part);
       // `namespace A.B` declared again adds to the `B` (or class/function/enum `B`) that an earlier `A` exports.
-      const exported = outer.namespace?.namespaceExports?.values.get(part.text);
-      if (exported && (outer !== scope || isAmbient || isExportedNamespaceRoot(node)) && !outer.values.has(part.text))
-        outer.values.set(part.text, exported);
-      namespace = outer.declareValue(part.text, 'namespace', node, part);
+      const exported = outer.namespace?.namespaceExports?.values.get(partName);
+      if (exported && (outer !== scope || isAmbient || isExportedNamespaceRoot(node)) && !outer.values.has(partName))
+        outer.values.set(partName, exported);
+      namespace = outer.declareValue(partName, 'namespace', node, part);
       // The path's first name is exported only by an `export` or an ambient body, which `exportDeclared` handles.
       if (outer !== scope) this.exportFrom(outer, namespace, 'value');
       namespace.namespaceExports ??= new Scope('block', outer, node);
@@ -311,10 +312,11 @@ export class Binder {
 
   private exportDeclared(declaration: TreeNode, scope: Scope): void {
     for (const nameNode of declaredNames(declaration)) {
-      const value = scope.values.get(nameNode.text);
+      const name = canonicalIdentifier(nameNode.text, nameNode);
+      const value = scope.values.get(name);
       if (value && value.valueDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id))
         this.exportFrom(scope, value, 'value');
-      const type = scope.types.get(nameNode.text);
+      const type = scope.types.get(name);
       if (type && type.typeDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id))
         this.exportFrom(scope, type, 'type');
     }

@@ -174,6 +174,8 @@ export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node 
 /** The TypeScript declarations that compile to code of their own, and the names a namespace's exports change. */
 const compiledDeclarations: Record<string, (node: TreeNode, binder: Binder) => ViewNode> = {
   shorthand_property_identifier: (node, binder) => shorthandPropertyView(node, binder),
+  shorthand_property_identifier_pattern: (node, binder) => shorthandPropertyPatternView(node, binder),
+  object_assignment_pattern: (node, binder) => objectAssignmentPatternView(node, binder),
   module: (node, binder) => namespaceView(node, binder),
   internal_module: (node, binder) => namespaceView(node, binder),
   import_alias: (node, binder) => importAliasView(node, binder),
@@ -249,6 +251,81 @@ function shorthandPropertyView(node: TreeNode, binder: Binder): ViewNode {
   ]);
 }
 
+function shorthandPropertyPatternView(node: TreeNode, binder: Binder): ViewNode {
+  const target = isAssignmentPatternPosition(node) ? rewrittenAssignmentReference(node, binder) : undefined;
+  if (!target) return generic(node, node.type, binder);
+  return assemble(node, 'pair_pattern', [
+    { node: leaf(node, 'property_identifier', nameOf(node)), fieldName: 'key' },
+    { node: token(node, ':'), fieldName: undefined },
+    { node: target, fieldName: 'value' },
+  ]);
+}
+
+function objectAssignmentPatternView(node: TreeNode, binder: Binder): ViewNode {
+  const left = node.childForFieldName('left');
+  const right = node.childForFieldName('right');
+  const target =
+    left?.type === 'shorthand_property_identifier_pattern' && right && isAssignmentPatternPosition(node)
+      ? rewrittenAssignmentReference(left, binder)
+      : undefined;
+  if (!target || !left || !right) return generic(node, node.type, binder);
+  return assemble(node, 'pair_pattern', [
+    { node: leaf(left, 'property_identifier', nameOf(left)), fieldName: 'key' },
+    { node: token(node, ':'), fieldName: undefined },
+    {
+      node: assemble(node, 'assignment_pattern', [
+        { node: target, fieldName: 'left' },
+        { node: token(node, '='), fieldName: undefined },
+        { node: view(right, binder), fieldName: 'right' },
+      ]),
+      fieldName: 'value',
+    },
+  ]);
+}
+
+function rewrittenAssignmentReference(node: TreeNode, binder: Binder): ViewNode | undefined {
+  const target = rewrittenIdentifierReference(node, binder);
+  if (target) target.inferredName = nameOf(node);
+  return target;
+}
+
+const patternContainerTypes = new Set([
+  'object_pattern',
+  'object',
+  'array_pattern',
+  'array',
+  'rest_pattern',
+  'spread_element',
+  'parenthesized_expression',
+]);
+
+function isAssignmentPatternPosition(node: TreeNode): boolean {
+  let child = node;
+  let parent = node.parent;
+  while (parent) {
+    if (patternContainerTypes.has(parent.type) || assertionTypes.has(parent.type)) {
+      child = parent;
+      parent = parent.parent;
+      continue;
+    }
+    const isValueOfPair =
+      (parent.type === 'pair_pattern' || parent.type === 'pair') && parent.childForFieldName('value')?.id === child.id;
+    const isLeftOfDefault =
+      (parent.type === 'assignment_pattern' || parent.type === 'object_assignment_pattern') &&
+      parent.childForFieldName('left')?.id === child.id;
+    if (isValueOfPair || isLeftOfDefault) {
+      child = parent;
+      parent = parent.parent;
+      continue;
+    }
+    break;
+  }
+  if (!parent || parent.childForFieldName('left')?.id !== child.id) return false;
+  return (
+    parent.type === 'assignment_expression' || (parent.type === 'for_in_clause' && !parent.childForFieldName('kind'))
+  );
+}
+
 function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode | undefined {
   if (node.parent?.childForFieldName('name')?.id === node.id) return undefined;
   const symbol = binder.lookupValue(node, nameOf(node));
@@ -288,11 +365,12 @@ function declaresLocalBindingInBody(declaration: TreeNode, symbol: Sym, currentB
   if (declaration.type === 'internal_module' || declaration.type === 'module') {
     const name = declaration.childForFieldName('name');
     const body = declaration.childForFieldName('body');
+    const rootPart = name ? namespacePathOf(name)[0] : undefined;
     return (
-      !!name &&
+      !!rootPart &&
       !!body &&
       blockHasRuntimeCode(body) &&
-      namespacePathOf(name)[0]?.text === symbol.name &&
+      nameOf(rootPart) === symbol.name &&
       declaresNamespaceVar(symbol)
     );
   }
@@ -736,7 +814,7 @@ function exportedVariables(declaration: TreeNode, namespaceName: string, binder:
 function exportedPattern(node: TreeNode, namespaceName: string, binder: Binder): ViewNode {
   const property = (name: TreeNode, value: ViewNode): ViewNode =>
     assemble(node, 'pair_pattern', [
-      { node: leaf(name, 'property_identifier', name.text), fieldName: 'key' },
+      { node: leaf(name, 'property_identifier', nameOf(name)), fieldName: 'key' },
       { node: token(node, ':'), fieldName: undefined },
       { node: value, fieldName: 'value' },
     ]);
