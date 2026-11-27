@@ -21,11 +21,14 @@ import {
   anyType,
   errorType,
   functionType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
+  literalType,
   neverType,
   type Signature,
   type Type,
+  typeMembers,
   undefinedType,
   unionOf,
   unknownType,
@@ -411,10 +414,7 @@ export class FunctionChecker {
 
   private checkBodyReturns(context: FunctionContext): void {
     const { node, declaredReturn, generator, asyncAnnotation } = context;
-    if (generator?.invalidAnnotation && generator.annotation) {
-      const own = this.c.globalType(context.isAsync ? 'AsyncGenerator' : 'Generator', [anyType, anyType, unknownType]);
-      this.c.expressions.reportNotAssignable(node.childForFieldName('return_type') ?? node, own, generator.annotation);
-    }
+    if (generator?.annotation) this.checkGeneratorAnnotation(node, context, generator);
     if (asyncAnnotation && !asyncAnnotation.isPromise)
       this.c.error(
         node.childForFieldName('return_type') ?? node,
@@ -423,6 +423,25 @@ export class FunctionChecker {
     if (declaredReturn) this.checkMissingReturn(node, context, declaredReturn);
     if (hasToken(node, 'get') && context.endReachable && !context.returnStates.some((state) => state && !state.dead))
       this.c.error(node.childForFieldName('name') ?? node, 'get アクセサーは値を返さなければいけません。');
+  }
+
+  private checkGeneratorAnnotation(node: TreeNode, context: FunctionContext, generator: GeneratorContext): void {
+    const annotation = generator.annotation;
+    if (!annotation || isAnyLike(annotation) || this.isLibraryGeneratorAnnotation(annotation, context.isAsync)) return;
+    const own = this.c.globalType(
+      context.isAsync ? 'AsyncGenerator' : 'Generator',
+      generator.invalidAnnotation
+        ? [anyType, anyType, unknownType]
+        : [generator.yieldType ?? unknownType, context.declaredReturn ?? voidType, generator.nextType ?? unknownType]
+    );
+    if (generator.invalidAnnotation || !this.c.relations.isAssignable(own, annotation)) {
+      this.c.expressions.reportNotAssignable(node.childForFieldName('return_type') ?? node, own, annotation);
+    }
+  }
+
+  private isLibraryGeneratorAnnotation(type: Type, isAsync: boolean): boolean {
+    const names = isAsync ? asyncGeneratorReturnTypes : generatorReturnTypes;
+    return type.kind === 'object' && names.some((candidate) => this.c.isLibraryType(type, candidate));
   }
 
   markCircularReturn(): void {
@@ -608,11 +627,78 @@ export class FunctionChecker {
   /** What a generator's return type says it yields, returns, and receives, or undefined when it is no iterator. */
   iterationTypesOf(type: Type, isAsync = false): IterationTypes | undefined {
     if (isAnyLike(type)) return anyIterationTypes;
-    const names = isAsync ? asyncGeneratorReturnTypes : generatorReturnTypes;
-    const name = names.find((candidate) => this.c.isLibraryType(type, candidate));
-    if (!name || type.kind !== 'object') return undefined;
-    const [yieldType = unknownType, returnType = anyType, nextType = anyType] = type.typeArguments ?? [];
-    return { yieldType, returnType, nextType };
+    if (this.isLibraryGeneratorAnnotation(type, isAsync) && type.kind === 'object') {
+      const [yieldType = unknownType, returnType = anyType, nextType = anyType] = type.typeArguments ?? [];
+      return { yieldType, returnType, nextType };
+    }
+    if (type.kind === 'union') return this.unionIterationTypes(type.types, isAsync);
+    return this.structuralIterationTypes(type, isAsync);
+  }
+
+  private unionIterationTypes(members: Type[], isAsync: boolean): IterationTypes | undefined {
+    const parts = members
+      .map((member) => this.iterationTypesOf(member, isAsync))
+      .filter((part): part is IterationTypes => part !== undefined);
+    if (parts.length === 0) return undefined;
+    return {
+      yieldType: unionOf(parts.map((part) => part.yieldType)),
+      returnType: unionOf(parts.map((part) => part.returnType)),
+      nextType: intersectionOf(
+        parts.map((part) => part.nextType),
+        this.c
+      ),
+    };
+  }
+
+  private structuralIterationTypes(type: Type, isAsync: boolean): IterationTypes | undefined {
+    if (type.kind !== 'object' && type.kind !== 'intersection') return undefined;
+    const symbolKey = this.c.typeNodes.librarySymbolKey(isAsync ? 'asyncIterator' : 'iterator');
+    const iteratorMethod = this.c.propertyOf(type, symbolKey);
+    const iterator = (iteratorMethod && this.c.signaturesOf(iteratorMethod.type(), 'call')[0]?.returnType()) ?? type;
+    const nextProperty = this.c.propertyOf(iterator, 'next');
+    const nextSignature = nextProperty && this.c.signaturesOf(nextProperty.type(), 'call')[0];
+    if (!nextSignature) return undefined;
+    const nextType = this.iteratorNextParameterType(nextSignature);
+    const rawResult = nextSignature.returnType();
+    const settled = isAsync ? awaitedType(this.c, rawResult) : rawResult;
+    if (isAnyLike(settled)) return { yieldType: anyType, returnType: anyType, nextType };
+    const results = typeMembers(settled);
+    const yielding = results.filter((member) => !this.isAlwaysDoneResult(member));
+    const hasValue = (member: Type): boolean => this.c.propertyOf(member, 'value') !== undefined;
+    if (!results.some(hasValue) || !yielding.every(hasValue)) return undefined;
+    const yieldValues = yielding.flatMap((member) => this.c.propertyOf(member, 'value')?.type() ?? []);
+    const returnValues = results
+      .filter((member) => this.canBeDoneResult(member))
+      .flatMap((member) => this.c.propertyOf(member, 'value')?.type() ?? []);
+    return {
+      yieldType: yieldValues.length > 0 ? unionOf(yieldValues) : anyType,
+      returnType: returnValues.length > 0 ? unionOf(returnValues) : voidType,
+      nextType,
+    };
+  }
+
+  private iteratorNextParameterType(signature: Signature): Type {
+    const parameter = signature.parameters[0];
+    if (!parameter) return unknownType;
+    if (!parameter.rest) return parameter.type;
+    const elements = typeMembers(parameter.type).flatMap((member): Type[] => {
+      if (member.kind === 'object' && member.objectKind === 'tuple') {
+        const first = member.tuple?.elements[0];
+        return first ? [first.type] : [];
+      }
+      return [this.c.restElementType(member)];
+    });
+    return elements.length > 0 ? unionOf(elements) : unknownType;
+  }
+
+  private isAlwaysDoneResult(result: Type): boolean {
+    const done = this.c.propertyOf(result, 'done')?.type();
+    return done?.kind === 'literal' && done.value === true;
+  }
+
+  private canBeDoneResult(result: Type): boolean {
+    const done = this.c.propertyOf(result, 'done')?.type();
+    return done !== undefined && (isAnyLike(done) || this.c.relations.isAssignable(literalType(true), done));
   }
 
   /** What `yield*` gives back: what the generator or other iterator it delegates to returns when done. */
