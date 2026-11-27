@@ -1,5 +1,5 @@
 import type { PathRes, ReceiverAdjust } from './annotations';
-import type { Expr } from './ast';
+import type { Expr, Span } from './ast';
 import type { Checker } from './checker';
 import { closureSignature } from './checkerClosures';
 import {
@@ -44,7 +44,10 @@ export function checkCall(c: Checker, expr: Extract<Expr, { kind: 'call' }>, exp
     const res = resolveValuePath(c, callee.path, callee.span);
     c.annotations.paths.set(callee, res);
     if (res.kind === 'fn' && res.fn.ast?.isUnsafe) c.requireUnsafe(callee.span, 'unsafe fn を呼ぶこと');
-    if (res.kind === 'fn') return callFn(c, expr, res.fn, res.typeArgs, expected);
+    if (res.kind === 'fn') {
+      rejectDropCall(res.fn, callee.span);
+      return callFn(c, expr, res.fn, res.typeArgs, expected);
+    }
     if (res.kind === 'ctor') return callCtor(c, expr, res, expected);
     const type = typeOfRes(c, res, callee.span, undefined);
     callee.ty = type;
@@ -52,6 +55,13 @@ export function checkCall(c: Checker, expr: Extract<Expr, { kind: 'call' }>, exp
   }
   const type = c.expr(callee, undefined);
   return callValue(c, expr, type, expected);
+}
+
+/** rustc rejects calling `Drop::drop` in any form, which would drop the value a second time. */
+function rejectDropCall(fn: FnDef, span: Span): void {
+  if (fn.trait?.builtin === 'Drop' || fn.impl?.trait?.trait.builtin === 'Drop') {
+    compileError(span, 'drop メソッドは直接呼べません（std::mem::drop(x) を使ってください。E0040）。');
+  }
 }
 
 function callFn(
@@ -358,9 +368,7 @@ export function checkMethodCall(
   }
   checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected), iterableParams(fn));
   if (fn.ast?.isUnsafe) c.requireUnsafe(expr.span, 'unsafe fn を呼ぶこと');
-  if (fn.trait?.builtin === 'Drop' || fn.impl?.trait?.trait.builtin === 'Drop') {
-    compileError(expr.methodSpan, 'drop メソッドは直接呼べません（std::mem::drop(x) を使ってください。E0040）。');
-  }
+  rejectDropCall(fn, expr.methodSpan);
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
   const adjusted = typeAfter(receiverType, found.adjust.derefs) ?? found.selfType;
   if (fn.selfMode === 'value' && !fn.selfWrapper) checkMoveOutOfRef(c, expr, found.adjust, adjusted);
