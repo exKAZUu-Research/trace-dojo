@@ -56,11 +56,13 @@ const checkedAmbientDeclarationTypes = new Set([
   'generator_function_declaration',
   'class_declaration',
   'abstract_class_declaration',
+  'interface_declaration',
+  'type_alias_declaration',
 ]);
 
 /**
- * Whether the checker checks a declaration under `declare`: namespaces, variables, enums, functions, and classes,
- * including invalid ambient implementations and initializers.
+ * Whether the checker checks a declaration under `declare`: namespaces, variables, enums, functions, classes,
+ * interfaces, and type aliases, including invalid ambient implementations and initializers.
  */
 export function isCheckedAmbientDeclaration(node: TreeNode): boolean {
   const declaration = ['export_statement', 'expression_statement'].includes(node.type) ? node.namedChildren[0] : node;
