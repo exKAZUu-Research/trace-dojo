@@ -522,16 +522,17 @@ function transcribeVar(name: string, bindings: Map<string, Binding>): Token[] {
  * The source text of tokens, on one line. An `expr` variable's parentheses carry a mark, which keeps them invisible
  * to `stringify!` when the text reaches another macro.
  */
-export function tokenText(tokens: Token[]): string {
+export function tokenText(tokens: Token[], inGroup = false): string {
   let text = '';
   for (const token of tokens) {
     const part =
       token.kind === 'leaf'
         ? token.text
-        : `${token.open}${token.invisible ? EXPR_MARK : ''}${tokenText(token.tokens)}${token.closeSpaced ? ' ' : ''}${token.close}`;
-    // The spaces the source had stay, which `stringify!` shows, and two words never run together.
+        : `${token.open}${token.invisible ? EXPR_MARK : ''}${tokenText(token.tokens, true)}${token.closeSpaced ? ' ' : ''}${token.close}`;
+    // The spaces the source had stay, which `stringify!` shows (after a group's opening too), and two words never run
+    // together.
     const apart = token.spaced || (/[\w'"]$/.test(text) && /^[\w'"]/.test(part));
-    text += text && apart ? ` ${part}` : part;
+    text += (text || inGroup) && apart ? ` ${part}` : part;
   }
   return text;
 }
