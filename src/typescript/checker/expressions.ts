@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { assertedExpression } from '../erasedSyntax';
 import { unsupportedMessage } from '../unsupported';
 // code-gauge-allow-file fileNcss -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
-import { awaitedType, checkAwaitPlace } from './awaited';
+import { awaitableContextualType, awaitedType, checkAwaitPlace } from './awaited';
 import { Calls } from './calls';
 import type { Checker } from './checker';
 import { DeferredContexts } from './deferredContexts';
@@ -223,7 +223,7 @@ export class ExpressionChecker {
   private awaitExpression(node: TreeNode, contextual: Type | undefined): Type {
     checkAwaitPlace(this.c, node, false);
     const operand = named(node).find((child) => child.type !== 'comment');
-    return operand ? awaitedType(this.c, this.check(operand, contextual)) : anyType;
+    return operand ? awaitedType(this.c, this.check(operand, awaitableContextualType(this.c, contextual))) : anyType;
   }
 
   /**

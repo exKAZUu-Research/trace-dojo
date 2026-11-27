@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { hasToken } from './syntax';
-import { isAnyLike, isIntrinsic, mapType, type Type, typeMembers, unknownType } from './types';
+import { isAnyLike, isIntrinsic, mapType, type Type, typeMembers, unionOf, unknownType } from './types';
 
 /** How deeply a promise may hold promises before its awaited type stops unwrapping. */
 const MAX_AWAITED_DEPTH = 50;
@@ -48,6 +48,12 @@ export function unwrapAwaitedType(c: Checker, type: Type): Type {
     c.isLibrary(root.declaration)
     ? type.aliasArguments[0]
     : type;
+}
+
+/** The contextual type `T | PromiseLike<T>` TypeScript gives an `await`, async `return`, or async `yield` operand. */
+export function awaitableContextualType(c: Checker, expected: Type | undefined): Type | undefined {
+  if (!expected || isAnyLike(expected)) return expected;
+  return unionOf([expected, c.globalType('PromiseLike', [expected])]);
 }
 
 function isGenericAwaitedOperand(type: Type): boolean {

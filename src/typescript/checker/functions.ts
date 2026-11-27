@@ -2,7 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { isAmbient } from '../namespaceInstantiation';
-import { awaitedType, unwrapAwaitedType } from './awaited';
+import { awaitableContextualType, awaitedType, unwrapAwaitedType } from './awaited';
 import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { FlowState, type State } from './flow';
@@ -499,8 +499,7 @@ export class FunctionChecker {
   }
 
   returnExpressionContext(context: FunctionContext, expected: Type | undefined): Type | undefined {
-    if (!expected || !context.isAsync || isAnyLike(expected)) return expected;
-    return unionOf([expected, this.c.globalType('PromiseLike', [expected])]);
+    return context.isAsync ? awaitableContextualType(this.c, expected) : expected;
   }
 
   private checkBody(body: TreeNode, context: FunctionContext): void {
