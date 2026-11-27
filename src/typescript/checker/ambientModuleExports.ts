@@ -115,7 +115,7 @@ function resolveQualifiedDefaultTarget(
 
 function walkQualifiedDefaultContainers(path: TreeNode[], lookup: DefaultExportLookup): Sym | undefined {
   const rootName = canonicalIdentifier(path[0].text, path[0]);
-  let current = lookupContainerInBodyOrExports(lookup, rootName);
+  let current = lookupContainerFromScope(lookup.scope, lookup.exports, rootName, lookup);
   if (!current || !isAddressableContainer(current, path.length === 2)) return undefined;
   for (let index = 1; index < path.length - 1; index++) {
     lookup.budget?.spend();
@@ -127,23 +127,55 @@ function walkQualifiedDefaultContainers(path: TreeNode[], lookup: DefaultExportL
   return current;
 }
 
-function lookupContainerInBodyOrExports(lookup: DefaultExportLookup, name: string): Sym | undefined {
-  const ns = unaliasInBinder(lookupInBodyOrExports(lookup, name, 'namespace'), 'namespace', lookup);
-  if (ns) return ns;
-  const val = unaliasInBinder(lookupInBodyOrExports(lookup, name, 'value'), 'value', lookup);
-  return val?.valueKind === 'enum' ? val : undefined;
+function lookupContainerFromScope(
+  startScope: Scope,
+  moduleExports: Scope,
+  name: string,
+  lookup: DefaultExportLookup,
+  seen = new Set<number>()
+): Sym | undefined {
+  for (let current: Scope | undefined = startScope; current; current = current.parent) {
+    lookup.budget?.spend();
+    const found = scopeContainerAt(current, name, current === moduleExports, lookup, seen);
+    if (found) return found;
+  }
+  return unaliasContainer(startScope.lookupContainer(name, lookup.budget), lookup, seen);
+}
+
+function scopeContainerAt(
+  scope: Scope,
+  name: string,
+  allowClause: boolean,
+  lookup: DefaultExportLookup,
+  seen: Set<number>
+): Sym | undefined {
+  const ns = !allowClause && scope.isClauseOnlyExport(name, 'namespace') ? undefined : scope.namespaces.get(name);
+  const resolvedNs = unaliasInBinder(ns, 'namespace', lookup, seen);
+  if (resolvedNs?.namespaceExports) return resolvedNs;
+  const val = !allowClause && scope.isClauseOnlyExport(name, 'value') ? undefined : scope.values.get(name);
+  if (!val || (val.valueKind !== 'enum' && val.valueKind !== 'importAlias')) return undefined;
+  return unaliasContainer(val, lookup, seen);
+}
+
+function unaliasContainer(symbol: Sym | undefined, lookup: DefaultExportLookup, seen: Set<number>): Sym | undefined {
+  if (!symbol) return undefined;
+  if (symbol.namespaceKind === 'importAlias') {
+    const ns = unaliasInBinder(symbol, 'namespace', lookup, seen);
+    if (ns?.namespaceExports) return ns;
+  }
+  const val = unaliasInBinder(symbol, 'value', lookup, seen);
+  return val?.namespaceExports || val?.valueKind === 'enum' ? val : undefined;
 }
 
 function lookupContainerInExports(
   exports: Scope,
   name: string,
   lookup: DefaultExportLookup,
-  seen?: Set<number>
+  seen = new Set<number>()
 ): Sym | undefined {
-  return (
-    unaliasInBinder(exports.namespaces.get(name), 'namespace', lookup, seen) ??
-    unaliasInBinder(exports.values.get(name), 'value', lookup, seen)
-  );
+  const ns = unaliasInBinder(exports.namespaces.get(name), 'namespace', lookup, seen);
+  if (ns?.namespaceExports) return ns;
+  return unaliasContainer(exports.values.get(name), lookup, seen);
 }
 
 function isAddressableContainer(symbol: Sym, beforeLast: boolean): boolean {
@@ -227,9 +259,7 @@ function resolveBinderEntityPath(
   const scope = lookup.scopeOf(root);
   if (rest.length === 0)
     return unaliasInBinder(lookupScopeMeaning(scope, root.text, meaning, lookup.budget), meaning, lookup, seen);
-  let current =
-    unaliasInBinder(scope.lookupNamespace(root.text, lookup.budget), 'namespace', lookup, seen) ??
-    unaliasInBinder(scope.lookupValue(root.text, lookup.budget), 'value', lookup, seen);
+  let current = lookupContainerFromScope(scope, lookup.exports, root.text, lookup, seen);
   for (let index = 0; index < rest.length - 1; index++) {
     lookup.budget?.spend();
     current = current?.namespaceExports
