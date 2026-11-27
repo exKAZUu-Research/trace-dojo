@@ -287,8 +287,8 @@ function token(position: TreeNode, text: string): ViewNode {
 
 /**
  * A namespace as TypeScript compiles it: a function, called once, that adds the namespace's exports to its object,
- * `var N = ((N) => { ...; return N; })(N || {});`, where `namespace A.B { }` nests `B` in `A`. One that only declares
- * types compiles to nothing.
+ * `var N = ((N) => { ...; return N; })(N || (N = {}));`, where `namespace A.B { }` nests `B` in `A`. One that only
+ * declares types compiles to nothing.
  */
 function namespaceView(node: TreeNode, binder: Binder): ViewNode {
   const name = node.childForFieldName('name');
@@ -414,8 +414,13 @@ function importAliasView(node: TreeNode, binder: Binder): ViewNode {
 /** The statements of the first namespace of a path `A.B.C`, which declare the next ones down to the body's. */
 function nestedNamespaceStatements(node: TreeNode, body: TreeNode, path: TreeNode[], binder: Binder): ViewNode[] {
   let statements = namespaceBodyStatements(body, path.at(-1)?.text ?? '', binder);
-  for (let index = path.length - 1; index > 0; index--)
-    statements = exportedNamespaceStatements(node, path[index].text, path[index - 1].text, statements, true);
+  for (let index = path.length - 1; index > 0; index--) {
+    const isNamespaceFirst = binder.lookupValue(path[index], path[index].text)?.valueEntries[0]?.kind === 'namespace';
+    statements = exportedNamespaceStatements(node, path[index].text, path[index - 1].text, statements, {
+      isPathPart: true,
+      isNamespaceFirst,
+    });
+  }
   return statements;
 }
 
@@ -453,7 +458,11 @@ function exportedNamespace(node: TreeNode, outerName: string, binder: Binder): V
   if (!name || !body || !blockHasRuntimeCode(body)) return [];
   const path = namespacePathOf(name);
   const statements = nestedNamespaceStatements(node, body, path, binder);
-  return exportedNamespaceStatements(node, path[0].text, outerName, statements, false);
+  const isNamespaceFirst = binder.lookupValue(name, path[0].text)?.valueEntries[0]?.kind === 'namespace';
+  return exportedNamespaceStatements(node, path[0].text, outerName, statements, {
+    isPathPart: false,
+    isNamespaceFirst,
+  });
 }
 
 /** `export const a = 1, b = 2;` as `N.a = 1, N.b = 2;`, whose variables are only the namespace's properties. */
@@ -515,22 +524,21 @@ function exportedPattern(node: TreeNode, namespaceName: string, binder: Binder):
   );
 }
 
-/** `var B = ((B) => { ... })(A.B || {}); A.B = B;` for a namespace `B` that the namespace `A` exports. */
+/** `var B = ((B) => { ... })(B = A.B || (A.B = {}));` for a namespace `B` that the namespace `A` exports. */
 function exportedNamespaceStatements(
   node: TreeNode,
   name: string,
   outerName: string,
   statements: ViewNode[],
-  isPathPart: boolean
+  { isPathPart, isNamespaceFirst }: { isPathPart: boolean; isNamespaceFirst: boolean }
 ): ViewNode[] {
-  const call = namespaceCall(
-    node,
-    name,
-    statements,
-    orEmptyObject(node, `${outerName}.${name}`, memberReference(node, outerName, name))
-  );
-  const declaration = varDeclaration(node, name, call);
-  return [isPathPart ? unstepped(declaration) : declaration, unstepped(exportAssignment(node, outerName, name))];
+  const exported = orEmptyObject(node, `${outerName}.${name}`, () => memberReference(node, outerName, name));
+  const argument = isNamespaceFirst
+    ? parenthesized(node, assignment(node, leaf(node, 'identifier', name), exported))
+    : exported;
+  const call = namespaceCall(node, name, statements, argument);
+  const statement = isNamespaceFirst ? varDeclaration(node, name, call) : expressionStatement(node, call);
+  return [isPathPart ? unstepped(statement) : statement];
 }
 
 function namespaceCall(node: TreeNode, name: string, statements: ViewNode[], argument: ViewNode): ViewNode {
@@ -567,24 +575,35 @@ function namespaceCall(node: TreeNode, name: string, statements: ViewNode[], arg
   ]);
 }
 
-/** `object || {}`, the namespace's object so far, or a new one. */
-function orEmptyObject(node: TreeNode, text: string, object = leaf(node, 'identifier', text)): ViewNode {
+/** `object || (object = {})`, publishing a new namespace object before its body runs when none exists yet. */
+function orEmptyObject(
+  node: TreeNode,
+  text: string,
+  object: () => ViewNode = () => leaf(node, 'identifier', text)
+): ViewNode {
+  const empty = assemble(node, 'object', [
+    { node: token(node, '{'), fieldName: undefined },
+    { node: token(node, '}'), fieldName: undefined },
+  ]);
+  const initialized = parenthesized(node, assignment(node, object(), empty));
   return assemble(
     node,
     'binary_expression',
     [
-      { node: object, fieldName: 'left' },
+      { node: object(), fieldName: 'left' },
       { node: token(node, '||'), fieldName: 'operator' },
-      {
-        node: assemble(node, 'object', [
-          { node: token(node, '{'), fieldName: undefined },
-          { node: token(node, '}'), fieldName: undefined },
-        ]),
-        fieldName: 'right',
-      },
+      { node: initialized, fieldName: 'right' },
     ],
-    `${text} || {}`
+    `${text} || (${text} = {})`
   );
+}
+
+function parenthesized(node: TreeNode, inner: ViewNode): ViewNode {
+  return assemble(node, 'parenthesized_expression', [
+    { node: token(node, '('), fieldName: undefined },
+    { node: inner, fieldName: undefined },
+    { node: token(node, ')'), fieldName: undefined },
+  ]);
 }
 
 function varDeclaration(node: TreeNode, name: string, value: ViewNode): ViewNode {
