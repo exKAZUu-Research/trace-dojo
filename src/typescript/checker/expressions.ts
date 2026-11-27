@@ -236,13 +236,25 @@ export class ExpressionChecker {
     const elements = named(node).filter((child) => child.type !== 'comment');
     let leftIsFree = true;
     for (const [index, element] of elements.entries()) {
-      if (index === elements.length - 1) return this.check(element, contextual);
-      this.check(element);
+      if (index === elements.length - 1) {
+        const result = this.check(element, contextual);
+        this.applySequenceCallFlow(element, result);
+        return result;
+      }
+      const elementType = this.check(element);
+      this.applySequenceCallFlow(element, elementType);
       leftIsFree &&= isSideEffectFree(element);
       if (leftIsFree && !(elements.length === 2 && isIndirectCall(node, element, elements[1])))
         this.c.error(elements[0], 'コンマ演算子の左側は使われず、副作用もありません。');
     }
     return anyType;
+  }
+
+  private applySequenceCallFlow(element: TreeNode, type: Type): void {
+    const call = skipParentheses(element);
+    if (call.type !== 'call_expression') return;
+    if (this.calls.endsFlow(call, type)) this.c.flow.current = undefined;
+    else this.c.conditions.applyAssertion(call);
   }
 
   /**
