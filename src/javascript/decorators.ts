@@ -166,12 +166,11 @@ function classMetadata(runtime: Runtime, cls: JsFunction, symbol: symbol): JsObj
 }
 
 function defineMetadataProperty(runtime: Runtime, target: JsFunction, symbol: symbol, metadata: JsObject): void {
-  runtime.defineProperty(target, symbol, {
-    value: metadata,
-    writable: true,
-    enumerable: true,
-    configurable: true,
-  });
+  if (runtime.hasProperty(target, symbol)) {
+    runtime.createDataProperty(target, symbol, metadata, true);
+    return;
+  }
+  runtime.set(target, symbol, metadata, undefined, runtime.evaluator.isStrict());
 }
 
 /** Runs the functions decorators added, with `thisValue` as `this`, draining one-shot queues when `consume` is set. */
