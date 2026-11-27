@@ -267,10 +267,9 @@ export class Interpreter implements CallSupport {
       try {
         // The parameters go when the function ends, after its body's variables; `process::exit` drops nothing.
         if (!exiting && runtime.dropper) {
-          runtime.dropper.dropSlots(
-            frame,
-            compiled.info.locals.map((local) => local.slot).toSorted((a, b) => a - b)
-          );
+          const bodySlots = compiled.bodySlots ?? [];
+          const others = compiled.info.locals.map((local) => local.slot).filter((slot) => !bodySlots.includes(slot));
+          runtime.dropper.dropSlots(frame, [...others.toSorted((a, b) => a - b), ...bodySlots]);
         }
         runtime.releaseGuards(frame, guards, result);
         onEnd?.(frame, result);

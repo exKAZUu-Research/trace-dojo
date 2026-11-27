@@ -50,6 +50,8 @@ export interface CompiledFn {
   /** Stores the arguments in the parameters' slots. */
   bind: (frame: Frame, args: Value[]) => void;
   body: Eval;
+  /** The slots the body's own variables are in, in the order declared, which go the last declared first. */
+  bodySlots?: readonly number[];
 }
 
 /** What compiled code calls into: functions, closures, natives, conversions, and formatting. */
@@ -130,6 +132,7 @@ export class Compiler {
   private recordsSteps = false;
   /** The operands of `&` whose temporaries a `let` extends, with the slot of the variable they live as long as. */
   private readonly extendedOperands = new WeakMap<Expr, number>();
+  private readonly temporaryHolders = new WeakMap<Stmt, number>();
 
   constructor(
     readonly program: Program,
@@ -164,8 +167,8 @@ export class Compiler {
         for (const [index, binder] of binders.entries()) binder(frame, args[index]);
       };
       const body = item.body!;
-      const run = this.compileBlock(body, isUnit(resolve(def.ret, true)), false);
-      compiled.body = run;
+      compiled.body = this.compileBlock(body, isUnit(resolve(def.ret, true)), false);
+      compiled.bodySlots = this.declaredSlots(body);
       this.fillInfo(info, context);
     });
     return compiled;
@@ -234,7 +237,7 @@ export class Compiler {
   compileBlock(block: Block, tailAsStatement = false, clearsLocals = true): Eval {
     const stmts = block.stmts.map((stmt) => this.compileStmt(stmt));
     const tail = block.tail && (tailAsStatement ? this.statement(block.tail) : this.value(block.tail));
-    const declared = block.stmts.flatMap((stmt) => (stmt.kind === 'let' ? this.patternSlots(stmt.pattern) : []));
+    const declared = this.declaredSlots(block);
     const count = stmts.length;
     const run: Eval = (frame) => {
       for (let index = 0; index < count; index++) stmts[index](frame);
@@ -252,6 +255,15 @@ export class Compiler {
         frame.endScope(declared);
       }
     };
+  }
+
+  /** The slots of a block's variables, and of the temporaries a `let` that binds none extends, in order. */
+  private declaredSlots(block: Block): number[] {
+    return block.stmts.flatMap((stmt) => {
+      if (stmt.kind !== 'let') return [];
+      const holder = this.temporaryHolders.get(stmt);
+      return holder === undefined ? this.patternSlots(stmt.pattern) : [holder];
+    });
   }
 
   statement(expr: Expr, span = expr.span): Eval {
@@ -287,12 +299,7 @@ export class Compiler {
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of let statement (plain, destructuring, let-else).
   // code-gauge-allow functionNcss -- One case per kind of let statement (plain, destructuring, let-else).
   private compileLet(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
-    const lastLocal = patternBindings(stmt.pattern, this.annotations).at(-1);
-    if (stmt.init && lastLocal) {
-      markExtendedTemporaries(stmt.init, this.annotations, (operand) =>
-        this.extendedOperands.set(operand, lastLocal.slot)
-      );
-    }
+    if (stmt.init) this.extendTemporaries(stmt);
     if (!stmt.init) {
       const locals = patternBindings(stmt.pattern, this.annotations);
       return (frame) => {
@@ -338,6 +345,22 @@ export class Compiler {
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
+  }
+
+  /**
+   * Keeps the temporaries a `let` extends (`let r = &make();`) until its variables go, after all of them; for a `let`
+   * that binds none (`let _ = &make();`), until its block ends, in a slot of their own.
+   */
+  private extendTemporaries(stmt: Extract<Stmt, { kind: 'let' }>): void {
+    const operands: Expr[] = [];
+    markExtendedTemporaries(stmt.init!, this.annotations, (operand) => operands.push(operand));
+    if (operands.length === 0) return;
+    let slot = patternBindings(stmt.pattern, this.annotations).at(0)?.slot;
+    if (slot === undefined) {
+      slot = this.fn.slotCount++;
+      this.temporaryHolders.set(stmt, slot);
+    }
+    for (const operand of operands) this.extendedOperands.set(operand, slot);
   }
 
   private paramBinder(local: LocalVar | undefined, pattern: Pattern | undefined): (frame: Frame, value: Value) => void {
