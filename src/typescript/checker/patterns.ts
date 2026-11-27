@@ -659,7 +659,11 @@ export class BindingPatterns {
       const element = this.iteratedType(undefined, type, consumer);
       if (element !== errorType) {
         if (node) this.iteratedType(node, type, consumer);
-        return awaitedType(this.c, element, node ? { node, kind: 'await' } : undefined);
+        return awaitedType(
+          this.c,
+          element,
+          node ? { node, kind: consumer === 'yieldStar' ? 'yield' : 'await' } : undefined
+        );
       }
     }
     if (node)

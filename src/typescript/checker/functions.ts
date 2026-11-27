@@ -853,11 +853,12 @@ export class FunctionChecker {
 
   /** What a `yield` yields: its operand, or with `yield*` what that iterates, awaited in an async generator. */
   private yieldedType(operand: TreeNode | undefined, type: Type, delegated: boolean, isAsync: boolean): Type {
+    const errorSite = operand ? { node: operand, kind: 'yield' as const } : undefined;
     if (!delegated) {
-      return isAsync ? awaitedType(this.c, type, operand ? { node: operand, kind: 'yield' } : undefined) : type;
+      return isAsync ? awaitedType(this.c, type, errorSite) : type;
     }
     return isAsync
-      ? this.c.patterns.asyncIteratedType(operand, type, 'yieldStar')
+      ? awaitedType(this.c, this.c.patterns.asyncIteratedType(operand, type, 'yieldStar'), errorSite)
       : this.c.patterns.iteratedType(operand, type, 'yieldStar');
   }
 
