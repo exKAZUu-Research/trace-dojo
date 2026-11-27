@@ -50,7 +50,7 @@ interface EnumMember {
 
 interface EnumInfo {
   members: Map<string, EnumMember>;
-  /** The type the enum's name stands for: the union of its members' literal types, or `number` with a computed member. */
+  /** The type the enum's name stands for: the union of its members' enum literal types, or `number` when it has none. */
   type: Type;
   /** The type of the enum object, `typeof E`. */
   objectType: ObjectType;
@@ -307,14 +307,24 @@ export class Enums {
   private identifierConstantValue(name: TreeNode, evaluation: Evaluation): EnumValue | undefined {
     const symbol = this.unaliasedValue(this.c.scopeOf(name).lookupValue(name.text));
     if (symbol?.valueKind === 'enumMember') return this.resolvedEnumMemberValue(name, symbol, evaluation);
-    return symbol ? this.constantSymbolValue(symbol, evaluation) : undefined;
+    return symbol ? this.constantSymbolValue(name, symbol, evaluation) : undefined;
   }
 
-  /** The value of a `const` an initializer names, when a constant expression initializes it, as tsc evaluates it. */
-  private constantSymbolValue(variable: Sym, evaluation: Evaluation): EnumValue | undefined {
+  /** The value of an unannotated `const` declared before `reference`, when a constant expression initializes it. */
+  private constantSymbolValue(reference: TreeNode, variable: Sym, evaluation: Evaluation): EnumValue | undefined {
     const declaration = variable.valueDeclaration;
-    const value = declaration?.type === 'variable_declarator' ? declaration.childForFieldName('value') : undefined;
-    if (variable.valueKind !== 'const' || !value || this.evaluatingConstants.has(variable.id)) return undefined;
+    const value =
+      declaration?.type === 'variable_declarator' && !declaration.childForFieldName('type')
+        ? declaration.childForFieldName('value')
+        : undefined;
+    if (
+      variable.valueKind !== 'const' ||
+      !declaration ||
+      !value ||
+      (declaration.startIndex > reference.startIndex && !isDeferredFrom(reference, declaration)) ||
+      this.evaluatingConstants.has(variable.id)
+    )
+      return undefined;
     this.evaluatingConstants.add(variable.id);
     try {
       return this.evaluate(value, { ...evaluation, members: new Map() });
@@ -323,28 +333,29 @@ export class Enums {
     }
   }
 
-  /** The value of `E.A`, `Q.R.X`, or `C.base`, an enum member or exported constant along a namespace path. */
+  /** The value of `E.A`, `Q.R.X`, or `C.base`, an enum member or exported constant along an entity-name path. */
   private qualifiedMemberValue(node: TreeNode, evaluation: Evaluation): EnumValue | undefined {
     const object = node.childForFieldName('object');
     const key = this.memberAccessKey(node, evaluation);
-    const container = object ? this.resolveContainerSymbol(skipParentheses(object), evaluation) : undefined;
+    const container = object ? this.resolveContainerSymbol(object) : undefined;
     if (!container || key === undefined) return undefined;
     if (container.valueKind === 'enum') {
       if (container.id === evaluation.symbol.id) return this.ownMemberValue(node, key, evaluation);
       const member = this.infoOf(container)?.members.get(key);
       if (member) return this.checkedEnumMemberValue(node, container, member, evaluation);
     }
+    if (node.type !== 'member_expression') return undefined;
     const exported = this.unaliasedValue(container.namespaceExports?.values.get(key));
     if (exported?.valueKind === 'enumMember') return this.resolvedEnumMemberValue(node, exported, evaluation);
-    return exported ? this.constantSymbolValue(exported, evaluation) : undefined;
+    return exported ? this.constantSymbolValue(node, exported, evaluation) : undefined;
   }
 
-  private resolveContainerSymbol(node: TreeNode, evaluation: Evaluation): Sym | undefined {
+  private resolveContainerSymbol(node: TreeNode): Sym | undefined {
     if (node.type === 'identifier') return this.unaliasedValue(this.c.scopeOf(node).lookupValue(node.text));
-    if (node.type !== 'member_expression' && node.type !== 'subscript_expression') return undefined;
+    if (node.type !== 'member_expression') return undefined;
     const object = node.childForFieldName('object');
-    const key = this.memberAccessKey(node, evaluation);
-    const parent = object ? this.resolveContainerSymbol(skipParentheses(object), evaluation) : undefined;
+    const key = node.childForFieldName('property')?.text;
+    const parent = object ? this.resolveContainerSymbol(object) : undefined;
     return key === undefined ? undefined : this.unaliasedValue(parent?.namespaceExports?.values.get(key));
   }
 
