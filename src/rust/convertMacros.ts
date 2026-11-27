@@ -422,7 +422,12 @@ export abstract class MacroConverter extends PatternConverter {
   private pinMacro(tree: Node | undefined, span: Span): Expr {
     const args = tree ? this.macroArgs(tree) : [];
     if (args.length !== 1) syntaxError(span, 'pin! には値を1つ書いてください。');
-    const segments = ['std', 'pin', 'pin_value'].map((part) => ({ name: part, args: undefined, span }));
+    const segments = ['std', 'pin', 'pin_value'].map((part) => ({
+      name: part,
+      args: undefined,
+      span,
+      internal: true as const,
+    }));
     return { kind: 'call', callee: { kind: 'path', path: { segments, span }, span }, args: [this.expr(args[0])], span };
   }
 

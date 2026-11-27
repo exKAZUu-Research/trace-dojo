@@ -190,6 +190,8 @@ function singleNameRes(c: Checker, segment: PathAst['segments'][number], span: S
   return valueBindingRes(c, binding, segment.args, span, name);
 }
 
+const INTERNAL_STD_HELPERS = new Set(['pin_value', 'c_str_literal']);
+
 function moduleValueRes(
   c: Checker,
   module: Module,
@@ -197,7 +199,9 @@ function moduleValueRes(
   last: PathAst['segments'][number],
   span: Span
 ): PathRes {
-  const binding = lookupQualifiedValue(module, c.body.module, last.name, span);
+  // The helpers that macro expansions call (`pin!`, C string literals) are not part of std for programs.
+  const hidden = module.isStd && INTERNAL_STD_HELPERS.has(last.name) && !last.internal;
+  const binding = hidden ? undefined : lookupQualifiedValue(module, c.body.module, last.name, span);
   if (!binding) {
     if (module.isStd) unavailableStdItem([...module.path.split('::'), last.name], span);
     compileError(span, `${names.join('::')} が見つかりません。`);

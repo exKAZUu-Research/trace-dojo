@@ -984,7 +984,12 @@ function byteStringExpr(bytes: number[], span: Span): Expr {
 
 /** `c"..."` as the `&CStr` of its bytes. */
 function cStringExpr(bytes: number[], span: Span): Expr {
-  const segments = ['std', 'ffi', 'c_str_literal'].map((name) => ({ name, args: undefined, span }));
+  const segments = ['std', 'ffi', 'c_str_literal'].map((name) => ({
+    name,
+    args: undefined,
+    span,
+    internal: true as const,
+  }));
   return {
     kind: 'call',
     callee: { kind: 'path', path: { segments, span }, span },

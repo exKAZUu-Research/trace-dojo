@@ -241,6 +241,8 @@ export interface PathAst {
 
 export interface PathSegment {
   name: string;
+  /** Set on a path a macro's expansion makes to a helper of the standard library that programs cannot name. */
+  internal?: true;
   /** For the first segment of `<T as Trait>::name` or `<T>::name`: the type and the trait it is qualified by. */
   qualified?: { self: TypeAst; trait: PathAst | undefined };
   args: TypeAst[] | undefined;
