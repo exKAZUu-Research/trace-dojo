@@ -363,12 +363,18 @@ function ownScopeEntries(node: Node, fnScope: Node): { scope: Node; names: strin
     const parameter = node.childForFieldName('parameter');
     if (parameter) entries.push({ scope: node, names: patternIdentifierNames(parameter) });
   }
-  if (node.type === 'for_in_statement' && node.childForFieldName('kind')) {
-    const left = node.childForFieldName('left');
-    const target = node.childForFieldName('kind')?.text === 'var' ? fnScope : node;
-    if (left) entries.push({ scope: target, names: patternIdentifierNames(left) });
-  }
+  const forIn = node.type === 'for_in_statement' ? forInScopeEntry(node, fnScope) : undefined;
+  if (forIn) entries.push(forIn);
   return entries;
+}
+
+function forInScopeEntry(node: Node, fnScope: Node): { scope: Node; names: string[] } | undefined {
+  const header = node.childForFieldName('header') ?? node;
+  const kind = header.childForFieldName('kind')?.text;
+  const hasUsing = header.children.some((child) => child?.type === 'using');
+  const left = header.childForFieldName('left');
+  if (!left || (!kind && !hasUsing)) return undefined;
+  return { scope: kind === 'var' ? fnScope : node, names: patternIdentifierNames(left) };
 }
 
 function functionParameterNames(node: Node): string[] {
