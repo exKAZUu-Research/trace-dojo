@@ -291,7 +291,14 @@ export abstract class EvaluatorBase {
             : pattern.target.kind === 'member'
               ? pattern.target.inferredName
               : undefined;
-        if (targetName !== undefined && resolved instanceof JsFunction) nameFunction(runtime, resolved, targetName);
+        if (
+          value === undefined &&
+          targetName !== undefined &&
+          resolved instanceof JsFunction &&
+          isAnonymousFunctionOrClass(pattern.value)
+        ) {
+          nameFunction(runtime, resolved, targetName);
+        }
         this.bindPattern(pattern.target, resolved, mode);
         return;
       }
@@ -354,6 +361,12 @@ export abstract class EvaluatorBase {
       return rest;
     });
   }
+}
+
+function isAnonymousFunctionOrClass(expression: Expression): boolean {
+  let inner = expression;
+  while (inner.kind === 'parenthesized') inner = inner.expression;
+  return inner.kind === 'functionExpression' || (inner.kind === 'classExpression' && inner.cls.name === '');
 }
 
 /** Names a function by the variable or parameter default it was assigned to when it has no name yet. */

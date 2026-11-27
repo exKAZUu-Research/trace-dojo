@@ -847,7 +847,7 @@ function buildNamespacePath(
       node,
       { name: nameOf(path[index]), receiver: receivers[index], outerReceiver: receivers[index - 1] },
       statements,
-      { isPathPart: true, isNamespaceFirst }
+      { isPathPart: true, isNamespaceFirst, syncsLocalBinding: isNamespaceFirst }
     );
   }
   return { statements, outermostReceiver: receivers[0], outermostSymbol: symbols[0] };
@@ -920,12 +920,19 @@ function exportedNamespace(node: TreeNode, outerReceiver: string, binder: Binder
     binder
   );
   const isNamespaceFirst = declaresNamespaceVar(outermostSymbol);
+  const syncsLocalBinding = isNamespaceFirst || hasLocalBindingInBody(node, outermostSymbol);
   return exportedNamespaceStatements(
     node,
     { name: nameOf(path[0]), receiver: outermostReceiver, outerReceiver },
     statements,
-    { isPathPart: false, isNamespaceFirst }
+    { isPathPart: false, isNamespaceFirst, syncsLocalBinding }
   );
+}
+
+function hasLocalBindingInBody(node: TreeNode, symbol: Sym | undefined): boolean {
+  if (!symbol) return false;
+  const currentBodyId = namespaceBodyOf(node)?.id;
+  return symbol.valueDeclarations.some((declaration) => declaresLocalBindingInBody(declaration, symbol, currentBodyId));
 }
 
 /** `export const a = 1, b = 2;` as `N.a = 1, N.b = 2;`, whose variables are only the namespace's properties. */
@@ -984,10 +991,14 @@ function exportedNamespaceStatements(
   node: TreeNode,
   { name, receiver, outerReceiver }: { name: string; receiver: string; outerReceiver: string },
   statements: ViewNode[],
-  { isPathPart, isNamespaceFirst }: { isPathPart: boolean; isNamespaceFirst: boolean }
+  {
+    isPathPart,
+    isNamespaceFirst,
+    syncsLocalBinding,
+  }: { isPathPart: boolean; isNamespaceFirst: boolean; syncsLocalBinding: boolean }
 ): ViewNode[] {
   const exported = orEmptyObject(node, `${outerReceiver}.${name}`, () => memberReference(node, outerReceiver, name));
-  const argument = isNamespaceFirst
+  const argument = syncsLocalBinding
     ? parenthesized(node, assignment(node, leaf(node, 'identifier', name), exported))
     : exported;
   const call = namespaceCall(node, receiver, statements, argument);
