@@ -127,6 +127,9 @@ export function isPlaceExpr(c: Checker, expr: Expr): boolean {
 
 // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): Type {
+  // Only the field an assignment writes is written; the place it is in is read.
+  const writing = c.body.writingUnionField === true;
+  c.body.writingUnionField = false;
   const operandType = c.settled(c.expr(expr.operand, undefined));
   for (const step of autoderefSteps(c.program, operandType)) {
     const t = normalize(shallow(step.type));
@@ -144,7 +147,7 @@ export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): 
       if (index < 0) continue;
       const field = variant.fields[index];
       checkFieldVisible(c, t.def, field, expr.nameSpan);
-      if (t.def.isUnion && !c.body.writingUnionField) c.requireUnsafe(expr.span, '共用体のフィールドを読むこと');
+      if (t.def.isUnion && !writing) c.requireUnsafe(expr.span, '共用体のフィールドを読むこと');
       const subst = new Map(t.def.params.map((param, i) => [param, t.args[i]]));
       c.annotations.fields.set(expr, {
         derefs: step.derefs,
