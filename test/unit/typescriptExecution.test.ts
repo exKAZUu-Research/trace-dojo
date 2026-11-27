@@ -971,11 +971,11 @@ test('lowers qualified fs import aliases, anonymous abstract default exports, de
   expect(
     executeProgram(
       'typescript',
-      'namespace N { declare function g(): void; }\nconsole.log(typeof N);\nnamespace N { export const x = 1; }\nconsole.log(N.x);'
+      'namespace N { declare function g(): void; }\nconsole.log(typeof N);\nnamespace N { export const x = 1; }\nconsole.log(N.x);\nnamespace A.B.C { declare const y: number; }\nconsole.log(typeof A, typeof A.B, typeof (A.B as any).C);'
     )
   ).toMatchObject({
     kind: 'executed',
-    stdout: 'undefined\n1\n',
+    stdout: 'undefined\n1\nobject object undefined\n',
     uncaughtException: undefined,
   });
 
@@ -1005,13 +1005,15 @@ for (const fn of [
 ]) {
   try { fn(); results.push('ok'); } catch (e: any) { results.push(e.code ?? e.name); }
 }
+fs.writeFileSync(1, 'fd1:', { flag: 'nonsense' });
+fs.appendFileSync(2, 'fd2', { flag: 'nonsense' });
 console.log(fs.existsSync('/missing/../dev/stdin'), fs.existsSync('part/../dev/stdout'), results.join(','));`,
       { stdin: 'hi' }
     )
   ).toMatchObject({
     kind: 'executed',
-    stdout: 'false false EEXIST,EEXIST,TypeError,ENOENT,ENOTDIR\n',
-    stderr: '',
+    stdout: 'fd1:false false EEXIST,EEXIST,TypeError,ENOENT,ENOTDIR\n',
+    stderr: 'fd2',
     uncaughtException: undefined,
   });
 });

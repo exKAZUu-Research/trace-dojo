@@ -43,10 +43,11 @@ function statementHasRuntimeCode(statement: TreeNode, includeUnexportedAmbient: 
   const inner = declaration.type === 'expression_statement' ? declaration.namedChildren[0] : declaration;
   if (inner?.type !== 'internal_module' && inner?.type !== 'module') return true;
   const innerBody = inner.childForFieldName('body');
-  return (
-    innerBody !== null &&
-    (includeUnexportedAmbient ? blockHasRuntimeCode(innerBody) : blockEmitsRuntimeNamespace(innerBody))
-  );
+  if (!innerBody) return false;
+  if (includeUnexportedAmbient) return blockHasRuntimeCode(innerBody);
+  const innerName = inner.childForFieldName('name');
+  const isDotted = innerName?.type === 'nested_identifier' || innerName?.type === 'member_expression';
+  return isDotted || blockEmitsRuntimeNamespace(innerBody);
 }
 
 /** Whether a declaration is in an ambient context, as in `declare namespace`, which declares without code to run. */

@@ -378,16 +378,8 @@ function declaresLocalBindingInBody(declaration: TreeNode, symbol: Sym, currentB
   if (currentBodyId === undefined || namespaceBodyOf(declaration)?.id !== currentBodyId || isAmbient(declaration))
     return false;
   if (declaration.type === 'internal_module' || declaration.type === 'module') {
-    const name = declaration.childForFieldName('name');
-    const body = declaration.childForFieldName('body');
-    const rootPart = name ? namespacePathOf(name)[0] : undefined;
-    return (
-      !!rootPart &&
-      !!body &&
-      blockEmitsRuntimeNamespace(body) &&
-      nameOf(rootPart) === symbol.name &&
-      declaresNamespaceVar(symbol)
-    );
+    const emitted = emittedNamespacePath(declaration);
+    return !!emitted && nameOf(emitted.path[0]) === symbol.name && declaresNamespaceVar(symbol);
   }
   if (declaration.type === 'enum_declaration') {
     return !declaration.children.some((child) => !child?.isNamed && child?.type === 'const');
@@ -530,18 +522,29 @@ function token(position: TreeNode, text: string): ViewNode {
  * declares types compiles to nothing.
  */
 function namespaceView(node: TreeNode, binder: Binder): ViewNode {
-  const name = node.childForFieldName('name');
-  const body = node.childForFieldName('body');
-  if (!name || !body || name.type === 'string' || !blockEmitsRuntimeNamespace(body))
-    return leaf(node, 'empty_statement');
-  const path = namespacePathOf(name);
-  const { statements, outermostReceiver, outermostSymbol } = buildNamespacePath(node, body, path, binder);
+  const emitted = emittedNamespacePath(node);
+  if (!emitted) return leaf(node, 'empty_statement');
+  const { path, body, emitsBody } = emitted;
+  const { statements, outermostReceiver, outermostSymbol } = buildNamespacePath(
+    node,
+    { body, path, emitsBody },
+    binder
+  );
   const outermost = nameOf(path[0]);
   const call = namespaceCall(node, outermostReceiver, statements, orEmptyObject(node, outermost));
   // Every block passes the object the blocks before it made, or a new one, so no block needs to know whether it is
   // first; a class, function, or enum declared before the namespace already declares its name.
   const isNamespaceFirst = declaresNamespaceVar(outermostSymbol);
   return isNamespaceFirst ? varDeclaration(node, outermost, call) : expressionStatement(node, call);
+}
+
+function emittedNamespacePath(node: TreeNode): { path: TreeNode[]; body: TreeNode; emitsBody: boolean } | undefined {
+  const name = node.childForFieldName('name');
+  const body = node.childForFieldName('body');
+  if (!name || !body || name.type === 'string') return undefined;
+  const path = namespacePathOf(name);
+  if (blockEmitsRuntimeNamespace(body)) return { path, body, emitsBody: true };
+  return path.length > 1 ? { path: path.slice(0, -1), body, emitsBody: false } : undefined;
 }
 
 /**
@@ -757,8 +760,7 @@ function unwrapImportTarget(
 /** The statements of the first namespace of a path `A.B.C`, which declare the next ones down to the body's. */
 function buildNamespacePath(
   node: TreeNode,
-  body: TreeNode,
-  path: TreeNode[],
+  { body, path, emitsBody }: { body: TreeNode; path: TreeNode[]; emitsBody: boolean },
   binder: Binder
 ): { statements: ViewNode[]; outermostReceiver: string; outermostSymbol: Sym | undefined } {
   const context = contextOf(binder);
@@ -768,7 +770,7 @@ function buildNamespacePath(
     body.id,
     path.map((_, index) => ({ symbol: symbols[index], receiver: receivers[index] })).toReversed()
   );
-  let statements = namespaceBodyStatements(body, receivers.at(-1) as string, binder);
+  let statements = emitsBody ? namespaceBodyStatements(body, receivers.at(-1) as string, binder) : [];
   for (let index = path.length - 1; index > 0; index--) {
     const isNamespaceFirst = declaresNamespaceVar(symbols[index]);
     statements = exportedNamespaceStatements(
@@ -838,11 +840,14 @@ function exportStatements(declaration: TreeNode, namespaceName: string, binder: 
 }
 
 function exportedNamespace(node: TreeNode, outerReceiver: string, binder: Binder): ViewNode[] {
-  const name = node.childForFieldName('name');
-  const body = node.childForFieldName('body');
-  if (!name || !body || !blockEmitsRuntimeNamespace(body)) return [];
-  const path = namespacePathOf(name);
-  const { statements, outermostReceiver, outermostSymbol } = buildNamespacePath(node, body, path, binder);
+  const emitted = emittedNamespacePath(node);
+  if (!emitted) return [];
+  const { path, body, emitsBody } = emitted;
+  const { statements, outermostReceiver, outermostSymbol } = buildNamespacePath(
+    node,
+    { body, path, emitsBody },
+    binder
+  );
   const isNamespaceFirst = declaresNamespaceVar(outermostSymbol);
   return exportedNamespaceStatements(
     node,
