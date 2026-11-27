@@ -1178,18 +1178,8 @@ function followingDeclarations(node: TreeNode): { later: TreeNode[]; next: TreeN
 }
 
 function unwrapOverloadSibling(node: TreeNode): TreeNode {
-  let current = node;
-  for (;;) {
-    if (current.type === 'export_statement') {
-      current = current.childForFieldName('declaration') ?? current;
-      continue;
-    }
-    if (current.type === 'ambient_declaration') {
-      current = named(current)[0] ?? current;
-      continue;
-    }
-    return current;
-  }
+  const exported = node.type === 'export_statement' ? (node.childForFieldName('declaration') ?? node) : node;
+  return exported.type === 'ambient_declaration' ? (named(exported)[0] ?? exported) : exported;
 }
 
 function declarationContainer(node: TreeNode): TreeNode {
