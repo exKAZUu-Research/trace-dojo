@@ -201,30 +201,34 @@ function defineDirectoryMethods(builder: RealmBuilder, fs: JsObject): void {
 
 function readFileSync(runtime: Runtime, args: Value[]): Value {
   const options = args[1];
-  const encoding = encodingOption(runtime, options);
-  // Node.js reads into a Buffer without an encoding, which a TypeScript program sees as unavailable.
-  if (runtime.unavailableMember && (encoding === undefined || encoding === null))
-    rejectUnavailableMember('エンコーディングを指定しない readFileSync（Buffer）', runtime.currentRow);
-  if (runtime.unavailableMember && !isUtf8(encoding))
-    rejectUnavailableMember(`readFileSync の encoding: ${encodingLabel(runtime, encoding)}`, runtime.currentRow);
+  checkReadEncoding(runtime, options);
   const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
   const parsed = parseOpenFlag(runtime, flag === undefined ? 'r' : runtime.toString(flag));
   // File descriptor 0 is standard input.
-  if (args[0] === 0) {
-    if (!parsed.readable) throwNodeError(runtime, 'EBADF', 'read');
-    return runtime.io.openReader('/dev/stdin').readRest();
-  }
+  if (args[0] === 0) return readStandardInput(runtime, parsed);
   const path = requirePath(runtime, args[0]);
-  if (STDIN_PATHS.has(resolvePath(path))) {
-    if (!parsed.readable) throwNodeError(runtime, 'EBADF', 'read');
-    return runtime.io.openReader('/dev/stdin').readRest();
-  }
+  if (STDIN_PATHS.has(resolvePath(path))) return readStandardInput(runtime, parsed);
   // Node.js names no path when reading a directory opened read-only fails, since it fails on `read(fd)` rather than `open`.
   if (!parsed.writable && path !== '' && runtime.io.files.kindOf(path) === 'directory')
     throwNodeError(runtime, 'EISDIR', 'read');
   const handle = withErrors(runtime, 'open', path, () => runtime.io.files.open(path, parsed.mode));
   if (!parsed.readable) throwNodeError(runtime, 'EBADF', 'read');
   return handle.read();
+}
+
+function checkReadEncoding(runtime: Runtime, options: Value): void {
+  if (!runtime.unavailableMember) return;
+  const encoding = encodingOption(runtime, options);
+  // Node.js reads into a Buffer without an encoding, which a TypeScript program sees as unavailable.
+  if (encoding === undefined || encoding === null)
+    rejectUnavailableMember('エンコーディングを指定しない readFileSync（Buffer）', runtime.currentRow);
+  if (!isUtf8(encoding))
+    rejectUnavailableMember(`readFileSync の encoding: ${encodingLabel(runtime, encoding)}`, runtime.currentRow);
+}
+
+function readStandardInput(runtime: Runtime, parsed: ParsedOpenFlag): string {
+  if (!parsed.readable) throwNodeError(runtime, 'EBADF', 'read');
+  return runtime.io.openReader('/dev/stdin').readRest();
 }
 
 /**
@@ -286,26 +290,17 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
   // The descriptors 1 and 2 and the paths `/dev/stdout` and `/dev/stderr` are the run's standard streams, as 0 and
   // `/dev/stdin` are its standard input.
   const path = file === 1 || file === 2 ? `/dev/fd/${file}` : requirePath(runtime, file);
-  const data = normalizeUtf8(requireText(runtime, content, 'data'));
+  const bytes = UTF8_ENCODER.encode(requireText(runtime, content, 'data'));
   const stream = STANDARD_STREAMS[resolvePath(path) as keyof typeof STANDARD_STREAMS];
   if (stream) {
-    runtime.io[stream].write(data);
+    runtime.io[stream].write(UTF8_DECODER.decode(bytes));
     return;
   }
   const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
   const parsed = parseOpenFlag(runtime, flag === undefined ? defaultFlag : runtime.toString(flag));
   const handle = withErrors(runtime, 'open', path, () => runtime.io.files.open(path, parsed.mode));
   if (!parsed.writable) throwNodeError(runtime, 'EBADF', 'write');
-  if (!parsed.mode.truncate && !parsed.mode.append) {
-    const oldBytes = UTF8_ENCODER.encode(handle.read());
-    const newBytes = UTF8_ENCODER.encode(data);
-    const merged = new Uint8Array(Math.max(oldBytes.length, newBytes.length));
-    merged.set(oldBytes);
-    merged.set(newBytes);
-    runtime.io.files.open(path, { create: 'always', truncate: true, append: false }).write(UTF8_DECODER.decode(merged));
-    return;
-  }
-  handle.write(data);
+  handle.writeBytes(bytes);
 }
 
 function normalizeUtf8(text: string): string {

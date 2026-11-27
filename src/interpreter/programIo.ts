@@ -19,6 +19,8 @@ export interface ProgramOutput {
 export const WORKING_DIRECTORY = '/';
 /** The paths that read standard input as a file, as on Linux. */
 const STDIN_PATHS = new Set(['/dev/stdin', '/dev/fd/0']);
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /**
  * The standard streams and the file system of one run, which every language's builtins share. Files hold text, which
@@ -202,6 +204,8 @@ export interface OpenMode {
 class FileNode {
   readonly kind = 'file';
   content = '';
+  /** Underlying UTF-8 bytes when byte-addressed writes have updated the file. */
+  rawBytes?: Uint8Array;
   /** Whether a path names the file, whose contents then count as stored; a deleted file counts only what is written. */
   isLinked = true;
 }
@@ -215,6 +219,7 @@ class DirectoryNode {
 export class FileHandle {
   /** Where the next write goes, or `undefined` for the end of the file. */
   position: number | undefined;
+  private bytePosition: number | undefined;
 
   constructor(
     private readonly files: VirtualFileSystem,
@@ -222,6 +227,7 @@ export class FileHandle {
     append: boolean
   ) {
     this.position = append ? undefined : 0;
+    this.bytePosition = append ? undefined : 0;
   }
 
   read(): string {
@@ -231,6 +237,13 @@ export class FileHandle {
   write(text: string): void {
     this.writeAt(this.position ?? this.node.content.length, text);
     if (this.position !== undefined) this.position += text.length;
+  }
+
+  /** Writes UTF-8 bytes, preserving split multi-byte sequences across successive update and append writes. */
+  writeBytes(bytes: Uint8Array): void {
+    const start = this.bytePosition ?? (this.node.rawBytes ?? UTF8_ENCODER.encode(this.node.content)).length;
+    this.files.writeBytesAt(this.node, start, bytes);
+    if (this.bytePosition !== undefined) this.bytePosition += bytes.length;
   }
 
   /** Writes at a position that the caller keeps instead of {@link position}, as a handle that also reads does. */
@@ -307,18 +320,34 @@ export class VirtualFileSystem {
     if (mode.truncate) {
       this.storedLength -= node.content.length;
       node.content = '';
+      node.rawBytes = undefined;
     }
     return new FileHandle(this, node, mode.append);
   }
 
   writeAt(node: FileNode, position: number, text: string): void {
     this.budget.spend(Math.ceil((text.length + Math.max(position - node.content.length, 0) + 1) / 64));
+    node.rawBytes = undefined;
     // Writing past the end, as a handle may after another truncates the file, leaves a gap of NUL characters.
     const content = node.content.padEnd(text === '' ? 0 : position, '\0');
     const updated = `${content.slice(0, position)}${text}${content.slice(position + text.length)}`;
     const gap = Math.max(position - node.content.length, 0);
     this.storedLength += node.isLinked ? updated.length - node.content.length : text.length + gap;
     if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
+    node.content = updated;
+  }
+
+  writeBytesAt(node: FileNode, position: number, bytes: Uint8Array): void {
+    const current = node.rawBytes ?? UTF8_ENCODER.encode(node.content);
+    const gap = Math.max(position - current.length, 0);
+    this.budget.spend(Math.ceil((bytes.length + gap + 1) / 64));
+    const merged = new Uint8Array(Math.max(current.length, position + bytes.length));
+    merged.set(current);
+    merged.set(bytes, position);
+    const updated = UTF8_DECODER.decode(merged);
+    this.storedLength += node.isLinked ? updated.length - node.content.length : bytes.length + gap;
+    if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
+    node.rawBytes = merged;
     node.content = updated;
   }
 

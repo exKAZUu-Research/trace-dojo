@@ -542,3 +542,16 @@ test('standard output and standard error share one limit', () => {
     limit: 'output',
   });
 });
+
+test('successive update and append writes preserve underlying UTF-8 bytes', () => {
+  const source = `const fs = require('fs');
+fs.writeFileSync('x', 'A', { flag: 'r+' });
+fs.appendFileSync('x', 'Z');
+fs.writeFileSync('x', 'é', { flag: 'rs+' });
+console.log(fs.readFileSync('x', 'utf8'));`;
+  expect(executeProgram('typescript', source, { files: { x: 'éX' } })).toMatchObject({
+    kind: 'executed',
+    stdout: 'éXZ\n',
+    finalFiles: { x: 'éXZ' },
+  });
+});
