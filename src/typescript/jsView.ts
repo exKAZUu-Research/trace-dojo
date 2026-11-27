@@ -388,27 +388,34 @@ function importAliasView(node: TreeNode, binder: Binder): ViewNode {
   const [name, target] = node.namedChildren;
   if (!name || !target) return leaf(node, 'empty_statement');
   const path = namespacePathOf(target);
-  const root = binder.lookupValue(target, path[0].text);
+  const rootName = nameOf(path[0]);
+  const root = binder.lookupValue(target, rootName);
   const hasValue =
     root !== undefined &&
     (root.valueEntries.some((entry) => entry.kind !== 'namespace') || isInstantiatedNamespace(root));
   if (!hasValue) return leaf(node, 'empty_statement');
-  let value = leaf(path[0], 'identifier', path[0].text);
-  let text = path[0].text;
+  const namespace = namespaceOfReference(path[0], root);
+  let value = namespace
+    ? memberReference(path[0], namespace, rootName)
+    : root.valueKind === 'enumMember'
+      ? enumMemberReference(path[0], root.valueDeclaration as TreeNode)
+      : leaf(path[0], 'identifier', rootName);
+  let text = value.text;
   for (const part of path.slice(1)) {
-    text = `${text}.${part.text}`;
+    const memberName = nameOf(part);
+    text = `${text}.${memberName}`;
     value = assemble(
       part,
       'member_expression',
       [
         { node: value, fieldName: 'object' },
         { node: token(part, '.'), fieldName: undefined },
-        { node: leaf(part, 'property_identifier', part.text), fieldName: 'property' },
+        { node: leaf(part, 'property_identifier', memberName), fieldName: 'property' },
       ],
       text
     );
   }
-  return varDeclaration(node, name.text, value);
+  return varDeclaration(node, nameOf(name), value);
 }
 
 /** The statements of the first namespace of a path `A.B.C`, which declare the next ones down to the body's. */
