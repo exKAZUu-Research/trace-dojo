@@ -125,11 +125,16 @@ export function isPlaceExpr(c: Checker, expr: Expr): boolean {
   return expr.kind === 'unary' && expr.op === '*';
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
-export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): Type {
-  // Only the field an assignment writes is written; the place it is in is read.
+/** Whether this field is the one an assignment writes, which only it is: the place the field is in is read. */
+function takeUnionWrite(c: Checker): boolean {
   const writing = c.body.writingUnionField === true;
   c.body.writingUnionField = false;
+  return writing;
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
+export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): Type {
+  const writing = takeUnionWrite(c);
   const operandType = c.settled(c.expr(expr.operand, undefined));
   for (const step of autoderefSteps(c.program, operandType)) {
     const t = normalize(shallow(step.type));

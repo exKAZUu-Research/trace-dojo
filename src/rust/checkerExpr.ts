@@ -245,7 +245,6 @@ function arrayExpr(c: Checker, expr: Extract<Expr, { kind: 'array' }>, expected:
   return { kind: 'array', elem, len: expr.elems.length };
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Follows rustc checks for the count and the Copy requirement in order.
 function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }>, expected: Type | undefined): Type {
   const e = expected ? shallow(expected) : undefined;
   const elem = e?.kind === 'array' ? e.elem : freshVar();

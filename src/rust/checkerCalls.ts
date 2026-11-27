@@ -371,14 +371,7 @@ export function checkMethodCall(
   rejectDropCall(fn, expr.methodSpan);
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
   const adjusted = typeAfter(receiverType, found.adjust.derefs) ?? found.selfType;
-  if (fn.selfMode === 'value' && !fn.selfWrapper) checkMoveOutOfRef(c, expr, found.adjust, adjusted);
-  if (fn.selfMode === 'value' && fn.selfWrapper) {
-    // `self: Box<Self>` takes the `Box`, which method lookup derefs through to `Self`; lookup stops at an `Rc`, `Arc`
-    // or `Pin` itself.
-    const derefs = fn.selfWrapper === 'Box' ? found.adjust.derefs.slice(0, -1) : found.adjust.derefs;
-    const toWrapper = { ...found.adjust, derefs };
-    checkMoveOutOfRef(c, expr, toWrapper, typeAfter(receiverType, toWrapper.derefs) ?? found.selfType);
-  }
+  if (fn.selfMode === 'value') checkSelfMove(c, expr, fn, found, receiverType);
   if (expr.method === 'map') return arrayMapResult(adjusted, found.selfType, sig.ret);
   return sig.ret;
 }
@@ -450,6 +443,22 @@ function fieldTypeOf(c: Checker, type: Type, name: string): Type | undefined {
 }
 
 /** Taking `self` by value through a reference moves out of it, which only `Copy` types allow. */
+/**
+ * A method taking `self` by value moves the receiver; `self: Box<Self>` takes the `Box`, which method lookup derefs
+ * through to `Self`, while lookup stops at an `Rc`, `Arc` or `Pin` itself.
+ */
+function checkSelfMove(
+  c: Checker,
+  expr: Extract<Expr, { kind: 'methodCall' }>,
+  fn: FnDef,
+  found: { adjust: ReceiverAdjust; selfType: Type },
+  receiverType: Type
+): void {
+  const derefs = fn.selfWrapper === 'Box' ? found.adjust.derefs.slice(0, -1) : found.adjust.derefs;
+  const adjust = { ...found.adjust, derefs };
+  checkMoveOutOfRef(c, expr, adjust, typeAfter(receiverType, derefs) ?? found.selfType);
+}
+
 function checkMoveOutOfRef(
   c: Checker,
   expr: Extract<Expr, { kind: 'methodCall' }>,

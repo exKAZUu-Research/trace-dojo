@@ -1076,19 +1076,19 @@ export class Checker {
       }
     }
     if (this.coercePointer(expr, a, t)) return;
-    // A safe function pointer coerces to an `unsafe` one.
-    if (a.kind === 'fn' && t.kind === 'fn' && t.isUnsafe && this.unifier.tryUnify({ ...a, isUnsafe: true }, t)) return;
-    // Only a closure that captures nothing is a function.
-    if (
+    if (t.kind === 'fn' && this.coerceToFnPointer(a, t)) return;
+    this.mismatch(expr.span, target, actual);
+  }
+
+  /** A safe function pointer to an `unsafe` one, and a closure that captures nothing to a function pointer. */
+  private coerceToFnPointer(a: Type, t: Type & { kind: 'fn' }): boolean {
+    if (a.kind === 'fn') return t.isUnsafe === true && this.unifier.tryUnify({ ...a, isUnsafe: true }, t);
+    return (
       a.kind === 'closure' &&
-      t.kind === 'fn' &&
       (a.closure.captures ?? []).length === 0 &&
       this.unifier.tryUnify({ kind: 'tuple', elems: a.closure.params }, { kind: 'tuple', elems: t.params }) &&
       this.unifier.tryUnify(a.closure.ret, t.ret)
-    ) {
-      return;
-    }
-    this.mismatch(expr.span, target, actual);
+    );
   }
 
   /** `Box<[T; N]>` → `Box<[T]>` and `Box<T>` → `Box<dyn Trait>`, also inside a `Pin`; false when none applies. */
