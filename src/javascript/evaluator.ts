@@ -20,6 +20,7 @@ import { defineAccessor } from './expressionEvaluator';
 import { createGeneratorObject, type Steps } from './generators';
 import { DONE, ValueIterator } from './iteration';
 import {
+  defineFunctionName,
   defineFunctionProperties,
   expectedArgumentCount,
   mergePrivate,
@@ -613,7 +614,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       temporaries.push(fn);
       runtime.allocate(3);
       defineFunctionProperties(fn, cls.name, cls.ctor ? expectedArgumentCount(cls.ctor) : 0);
-      if (inferredName !== undefined) nameFunction(runtime, fn, inferredName);
+      if (inferredName !== undefined && !suppressesDecoratorDefaultName(cls)) nameFunction(runtime, fn, inferredName);
       fn.properties.set('prototype', {
         value: prototype,
         writable: false,
@@ -648,7 +649,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       const staticInitializers = this.inScope(classScope, () =>
         this.defineMembers(cls, fn, prototype, behavior, { definitions, isDecorated: classDecorators !== undefined })
       );
-      const name = cls.name || (typeof inferredName === 'string' ? inferredName : '');
+      const name = decoratorClassName(cls, inferredName);
       const decorated =
         classDecorators &&
         decorateClassDefinition(runtime, {
@@ -667,7 +668,9 @@ export class Evaluator extends SuspendableStatementEvaluator {
       }
       // As tsx compiles a decorated class, its own name inside its body stays the class the decorators were given.
       if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
-      this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
+      withTemporaryStaticDefaultName(cls, fn, inferredName, () =>
+        this.initializeStaticMembers(classScope, fn, staticInitializers, binding)
+      );
       if (!decorated) return fn;
       if (binding && decorated.cls !== fn) binding.declaredClass = fn;
       runInitializers(runtime, decorated.classInitializers, decorated.cls, true);
@@ -1068,4 +1071,44 @@ function initialValue(runtime: Evaluator['runtime'], target: JsObject, field: Cl
 function privateIdentity(key: Key): string {
   if (typeof key !== 'string') throw new TypeError('A private name has a string identity');
   return key;
+}
+
+/**
+ * esbuild lowers a class-only decorated anonymous `export default [abstract] class` declaration with `""` for class
+ * decorators while keeping `"default"` during its static field and static block initialization.
+ */
+function suppressesDecoratorDefaultName(cls: ClassNode): boolean {
+  return Boolean(
+    cls.isUnnamedDefaultDeclaration &&
+    cls.decorators &&
+    !cls.members.some((member) => member.kind !== 'staticBlock' && member.decorators)
+  );
+}
+
+function decoratorClassName(cls: ClassNode, inferredName: Key | undefined): string {
+  if (cls.name) return cls.name;
+  return !suppressesDecoratorDefaultName(cls) && typeof inferredName === 'string' ? inferredName : '';
+}
+
+function withTemporaryStaticDefaultName(
+  cls: ClassNode,
+  fn: JsFunction,
+  inferredName: Key | undefined,
+  run: () => void
+): void {
+  if (!suppressesDecoratorDefaultName(cls) || typeof inferredName !== 'string' || !hasOwnFunctionName(fn, '')) {
+    run();
+    return;
+  }
+  defineFunctionName(fn, inferredName);
+  try {
+    run();
+  } finally {
+    if (hasOwnFunctionName(fn, inferredName)) defineFunctionName(fn, '');
+  }
+}
+
+function hasOwnFunctionName(fn: JsFunction, expected: string): boolean {
+  const property = fn.properties.get('name');
+  return Boolean(property && !isAccessor(property) && property.value === expected);
 }

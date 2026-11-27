@@ -32,6 +32,8 @@ class ViewNode implements Node {
   hidesCallRow = false;
   /** The variable name a synthesized namespace-export member target stands for, for anonymous function/class naming. */
   inferredName?: string;
+  /** Whether a viewed `class` came from an unnamed `export default [abstract] class` declaration. */
+  isUnnamedDefaultClassDeclaration = false;
   /** Whether a synthesized member expression represents a live ESM import binding called with `undefined` receiver. */
   isUnboundCall = false;
   /** Whether an `imported_module` node wraps the CommonJS module in an ESM namespace object (`__toESM`). */
@@ -652,7 +654,9 @@ function exportView(node: TreeNode, binder: Binder): ViewNode {
   const declaration = node.childForFieldName('declaration');
   if (declaration && !declaration.childForFieldName('name')) {
     if (declaration.type === 'class_declaration' || declaration.type === 'abstract_class_declaration') {
-      return expressionStatement(node, withDefaultName(generic(declaration, 'class', binder)));
+      const viewed = withDefaultName(generic(declaration, 'class', binder));
+      viewed.isUnnamedDefaultClassDeclaration = true;
+      return expressionStatement(node, viewed);
     }
     const fnType = unnamedDefaultFunctionViewTypes[declaration.type];
     if (fnType) return unstepped(expressionStatement(node, withDefaultName(generic(declaration, fnType, binder))));
@@ -1057,6 +1061,11 @@ export function isHiddenCallFunction(node: Node): boolean {
 /** The inferred name a synthesized namespace-export target or anonymous default export carries, if any. */
 export function inferredTargetNameOf(node: Node): string | undefined {
   return node instanceof ViewNode ? node.inferredName : undefined;
+}
+
+/** Whether a viewed `class` came from an unnamed `export default [abstract] class` declaration. */
+export function isUnnamedDefaultClassDeclaration(node: Node): boolean {
+  return node instanceof ViewNode && node.isUnnamedDefaultClassDeclaration;
 }
 
 /** Whether a synthesized member expression calls its function with an `undefined` receiver. */

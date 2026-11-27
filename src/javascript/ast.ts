@@ -148,6 +148,8 @@ export interface ClassNode extends Span {
   source: string;
   /** The class's decorators, in source order, as TypeScript's standard decorators apply them. */
   decorators?: Expression[];
+  /** Whether the class is an unnamed `export default [abstract] class` declaration rather than an expression. */
+  isUnnamedDefaultDeclaration?: boolean;
 }
 
 export type ClassMember =

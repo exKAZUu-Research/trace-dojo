@@ -971,6 +971,28 @@ test('lowers qualified fs import aliases, anonymous abstract default exports, de
   expect(
     executeProgram(
       'typescript',
+      'function d(v: any, c: any) { c.addInitializer(function(this: any) { console.log("init:" + this.name); }); console.log(JSON.stringify([v.name, c.name])); }\n@d export default abstract class { static { console.log("static:" + this.name); } }'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '["",""]\nstatic:default\ninit:\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      'function d(v: any, c: any) { console.log(JSON.stringify([v.name, c.name])); }\n@d export default class {}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '["",""]\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
       'namespace N { declare function g(): void; }\nconsole.log(typeof N);\nnamespace N { export const x = 1; }\nconsole.log(N.x);\nnamespace A.B.C { declare const y: number; }\nconsole.log(typeof A, typeof A.B, typeof (A.B as any).C);'
     )
   ).toMatchObject({

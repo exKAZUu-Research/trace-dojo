@@ -22,6 +22,7 @@ import {
   isHiddenCallFunction,
   isNamespaceImportNode,
   isUnboundCallMember,
+  isUnnamedDefaultClassDeclaration,
   isUnsteppedStatement,
   PARAMETER_PROPERTY_ASSIGNMENT,
 } from './jsView';
@@ -350,6 +351,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
 
   override classNode(node: Node, name: string): ClassNode {
     const cls = super.classNode(node, name);
+    if (isUnnamedDefaultClassDeclaration(node)) cls.isUnnamedDefaultDeclaration = true;
     if (!cls.superClass || !cls.ctor) return cls;
     const constructor = node.childForFieldName('body')?.namedChildren.find((member) => isConstructorDefinition(member));
     const count =
