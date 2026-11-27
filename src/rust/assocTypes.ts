@@ -89,7 +89,12 @@ function boundWithAssoc(self: Type, name: string, scope: TypeScope, span: Span):
   );
   if (new Set(candidates.map((candidate) => candidate.trait)).size > 1)
     compileError(span, `関連型 ${name} が、複数のトレイトにあります（<T as Trait>::${name} と書いてください）。`);
-  if (!candidates[0]) compileError(span, `${typeToString(self)} に関連型 ${name} がありません。`);
+  if (!candidates[0]) {
+    // The std traits declare only the associated types the environment supports (`IntoIterator` has no `IntoIter`).
+    if (allSupertraits(bounds, self).some(({ trait }) => (trait.module as Module | undefined)?.isStd))
+      compileError(span, `${typeToString(self)}::${name} は、この採点環境では使えません。`);
+    compileError(span, `${typeToString(self)} に関連型 ${name} がありません。`);
+  }
   return candidates[0];
 }
 
