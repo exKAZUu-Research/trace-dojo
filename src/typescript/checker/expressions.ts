@@ -291,17 +291,8 @@ export class ExpressionChecker {
     const type = this.check(operand, target);
     if (target === errorType) return type;
     if (this.c.relations.isAssignable(type, target)) this.checkExcessProperties(operand, type, target);
-    else if (!this.elaboration.report(operand, type, target)) {
-      const message = this.elaboration.typeRelationMessage(type, target);
-      const [source, expected] = [this.c.print(type), this.c.print(target)];
-      const head = `型 '${source}' を型 '${expected}' に代入することはできません。`;
-      this.c.error(
-        operand,
-        message.startsWith(head)
-          ? `型 '${source}' は、期待される型 '${expected}' を満たしません。${message.slice(head.length)}`
-          : message
-      );
-    }
+    else if (!this.elaboration.report(operand, type, target))
+      this.c.error(operand, this.elaboration.typeRelationMessage(type, target, 'satisfies'));
     return type;
   }
 

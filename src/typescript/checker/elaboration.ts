@@ -37,18 +37,25 @@ export class Elaboration {
   typeRelationMessage(
     source: Type,
     target: Type,
-    context: 'assignment' | 'argument' | 'constraint' = 'assignment'
+    context: 'assignment' | 'argument' | 'constraint' | 'satisfies' = 'assignment'
   ): string {
     const types = this.c.typesForMessage(source, target);
     const actual = this.c.print(types.source);
     const expected = this.c.print(types.target);
+    const details = this.assignmentDetails(source, types.target);
+    const isMissingMember =
+      (source.kind !== 'union' || source === booleanType) &&
+      !this.tupleMismatch(source, types.target) &&
+      details !== '';
     const head =
       context === 'constraint'
         ? `型 '${actual}' は制約 '${expected}' を満たしていません。`
         : context === 'argument'
           ? `型 '${actual}' の引数を型 '${expected}' のパラメーターに渡すことはできません。`
-          : assignmentMessage(actual, expected);
-    return head + this.assignmentDetails(source, types.target);
+          : context === 'satisfies' && !isMissingMember
+            ? `型 '${actual}' は、期待される型 '${expected}' を満たしません。`
+            : assignmentMessage(actual, expected);
+    return head + details;
   }
 
   private assignmentDetails(source: Type, target: Type): string {
