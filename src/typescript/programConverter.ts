@@ -40,7 +40,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   private readonly scopeNames = new WeakMap<Node, Map<string, Node[]>>();
   private readonly enclosingScope = new WeakMap<Node, Node>();
   private readonly enclosingFnScope = new WeakMap<Node, Node>();
-  private readonly foldingEnums = new Set<string>();
+  private readonly foldingEnums = new Map<string, Map<string, FoldedValue>>();
   /** The errors of the statements that failed to convert, which tsc reports all of, unlike Node's first one. */
   private readonly statementErrors: SourceDiagnostic[] = [];
 
@@ -111,14 +111,17 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     const assignments: Expression[] = [];
     const currentScope = this.enclosingFnScope.get(node);
     const folded = currentScope ? this.foldedMapFor(currentScope, name) : new Map<string, FoldedValue>();
-    const enumsInScope: EnumsInScope = (enumName) => this.lookupFoldedEnum(node, enumName);
+    const enumsInScope: EnumsInScope = (enumName) =>
+      enumName === name ? folded : this.lookupFoldedEnum(node, enumName);
     let previous: FoldedValue;
     let isFirst = true;
     for (const member of node.childForFieldName('body')?.namedChildren ?? []) {
       if (member.type === 'comment') continue;
       const key = enumMemberName(member);
       const initializer = member.childForFieldName('value');
-      const known = initializer ? foldEnumValue(initializer, enumsInScope) : countedEnumValue(previous, isFirst);
+      const known = initializer
+        ? foldEnumValue(initializer, enumsInScope, folded)
+        : countedEnumValue(previous, isFirst);
       const value: Expression = initializer
         ? this.expression(initializer)
         : { kind: 'literal', value: known?.kind === 'number' ? known.value : undefined, row };
@@ -241,10 +244,11 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     const existing = !isFullScope ? this.foldedEnums.get(scope)?.get(enumName) : undefined;
     if (existing) return existing;
     const key = `${scope.startIndex}:${enumName}`;
-    if (this.foldingEnums.has(key)) return undefined;
-    this.foldingEnums.add(key);
+    const inProgress = this.foldingEnums.get(key);
+    if (inProgress) return inProgress;
+    const folded = new Map<string, FoldedValue>();
+    this.foldingEnums.set(key, folded);
     try {
-      const folded = new Map<string, FoldedValue>();
       for (const declaration of declarations) {
         if (!isFullScope && declaration.startIndex > fromNode.startIndex) continue;
         this.foldDeclarationInto(declaration, folded);
@@ -263,7 +267,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       const key = enumMemberName(member);
       const initializer = member.childForFieldName('value');
       const known = initializer
-        ? foldEnumValue(initializer, (name) => this.lookupFoldedEnum(initializer, name))
+        ? foldEnumValue(initializer, (name) => this.lookupFoldedEnum(initializer, name), folded)
         : countedEnumValue(previous, isFirst);
       folded.set(key, known);
       previous = known;

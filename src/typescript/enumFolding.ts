@@ -15,9 +15,13 @@ const arithmeticOperators = new Set(['+', '-', '*', '/', '%', '**', '|', '&', '^
 
 /**
  * The value esbuild folds an enum initializer to: number and string literals, template literals (always strings),
- * arithmetic on folded numbers, and members of the enums compiled before, by their enum's name and theirs.
+ * arithmetic on folded numbers, and earlier members of the same enum or of enums compiled before.
  */
-export function foldEnumValue(node: Node, enums: EnumsInScope): FoldedValue {
+export function foldEnumValue(
+  node: Node,
+  enums: EnumsInScope,
+  ownMembers?: ReadonlyMap<string, FoldedValue>
+): FoldedValue {
   switch (node.type) {
     case 'number': {
       return { kind: 'number', value: Number(node.text.replaceAll('_', '')) };
@@ -26,16 +30,19 @@ export function foldEnumValue(node: Node, enums: EnumsInScope): FoldedValue {
       return { kind: 'string', value: decodeStringLiteral(node.text) };
     }
     case 'template_string': {
-      return foldTemplate(node, enums);
+      return foldTemplate(node, enums, ownMembers);
     }
     case 'parenthesized_expression': {
-      return node.namedChildren[0] ? foldEnumValue(node.namedChildren[0], enums) : undefined;
+      return node.namedChildren[0] ? foldEnumValue(node.namedChildren[0], enums, ownMembers) : undefined;
     }
     case 'unary_expression': {
-      return foldUnary(node, enums);
+      return foldUnary(node, enums, ownMembers);
     }
     case 'binary_expression': {
-      return foldBinary(node, enums);
+      return foldBinary(node, enums, ownMembers);
+    }
+    case 'identifier': {
+      return ownMembers?.get(nameOf(node));
     }
     case 'member_expression':
     case 'subscript_expression': {
@@ -47,13 +54,13 @@ export function foldEnumValue(node: Node, enums: EnumsInScope): FoldedValue {
   }
 }
 
-function foldTemplate(node: Node, enums: EnumsInScope): FoldedValue {
+function foldTemplate(node: Node, enums: EnumsInScope, ownMembers?: ReadonlyMap<string, FoldedValue>): FoldedValue {
   let value = '';
   for (const child of node.children) {
     if (child.type === 'string_fragment' || child.type === 'escape_sequence') {
       value += decodeTemplateFragment(child.text.replaceAll(/\r\n?/g, '\n'));
     } else if (child.type === 'template_substitution') {
-      const inner = child.namedChildren[0] ? foldEnumValue(child.namedChildren[0], enums) : undefined;
+      const inner = child.namedChildren[0] ? foldEnumValue(child.namedChildren[0], enums, ownMembers) : undefined;
       if (inner?.value === undefined) return { kind: 'string' };
       value += String(inner.value);
     }
@@ -61,19 +68,19 @@ function foldTemplate(node: Node, enums: EnumsInScope): FoldedValue {
   return { kind: 'string', value };
 }
 
-function foldUnary(node: Node, enums: EnumsInScope): FoldedValue {
+function foldUnary(node: Node, enums: EnumsInScope, ownMembers?: ReadonlyMap<string, FoldedValue>): FoldedValue {
   const operator = node.childForFieldName('operator')?.text;
-  const operand = foldEnumValue(node.childForFieldName('argument') as Node, enums);
+  const operand = foldEnumValue(node.childForFieldName('argument') as Node, enums, ownMembers);
   if (operand?.kind !== 'number') return undefined;
   if (operator === '-') return { kind: 'number', value: -operand.value };
   if (operator === '+') return operand;
   return operator === '~' ? { kind: 'number', value: ~operand.value } : undefined;
 }
 
-function foldBinary(node: Node, enums: EnumsInScope): FoldedValue {
+function foldBinary(node: Node, enums: EnumsInScope, ownMembers?: ReadonlyMap<string, FoldedValue>): FoldedValue {
   const operator = node.childForFieldName('operator')?.text ?? '';
-  const left = foldEnumValue(node.childForFieldName('left') as Node, enums);
-  const right = foldEnumValue(node.childForFieldName('right') as Node, enums);
+  const left = foldEnumValue(node.childForFieldName('left') as Node, enums, ownMembers);
+  const right = foldEnumValue(node.childForFieldName('right') as Node, enums, ownMembers);
   if (operator === '+' && left && right && (left.kind === 'string' || right.kind === 'string')) {
     const value = left.value !== undefined && right.value !== undefined ? `${left.value}${right.value}` : undefined;
     return { kind: 'string', value };
