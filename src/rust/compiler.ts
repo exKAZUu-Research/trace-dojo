@@ -30,8 +30,6 @@ import { concreteType, runtimeType } from './runtimeTypes';
 import { markExtendedTemporaries } from './temporaryScopes';
 import { trackCollectionStorage } from './turtleTypes';
 import { constArgValue, type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
-import type {
-  SharedBox} from './values';
 import {
   AccessorPlace,
   CellPlace,
@@ -43,6 +41,7 @@ import {
   type Place,
   RangeValue,
   RawPtr,
+  type SharedBox,
   StructValue,
   textOf,
   UNIT_VALUE,
@@ -607,11 +606,7 @@ export class Compiler {
         };
       }
       case 'dyn': {
-        if (coercion.shared) {
-          const type = runtimeType(coercion.type);
-          return (frame) => sharedDyn(derefAll(read(frame)) as SharedBox, type(frame));
-        }
-        return dynCoercion(read, runtimeType(coercion.type), coercion.mutable);
+        return dynCoercion(read, runtimeType(coercion.type), coercion.mutable, coercion.shared === true);
       }
       case 'intoIter': {
         const from = runtimeType(coercion.from);
@@ -997,7 +992,8 @@ function sharedDyn(box: SharedBox, type: Type): SharedBox {
   });
 }
 
-function dynCoercion(read: Eval, type: (frame: Frame) => Type, mutable: boolean): Eval {
+function dynCoercion(read: Eval, type: (frame: Frame) => Type, mutable: boolean, shared: boolean): Eval {
+  if (shared) return (frame) => sharedDyn(derefAll(read(frame)) as SharedBox, type(frame));
   if (!mutable) return (frame) => new DynValue(type(frame), derefAll(read(frame)));
   return (frame) => {
     const target = read(frame) as Place;

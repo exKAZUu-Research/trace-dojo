@@ -41,6 +41,7 @@ import {
   unavailableStdItem,
 } from './stdNames';
 import { TraitSolver } from './traits';
+import { typeAlias } from './typeAliases';
 import {
   adt,
   type AdtDef,
@@ -87,7 +88,7 @@ function derivedTraits(derives: readonly { name: string; span: Span }[]): Set<st
  * The type parameters a generics list declares. A name may be declared once, in the list and in the item around it
  * (E0403): a later one would hide the earlier one from the lookup by name.
  */
-function declareTypeParams(generics: Generics, enclosing: readonly TypeParam[] = []): TypeParam[] {
+export function declareTypeParams(generics: Generics, enclosing: readonly TypeParam[] = []): TypeParam[] {
   const names = new Set<string>();
   for (const param of generics.params) {
     if (enclosing.some((outer) => outer.name === param.name)) {
@@ -350,25 +351,7 @@ export class ItemCollector {
           break;
         }
         case 'typeAlias': {
-          let resolved: Type | undefined;
-          let resolving = false;
-          const params = declareTypeParams(item.generics);
-          const scope: TypeScope = {
-            module,
-            params: new Map(params.map((param) => [param.name, param])),
-            selfType: undefined,
-          };
-          const resolve = (): Type => {
-            if (resolved) return resolved;
-            if (resolving) compileError(item.span, `型の別名 ${item.name} が、自分自身を使っています（E0391）。`);
-            resolving = true;
-            try {
-              resolved = lowerType(item.type, scope);
-            } finally {
-              resolving = false;
-            }
-            return resolved;
-          };
+          const { params, resolve } = typeAlias(item, module);
           this.declareType(
             module,
             item.name,
