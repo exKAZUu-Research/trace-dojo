@@ -1,6 +1,6 @@
 name: Lint PR title
 on:
-  pull_request_target:
+  pull_request:
     types:
       - opened
       - edited
@@ -8,3 +8,5 @@ on:
 jobs:
   semantic-pr:
     uses: exKAZUu-Research/reusable-workflows/.github/workflows/semantic-pr.yml@main
+    permissions:
+      pull-requests: read
