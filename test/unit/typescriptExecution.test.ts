@@ -1036,7 +1036,7 @@ console.log(fs.existsSync('/missing/../dev/stdin'), fs.existsSync('part/../dev/s
     )
   ).toMatchObject({
     kind: 'executed',
-    stdout: 'fd1:false false EEXIST,EEXIST,TypeError,ENOENT,ENOTDIR,stop1,stop2\n',
+    stdout: 'fd1:false false EEXIST,EEXIST,ERR_INVALID_ARG_VALUE,ENOENT,ENOTDIR,stop1,stop2\n',
     stderr: 'fd2',
     uncaughtException: undefined,
   });

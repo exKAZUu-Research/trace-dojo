@@ -80,28 +80,43 @@ function defineProcessExit(builder: RealmBuilder, process: JsObject): void {
 function parseExitCode(runtime: Runtime, code: Value): number | undefined {
   if (code === undefined || code === null) return undefined;
   if (typeof code === 'string') {
-    if (/^-?\d+$/.test(code)) {
-      const parsed = Number(code);
-      if (Number.isSafeInteger(parsed)) return parsed;
-    }
-    return runtime.throwError(
+    const parsed = code === '' ? Number.NaN : Number(code);
+    if (!Number.isNaN(parsed)) return validateIntegerExitCode(runtime, parsed);
+    return throwCodedError(
+      runtime,
       'TypeError',
+      'ERR_INVALID_ARG_TYPE',
       `The "code" argument must be of type number. Received type string (${inspect(runtime, code)})`
     );
   }
-  if (typeof code === 'number') {
-    if (!Number.isInteger(code)) {
-      return runtime.throwError(
-        'RangeError',
-        `The value of "code" is out of range. It must be an integer. Received ${code}`
-      );
-    }
-    return code;
-  }
-  return runtime.throwError(
+  if (typeof code === 'number') return validateIntegerExitCode(runtime, code);
+  return throwCodedError(
+    runtime,
     'TypeError',
+    'ERR_INVALID_ARG_TYPE',
     `The "code" argument must be of type number. Received ${inspect(runtime, code)}`
   );
+}
+
+function validateIntegerExitCode(runtime: Runtime, value: number): number {
+  if (!Number.isInteger(value)) {
+    return throwCodedError(
+      runtime,
+      'RangeError',
+      'ERR_OUT_OF_RANGE',
+      `The value of "code" is out of range. It must be an integer. Received ${value}`
+    );
+  }
+  if (!Number.isSafeInteger(value)) {
+    const formatted = Math.abs(value) < 1e21 ? String(value).replaceAll(/\B(?=(\d{3})+(?!\d))/g, '_') : String(value);
+    return throwCodedError(
+      runtime,
+      'RangeError',
+      'ERR_OUT_OF_RANGE',
+      `The value of "code" is out of range. It must be >= -9007199254740991 && <= 9007199254740991. Received ${formatted}`
+    );
+  }
+  return value === 0 ? 0 : value;
 }
 
 /** Loads a built-in Node.js module by specifier, for `require` and lowered ECMAScript `import` declarations. */
@@ -372,7 +387,12 @@ interface ParsedOpenFlag {
 function parseOpenFlag(runtime: Runtime, flag: string): ParsedOpenFlag {
   const match = /^(?:(?<read>r|rs|sr)|(?<write>w|wx|xw)|(?<append>a|as|sa|ax|xa))(?<plus>\+)?$/.exec(flag);
   if (!match?.groups) {
-    return runtime.throwError('TypeError', `The argument 'flags' is invalid. Received '${flag}'`);
+    return throwCodedError(
+      runtime,
+      'TypeError',
+      'ERR_INVALID_ARG_VALUE',
+      `The argument 'flags' is invalid. Received '${flag}'`
+    );
   }
   const { read, write, append, plus } = match.groups;
   const hasPlus = plus === '+';
@@ -382,6 +402,12 @@ function parseOpenFlag(runtime: Runtime, flag: string): ParsedOpenFlag {
     readable: read !== undefined || hasPlus,
     writable: write !== undefined || append !== undefined || hasPlus,
   };
+}
+
+function throwCodedError(runtime: Runtime, kind: 'TypeError' | 'RangeError', code: string, message: string): never {
+  const error = runtime.newError(kind, message);
+  runtime.set(error, 'code', code);
+  throw new JsThrow(error);
 }
 
 function requirePath(runtime: Runtime, value: Value): string {
