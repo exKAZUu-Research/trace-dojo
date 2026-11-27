@@ -42,17 +42,16 @@ export function derefCoercedPlace(
   expr: Expr,
   placeOf: (expr: Expr) => Place | undefined
 ): { place: Place; type: Type } | undefined {
-  const coercion = annotations.coercions.get(expr);
-  if (coercion?.kind !== 'deref' || coercion.fromMut || coercion.derefs.length === 0) return undefined;
-  if (!coercion.derefs.every((step) => step === 'ref')) return undefined;
+  const derefs = copiedReferenceDerefs(annotations, expr);
+  if (derefs === undefined) return undefined;
   let place = placeOf(expr);
   let type = expr.ty && normalize(shallow(expr.ty));
-  for (let step = 0; step < coercion.derefs.length; step++) {
+  for (let step = 0; step < derefs; step++) {
     if (!place || type?.kind !== 'ref') return undefined;
     place = project(place, '*');
     type = normalize(shallow(type.target));
   }
-  return place && type?.kind === 'ref' ? { place, type } : undefined;
+  return place && type?.kind === 'ref' && !type.mutable ? { place, type } : undefined;
 }
 
 export function tupleElem(layout: Layout, index: number): Layout {
@@ -84,14 +83,24 @@ export function storedElement<V>(fn: FnDef, args: V[]): V | undefined {
 
 /** For a value of a reference coerced through shared references (`&&'a str` to `&str`), the inner reference's layout. */
 export function derefCoercedLayout(annotations: Annotations, expr: Expr, layout: Layout): Layout | undefined {
-  const coercion = annotations.coercions.get(expr);
-  if (coercion?.kind !== 'deref' || coercion.fromMut || coercion.derefs.length === 0) return undefined;
+  const derefs = copiedReferenceDerefs(annotations, expr);
+  if (derefs === undefined) return undefined;
   let inner = layout;
-  for (const step of coercion.derefs) {
-    if (step !== 'ref' || inner.kind !== 'ref' || inner.target.kind !== 'ref') return undefined;
+  for (let step = 0; step < derefs; step++) {
+    if (inner.kind !== 'ref' || inner.target.kind !== 'ref') return undefined;
     inner = inner.target;
   }
-  return inner;
+  return inner.kind === 'ref' && !inner.mutable ? inner : undefined;
+}
+
+/**
+ * How many references a deref coercion goes through to reach a shared reference it copies (`&&'a str` or
+ * `&mut &'a str` to `&'a str`), or undefined for one that goes through an owner or a `Deref` impl.
+ */
+function copiedReferenceDerefs(annotations: Annotations, expr: Expr): number | undefined {
+  const coercion = annotations.coercions.get(expr);
+  if (coercion?.kind !== 'deref' || coercion.derefs.length === 0) return undefined;
+  return coercion.derefs.every((step) => step === 'ref' || step === 'mutRef') ? coercion.derefs.length : undefined;
 }
 
 /** `TryFrom<&[T]>` for `&[T; N]` borrows the array from the slice: the input outlives what the result holds. */

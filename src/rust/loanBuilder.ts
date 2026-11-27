@@ -696,13 +696,14 @@ export class LoanBuilder {
 
   /** Evaluates an expression for its value, moving or copying the place it denotes. */
   private value(expr: Expr): Value {
+    // A reference coerced to the shared reference it holds copies that one, rather than reborrowing the outer one.
+    const coerced = derefCoercedPlace(this.annotations, expr, (e) => this.place(e));
+    if (coerced) return this.read(coerced.place, coerced.type, expr.span);
     const mutable = this.annotations.reborrows.get(expr);
     if (mutable !== undefined && isMutableReference(expr.ty)) {
       const place = this.place(expr, mutable);
       if (place) return this.borrow(project(place, '*'), mutable, expr.span, refTarget(expr.ty)).value;
     }
-    const coerced = derefCoercedPlace(this.annotations, expr, (e) => this.place(e));
-    if (coerced) return this.read(coerced.place, coerced.type, expr.span);
     return this.derefCoercedValue(expr, this.valueInner(expr));
   }
 
