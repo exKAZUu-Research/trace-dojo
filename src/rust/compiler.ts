@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
-import { patternBindings } from './astWalk';
+import { patternBindingParts, patternBindings } from './astWalk';
 import type { Checker } from './checker';
 import { compileCall, compileMethodCall } from './compilerCalls';
 import { construct, derefAll, evaluateValues, isPlaceExpr, isRefType, LocalPlace } from './compilerCommon';
@@ -17,7 +17,7 @@ import {
   takesWhole,
 } from './compilerPatterns';
 import { compileField, compileIndex, compilePlace, readPlace, userDerefCall } from './compilerPlaces';
-import { dropsBorrowedTemporary } from './compilerTemporaries';
+import { dropsBorrowedTemporary, holdTemporary } from './compilerTemporaries';
 import type { Dropper } from './drops';
 import type { Formatter } from './fmt';
 import { normalize } from './infer';
@@ -318,36 +318,34 @@ export class Compiler {
     if (stmt.pattern.kind !== 'binding' && isPlaceExpr(stmt.init, this.annotations)) return this.destructure(stmt);
     if (stmt.else) {
       const init = this.value(stmt.init);
-      const matcher = this.compileMatcher(stmt.pattern);
+      const bindRest = this.compileTemporaryBinder(stmt.pattern, stmt.init);
       const elseBlock = this.compileBlock(stmt.else, true);
       const run: Eval = (frame) => {
         frame.runtime.spend();
-        const value = init(frame);
-        if (!matcher(frame, value, undefined)) elseBlock(frame);
+        if (!bindRest(frame, init(frame))) elseBlock(frame);
         return UNIT_VALUE;
       };
       return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
     }
     if (stmt.hidden) {
-      const bind = this.compileBinder(stmt.pattern);
+      const bind =
+        stmt.pattern.kind === 'binding'
+          ? this.compileBinder(stmt.pattern)
+          : this.compileTemporaryBinder(stmt.pattern, stmt.init);
       const init = this.value(stmt.init);
       return (frame) => {
         bind(frame, init(frame));
         return UNIT_VALUE;
       };
     }
-    const bind = this.compileBinder(stmt.pattern);
     const local =
       stmt.pattern.kind === 'binding' && !stmt.pattern.sub ? this.annotations.bindings.get(stmt.pattern) : undefined;
+    const bind = local ? this.compileBinder(stmt.pattern) : this.compileTemporaryBinder(stmt.pattern, stmt.init);
     const init = this.bindingValue(stmt.init, local?.slot);
-    // `let _ = value;` binds nothing, so the value goes at once.
-    const dropped = stmt.pattern.kind === 'wild' ? this.droppedType(stmt.init.ty) : undefined;
     const run: Eval = (frame) => {
       frame.runtime.spend();
       const mark = frame.runtime.liveGuards.length;
-      const value = init(frame);
-      bind(frame, value);
-      if (dropped) frame.runtime.dropper?.drop(value, dropped(frame));
+      bind(frame, init(frame));
       frame.runtime.releaseGuards(frame, mark);
       return UNIT_VALUE;
     };
@@ -470,6 +468,25 @@ export class Compiler {
     const matcher = this.compileMatcher(pattern);
     return (frame, value) => {
       matcher(frame, value, undefined);
+    };
+  }
+
+  /**
+   * Binds a pattern to a value no variable holds, telling whether it matched. What the bindings leave of the value goes
+   * at once, or before `else` when it does not match; with a `ref` binding into it, when the bindings go.
+   */
+  private compileTemporaryBinder(pattern: Pattern, init: Expr): (frame: Frame, value: Value) => boolean {
+    const matcher = this.compileMatcher(pattern);
+    const dropped = this.droppedType(init.ty);
+    if (!dropped) return (frame, value) => matcher(frame, value, undefined);
+    const parts = patternBindingParts(pattern, this.annotations);
+    const holder = parts.some((part) => part.throughRef) ? parts[0].local.slot : undefined;
+    return (frame, value) => {
+      const place = new CellPlace(value);
+      const matched = frame.runtime.withRoots([place], () => matcher(frame, value, () => place));
+      if (matched && holder !== undefined) holdTemporary(frame, place, dropped(frame), holder);
+      else frame.runtime.dropper?.drop(place.get(), dropped(frame));
+      return matched;
     };
   }
 
