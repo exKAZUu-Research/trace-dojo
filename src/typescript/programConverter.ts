@@ -20,6 +20,8 @@ import {
   IMPORTED_MODULE,
   inferredTargetNameOf,
   isHiddenCallFunction,
+  isNamespaceImportNode,
+  isUnboundCallMember,
   isUnsteppedStatement,
   PARAMETER_PROPERTY_ASSIGNMENT,
 } from './jsView';
@@ -79,13 +81,17 @@ export class TypeScriptProgramConverter extends ProgramConverter {
         if (inlined) return inlined;
         const member = convertMember(node);
         const inferredName = inferredTargetNameOf(node);
-        if (member.kind === 'member' && inferredName !== undefined) member.inferredName = inferredName;
+        if (member.kind === 'member') {
+          if (inferredName !== undefined) member.inferredName = inferredName;
+          if (isUnboundCallMember(node)) member.isUnboundCall = true;
+        }
         return member;
       };
     }
     this.expressionConverters[IMPORTED_MODULE] = (node) => ({
       kind: 'importedModule',
       specifier: decodeStringLiteral(node.text),
+      isNamespace: isNamespaceImportNode(node) || undefined,
       row: rowOf(node),
     });
     // `this.name = name` for a parameter property, which steps on the parameter's row as the assignment it stands for.

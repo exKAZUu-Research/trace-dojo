@@ -221,7 +221,7 @@ export type Expression = Span & {
     | { kind: 'templateObject'; cooked: (string | undefined)[]; raw: string[] }
     | { kind: 'regex'; pattern: string; flags: string }
     | { kind: 'identifier'; name: string }
-    | { kind: 'importedModule'; specifier: string }
+    | { kind: 'importedModule'; specifier: string; isNamespace?: boolean }
     | { kind: 'this' }
     | { kind: 'newTarget' }
     | { kind: 'array'; elements: (Argument | undefined)[] }
@@ -264,6 +264,7 @@ export interface MemberExpression extends Span {
   property: PropertyName;
   optional: boolean;
   inferredName?: string;
+  isUnboundCall?: boolean;
 }
 
 /** How V8 names what a pattern takes apart, in the TypeError a value it cannot take apart throws. */

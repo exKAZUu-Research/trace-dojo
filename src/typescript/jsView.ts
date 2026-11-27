@@ -32,6 +32,10 @@ class ViewNode implements Node {
   hidesCallRow = false;
   /** The variable name a synthesized namespace-export member target stands for, for anonymous function/class naming. */
   inferredName?: string;
+  /** Whether a synthesized member expression represents a live ESM import binding called with `undefined` receiver. */
+  isUnboundCall = false;
+  /** Whether an `imported_module` node wraps the CommonJS module in an ESM namespace object (`__toESM`). */
+  isNamespaceImport = false;
   /** Generated helper binding names allocated for this program, omitted from learner trace snapshots. */
   hiddenNames?: ReadonlySet<string>;
   /** A collision-free alias bound to an enum's object when a member initializer shadows the enum's source name. */
@@ -107,6 +111,7 @@ class ViewContext {
   readonly hiddenNames = new Set<string>();
   readonly bodyReceivers = new Map<number, NamespaceReceiver[]>();
   readonly enumAliases = new Map<number, string>();
+  readonly importReceivers = new Map<number, string>();
   private nextId = 0;
 
   constructor(root: TreeNode, budget: ExecutionBudget) {
@@ -120,6 +125,15 @@ class ViewContext {
     this.usedNames.add(candidate);
     this.hiddenNames.add(candidate);
     return candidate;
+  }
+
+  importReceiverFor(statement: TreeNode, moduleName: string): string {
+    let helper = this.importReceivers.get(statement.id);
+    if (!helper) {
+      helper = this.freshHelperName(`import_${moduleName}`);
+      this.importReceivers.set(statement.id, helper);
+    }
+    return helper;
   }
 }
 
@@ -253,12 +267,7 @@ function shorthandPropertyView(node: TreeNode, binder: Binder): ViewNode {
 
 function shorthandPropertyPatternView(node: TreeNode, binder: Binder): ViewNode {
   const target = isAssignmentPatternPosition(node) ? rewrittenAssignmentReference(node, binder) : undefined;
-  if (!target) return generic(node, node.type, binder);
-  return assemble(node, 'pair_pattern', [
-    { node: leaf(node, 'property_identifier', nameOf(node)), fieldName: 'key' },
-    { node: token(node, ':'), fieldName: undefined },
-    { node: target, fieldName: 'value' },
-  ]);
+  return target ? pairPattern(node, node, target) : generic(node, node.type, binder);
 }
 
 function objectAssignmentPatternView(node: TreeNode, binder: Binder): ViewNode {
@@ -269,17 +278,22 @@ function objectAssignmentPatternView(node: TreeNode, binder: Binder): ViewNode {
       ? rewrittenAssignmentReference(left, binder)
       : undefined;
   if (!target || !left || !right) return generic(node, node.type, binder);
-  return assemble(node, 'pair_pattern', [
-    { node: leaf(left, 'property_identifier', nameOf(left)), fieldName: 'key' },
-    { node: token(node, ':'), fieldName: undefined },
-    {
-      node: assemble(node, 'assignment_pattern', [
-        { node: target, fieldName: 'left' },
-        { node: token(node, '='), fieldName: undefined },
-        { node: view(right, binder), fieldName: 'right' },
-      ]),
-      fieldName: 'value',
-    },
+  return pairPattern(node, left, defaultedTarget(node, target, right, binder));
+}
+
+function pairPattern(position: TreeNode, keyNode: TreeNode, value: ViewNode): ViewNode {
+  return assemble(position, 'pair_pattern', [
+    { node: leaf(keyNode, 'property_identifier', nameOf(keyNode)), fieldName: 'key' },
+    { node: token(position, ':'), fieldName: undefined },
+    { node: value, fieldName: 'value' },
+  ]);
+}
+
+function defaultedTarget(position: TreeNode, target: ViewNode, right: TreeNode, binder: Binder): ViewNode {
+  return assemble(position, 'assignment_pattern', [
+    { node: target, fieldName: 'left' },
+    { node: token(position, '='), fieldName: undefined },
+    { node: view(right, binder), fieldName: 'right' },
   ]);
 }
 
@@ -331,9 +345,22 @@ function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode 
   const symbol = binder.lookupValue(node, nameOf(node));
   const namespace = namespaceOfReference(node, symbol, binder);
   if (namespace) return memberReference(node, namespace, nameOf(node));
+  if (symbol?.valueKind === 'import' && symbol.importTarget && !symbol.importTarget.typeOnly) {
+    const declaration = symbol.valueDeclarations[0];
+    if (declaration?.type === 'import_statement' && symbol.importTarget.name !== '*') {
+      const receiver = contextOf(binder).importReceiverFor(declaration, symbol.importTarget.module);
+      return liveImportReference(node, receiver, symbol.importTarget.name);
+    }
+  }
   // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
   if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode, binder);
   return undefined;
+}
+
+function liveImportReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
+  const reference = memberReference(position, objectName, memberName);
+  reference.isUnboundCall = true;
+  return reference;
 }
 
 /**
@@ -540,9 +567,8 @@ function declaresNamespaceVar(symbol: Sym | undefined): boolean {
 }
 
 /**
- * An `import` of a Node.js module as tsx compiles it for a CommonJS program, which reads the module with `require`:
- * `var fs = require("fs");` (for a default or namespace import) and `var readFileSync = require("fs").readFileSync;`. A
- * type-only one compiles to nothing.
+ * An `import` of a Node.js module as tsx compiles it for CommonJS: `var ns = __toESM(require("fs"))` for a namespace
+ * import, and a hidden `var $ns_import_fs = __toESM(require("fs"))` whose live getters default and named imports read.
  */
 function importView(node: TreeNode, binder: Binder): ViewNode {
   const clause = node.childForFieldName('import_clause');
@@ -553,14 +579,7 @@ function importView(node: TreeNode, binder: Binder): ViewNode {
   if (bindings.length === 0) return leaf(node, 'empty_statement');
   const declarators = bindings.flatMap(([name, value], index) => [
     ...(index === 0 ? [] : [{ node: token(node, ','), fieldName: undefined }]),
-    {
-      node: assemble(node, 'variable_declarator', [
-        { node: leaf(node, 'identifier', name), fieldName: 'name' },
-        { node: token(node, '='), fieldName: undefined },
-        { node: value, fieldName: 'value' },
-      ]),
-      fieldName: undefined,
-    },
+    { node: variableDeclarator(node, name, value), fieldName: undefined },
   ]);
   return unstepped(
     assemble(node, 'variable_declaration', [
@@ -571,36 +590,48 @@ function importView(node: TreeNode, binder: Binder): ViewNode {
   );
 }
 
-/** The names an import declares, with the expressions that read them from the module `require` returns. */
+/** The bindings an import statement initializes at the top of the module. */
 function importBindings(node: TreeNode, clause: TreeNode, source: TreeNode, binder: Binder): [string, ViewNode][] {
   const moduleName = stringValue(source);
   const ambientExports = binder.ambientModules.get(moduleName)?.namespaceExports;
-  const required = (): ViewNode => leaf(source, IMPORTED_MODULE, source.text);
-  return clause.namedChildren.flatMap((part): [string, ViewNode][] => {
-    // A default import is the whole module, as tsx's interop gives a CommonJS module without a default export.
-    if (part?.type === 'identifier') return [[part.text, required()]];
-    const name = part?.namedChildren[0];
-    if (part?.type === 'namespace_import' && name) return [[name.text, required()]];
-    if (part?.type !== 'named_imports') return [];
-    return namedImportBindings(node, part, { moduleName, ambientExports, required });
-  });
+  const importedNamespace = (): ViewNode => {
+    const mod = leaf(source, IMPORTED_MODULE, source.text);
+    mod.isNamespaceImport = true;
+    return mod;
+  };
+  const bindings: [string, ViewNode][] = [];
+  let needsSharedNamespace = false;
+  for (const part of clause.namedChildren) {
+    if (part?.type === 'identifier') {
+      needsSharedNamespace = true;
+    } else if (part?.type === 'namespace_import') {
+      const name = part.namedChildren[0];
+      if (name) bindings.push([nameOf(name), importedNamespace()]);
+    } else if (part?.type === 'named_imports' && hasValueImportSpecifier(part, { moduleName, ambientExports })) {
+      needsSharedNamespace = true;
+    }
+  }
+  if (needsSharedNamespace) {
+    bindings.unshift([contextOf(binder).importReceiverFor(node, moduleName), importedNamespace()]);
+  }
+  return bindings;
 }
 
-function namedImportBindings(
-  node: TreeNode,
+function hasValueImportSpecifier(
   namedImports: TreeNode,
-  context: { moduleName: string; ambientExports: Scope | undefined; required: () => ViewNode }
-): [string, ViewNode][] {
-  return namedImports.namedChildren.flatMap((specifier): [string, ViewNode][] => {
+  context: { moduleName: string; ambientExports: Scope | undefined }
+): boolean {
+  return namedImports.namedChildren.some((specifier) => {
     const imported = specifier?.childForFieldName('name');
     const local = specifier?.childForFieldName('alias') ?? imported;
-    if (!imported || !local || isTypeOnlySpecifier(specifier, imported.text, context)) return [];
-    const member = assemble(node, 'member_expression', [
-      { node: context.required(), fieldName: 'object' },
-      { node: token(node, '.'), fieldName: undefined },
-      { node: leaf(imported, 'property_identifier', imported.text), fieldName: 'property' },
-    ]);
-    return [[local.text, member]];
+    const importedName = imported ? (imported.type === 'string' ? stringValue(imported) : nameOf(imported)) : undefined;
+    return (
+      !!specifier &&
+      !!importedName &&
+      !!local &&
+      local.type !== 'string' &&
+      !isTypeOnlySpecifier(specifier, importedName, context)
+    );
   });
 }
 
@@ -639,11 +670,13 @@ function importAliasView(node: TreeNode, binder: Binder): ViewNode {
   const root = binder.lookupValue(target, rootName);
   if (!root || !resolveImportAliasValue(path, binder)) return leaf(node, 'empty_statement');
   const namespace = namespaceOfReference(path[0], root, binder);
-  let value = namespace
-    ? memberReference(path[0], namespace, rootName)
-    : root.valueKind === 'enumMember'
-      ? enumMemberReference(path[0], root.valueDeclaration as TreeNode, binder)
-      : leaf(path[0], 'identifier', rootName);
+  let value =
+    rewrittenIdentifierReference(path[0], binder) ??
+    (namespace
+      ? memberReference(path[0], namespace, rootName)
+      : root.valueKind === 'enumMember'
+        ? enumMemberReference(path[0], root.valueDeclaration as TreeNode, binder)
+        : leaf(path[0], 'identifier', rootName));
   let text = value.text;
   for (const part of path.slice(1)) {
     const memberName = nameOf(part);
@@ -812,25 +845,16 @@ function exportedVariables(declaration: TreeNode, namespaceName: string, binder:
  * it read as the namespace's properties already.
  */
 function exportedPattern(node: TreeNode, namespaceName: string, binder: Binder): ViewNode {
-  const property = (name: TreeNode, value: ViewNode): ViewNode =>
-    assemble(node, 'pair_pattern', [
-      { node: leaf(name, 'property_identifier', nameOf(name)), fieldName: 'key' },
-      { node: token(node, ':'), fieldName: undefined },
-      { node: value, fieldName: 'value' },
-    ]);
   if (node.type === 'identifier') return exportedMemberReference(node, namespaceName, nameOf(node));
   if (node.type === 'shorthand_property_identifier_pattern')
-    return property(node, exportedMemberReference(node, namespaceName, nameOf(node)));
+    return pairPattern(node, node, exportedMemberReference(node, namespaceName, nameOf(node)));
   const left = node.childForFieldName('left');
   const right = node.childForFieldName('right');
   if (node.type === 'object_assignment_pattern' && left?.type === 'shorthand_property_identifier_pattern' && right)
-    return property(
+    return pairPattern(
+      node,
       left,
-      assemble(node, 'assignment_pattern', [
-        { node: exportedMemberReference(left, namespaceName, nameOf(left)), fieldName: 'left' },
-        { node: token(node, '='), fieldName: undefined },
-        { node: view(right, binder), fieldName: 'right' },
-      ])
+      defaultedTarget(node, exportedMemberReference(left, namespaceName, nameOf(left)), right, binder)
     );
   if (!exportedPatternTypes.has(node.type)) return view(node, binder);
   return assemble(
@@ -929,15 +953,18 @@ function parenthesized(node: TreeNode, inner: ViewNode): ViewNode {
 }
 
 function varDeclaration(node: TreeNode, name: string, value: ViewNode): ViewNode {
-  const declarator = assemble(node, 'variable_declarator', [
+  return assemble(node, 'variable_declaration', [
+    { node: token(node, 'var'), fieldName: undefined },
+    { node: variableDeclarator(node, name, value), fieldName: undefined },
+    { node: token(node, ';'), fieldName: undefined },
+  ]);
+}
+
+function variableDeclarator(node: TreeNode, name: string, value: ViewNode): ViewNode {
+  return assemble(node, 'variable_declarator', [
     { node: leaf(node, 'identifier', name), fieldName: 'name' },
     { node: token(node, '='), fieldName: undefined },
     { node: value, fieldName: 'value' },
-  ]);
-  return assemble(node, 'variable_declaration', [
-    { node: token(node, 'var'), fieldName: undefined },
-    { node: declarator, fieldName: undefined },
-    { node: token(node, ';'), fieldName: undefined },
   ]);
 }
 
@@ -981,6 +1008,16 @@ export function isHiddenCallFunction(node: Node): boolean {
 /** The declared variable name a synthesized namespace-export member target stands for, if any. */
 export function inferredTargetNameOf(node: Node): string | undefined {
   return node instanceof ViewNode ? node.inferredName : undefined;
+}
+
+/** Whether a synthesized member expression calls its function with an `undefined` receiver. */
+export function isUnboundCallMember(node: Node): boolean {
+  return node instanceof ViewNode && node.isUnboundCall;
+}
+
+/** Whether an `imported_module` node wraps the module in an ESM namespace object. */
+export function isNamespaceImportNode(node: Node): boolean {
+  return node instanceof ViewNode && node.isNamespaceImport;
 }
 
 /** Generated helper binding names allocated for a viewed program, omitted from learner trace snapshots. */

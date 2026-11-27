@@ -265,12 +265,13 @@ export class Binder {
     const clauseTypeOnly = node.children.some((child) => !child.isNamed && child.type === 'type');
     for (const { local, name, typeOnly: specTypeOnly } of importedNames(clause)) {
       const typeOnly = clauseTypeOnly || specTypeOnly;
+      const localName = canonicalIdentifier(local.text, local);
       const meanings = this.importMeaningsOf(module, name);
       if (meanings.value) {
-        scope.declareValue(local.text, 'import', node, local).importTarget = { module, name, typeOnly };
+        scope.declareValue(localName, 'import', node, local).importTarget = { module, name, typeOnly };
       }
       if (meanings.type) {
-        scope.declareType(local.text, 'import', node, local).importTarget = { module, name, typeOnly };
+        scope.declareType(localName, 'import', node, local).importTarget = { module, name, typeOnly };
       }
     }
   }
@@ -568,7 +569,14 @@ function importedNames(clause: TreeNode): { local: TreeNode; name: string; typeO
       const imported = specifier.childForFieldName('name');
       const local = specifier.childForFieldName('alias') ?? imported;
       const typeOnly = specifier.children.some((child) => !child.isNamed && child.type === 'type');
-      return imported && local ? [{ local, name: imported.text, typeOnly }] : [];
+      const importedName = imported
+        ? imported.type === 'string'
+          ? stringValue(imported)
+          : canonicalIdentifier(imported.text, imported)
+        : undefined;
+      return imported && local && importedName !== undefined && local.type !== 'string'
+        ? [{ local, name: importedName, typeOnly }]
+        : [];
     });
   });
 }

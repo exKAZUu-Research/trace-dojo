@@ -779,3 +779,27 @@ test.each(["'utf8'", "'utf-8'", "{ encoding: 'utf-8' }"])(
     });
   }
 );
+
+test('preserves ESM namespace interop, named default imports, and live named fs bindings', () => {
+  const source = `"use strict";
+import * as ns from 'fs';
+import * as ns2 from 'fs';
+import * as nodeNs from 'node:fs';
+import fs, { default as fs2, existsSync } from 'fs';
+import { default as nodeFs, existsSync as nodeExists } from 'node:fs';
+const req = require('fs');
+console.log(ns === req, ns === ns2, ns === nodeNs, (ns as any).default === req);
+console.log(fs === req, fs2 === req, nodeFs === req, typeof (ns as any).default);
+req.existsSync = function (this: unknown) {
+  return [this === undefined, this === ns];
+} as any;
+console.log(existsSync('missing'), nodeExists('missing'), ns.existsSync('missing'));`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false false false true\ntrue true true object\n[ true, false ] [ true, false ] [ false, true ]\n',
+    uncaughtException: undefined,
+  });
+  expect(diagnosticsOf("import * as ns from 'fs'; (ns as any)['read' + 'File']('a', () => {});")).toEqual([
+    '1: fs.readFile は、この採点環境では使えません。',
+  ]);
+});

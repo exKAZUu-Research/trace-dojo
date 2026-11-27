@@ -3,7 +3,7 @@ import { inspect } from './inspect';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
 import { rejectUnavailableMember } from './unavailableMembers';
-import { isObject, JsObject, JsThrow, ProgramExit, type Value } from './values';
+import { isObject, JsObject, JsThrow, ProgramExit, toBoolean, type Value } from './values';
 
 type NodeErrorCode = FileSystemErrorCode | 'EBADF';
 
@@ -37,8 +37,11 @@ const MODULE_NAMES = { fs: 'fs', 'node:fs': 'fs' } as const;
 export function defineNodeBuiltins(builder: RealmBuilder): void {
   const fs = new JsObject(builder.realm.objectPrototype);
   defineFileSystem(builder, fs);
+  for (const property of fs.properties.values()) property.enumerable = true;
   builder.realm.fsModule = fs;
+  builder.realm.fsObjects = new WeakSet([fs]);
   builder.realm.loadNodeModule = loadNodeModule;
+  builder.realm.importNodeModule = importNodeModule;
   builder.global(
     'require',
     builder.function('require', 1, ({ runtime, args }) => loadNodeModule(runtime, runtime.toString(args[0])))
@@ -109,6 +112,28 @@ function loadNodeModule(runtime: Runtime, name: string): Value {
   return runtime.realm.fsModule;
 }
 
+/** Wraps a CommonJS built-in module as tsx's `__toESM` helper does for ECMAScript `import` declarations. */
+function importNodeModule(runtime: Runtime, name: string): Value {
+  const mod = loadNodeModule(runtime, name);
+  if (!(mod instanceof JsObject)) return mod;
+  const isEsModule = toBoolean(runtime.get(mod, '__esModule'));
+  const target = new JsObject(mod.proto);
+  runtime.realm.fsObjects?.add(target);
+  if (!isEsModule) {
+    target.properties.set('default', { value: mod, writable: false, enumerable: true, configurable: false });
+  }
+  for (const [key, descriptor] of mod.properties) {
+    if (typeof key !== 'string' || target.properties.has(key)) continue;
+    target.properties.set(key, {
+      get: runtime.newNativeFunction('get', 0, () => runtime.get(mod, key)),
+      set: undefined,
+      enumerable: descriptor.enumerable,
+      configurable: false,
+    });
+  }
+  return target;
+}
+
 /**
  * What a stream's `write` is given after its text that this interpreter does not run, if anything: an encoding other
  * than UTF-8, which Node.js decodes the text with, or the callback Node.js calls once the text is written.
@@ -139,6 +164,10 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
       runtime.io.files.kindOf(args[0]) !== undefined
     );
   });
+  defineDirectoryMethods(builder, fs);
+}
+
+function defineDirectoryMethods(builder: RealmBuilder, fs: JsObject): void {
   builder.method(fs, 'mkdirSync', 2, ({ runtime, args }) => {
     const path = requirePath(runtime, args[0]);
     const options = args[1];

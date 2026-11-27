@@ -85,9 +85,11 @@ export function unavailableMemberCheck(runtime: Runtime): UnavailableMemberCheck
       }
     }
   }
-  if (realm.fsModule) nodeObjects.set(realm.fsModule, { owner: 'fs', members: UNAVAILABLE_FS_MEMBERS });
+  const fsTarget = { owner: 'fs', members: UNAVAILABLE_FS_MEMBERS };
+  if (realm.fsModule) nodeObjects.set(realm.fsModule, fsTarget);
   return (value, key) => {
-    const target = nodeObjects.get(value);
+    const target =
+      nodeObjects.get(value) ?? (value instanceof JsObject && realm.fsObjects?.has(value) ? fsTarget : undefined);
     const isUnavailableNodeMember =
       target !== undefined &&
       typeof key === 'string' &&

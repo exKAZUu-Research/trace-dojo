@@ -69,7 +69,9 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return this.readVariable(expression.name);
       }
       case 'importedModule': {
-        return runtime.realm.loadNodeModule?.(runtime, expression.specifier);
+        return expression.isNamespace
+          ? runtime.realm.importNodeModule?.(runtime, expression.specifier)
+          : runtime.realm.loadNodeModule?.(runtime, expression.specifier);
       }
       case 'this': {
         return this.thisValue();
@@ -343,7 +345,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     // Parentheses keep a method's receiver but end an optional chain, so `(a?.b)()` calls whatever `a?.b` gave.
     let target = callee;
     while (target.kind === 'parenthesized') target = target.expression;
-    if (target.kind !== 'member') {
+    if (target.kind !== 'member' || target.isUnboundCall) {
       const fn = this.evaluateChain(callee);
       return fn === SHORT_CIRCUIT ? SHORT_CIRCUIT : { fn, thisValue: undefined };
     }

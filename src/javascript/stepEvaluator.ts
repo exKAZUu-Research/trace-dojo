@@ -328,7 +328,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
   private *calleeSteps(callee: Expression): Steps<{ fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT> {
     let target = callee;
     while (target.kind === 'parenthesized') target = target.expression;
-    if (target.kind !== 'member') {
+    if (target.kind !== 'member' || target.isUnboundCall) {
       const fn = yield* this.chainSteps(callee);
       return fn === SHORT_CIRCUIT ? SHORT_CIRCUIT : { fn, thisValue: undefined };
     }

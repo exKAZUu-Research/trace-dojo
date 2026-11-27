@@ -5,7 +5,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import { FlowState } from './flow';
 import { unavailableNodeMember } from './nodeLibrary';
-import type { Scope, Sym } from './scopes';
+import { canonicalIdentifier, type Scope, type Sym } from './scopes';
 import { nameSuggestionHint, spellingSuggestion } from './spelling';
 import { named, stringValue } from './syntax';
 import {
@@ -291,9 +291,17 @@ export class Namespaces {
     const exports = module.namespaceExports as Scope;
     for (const specifier of named(imports)) {
       const name = specifier.childForFieldName('name');
-      const unavailable = name && this.isLibraryModule(module) && unavailableNodeMember(`"${module.name}"`, name.text);
+      const exported = name && canonicalImportSpecifier(name);
+      const unavailable =
+        exported && this.isLibraryModule(module) && unavailableNodeMember(`"${module.name}"`, exported);
       if (name && unavailable) this.c.error(name, unsupportedMessage(unavailable));
-      else if (name && !exports.values.has(name.text) && !exports.types.has(name.text))
+      else if (
+        name &&
+        exported &&
+        !exports.values.has(exported) &&
+        !exports.types.has(exported) &&
+        !this.isSyntheticDefault(module, exported)
+      )
         this.reportMissingImport(name, exports, moduleName);
     }
   }
@@ -344,6 +352,10 @@ export class Namespaces {
       this.c.flow.current = outer;
     }
   }
+}
+
+function canonicalImportSpecifier(node: TreeNode): string {
+  return node.type === 'string' ? stringValue(node) : canonicalIdentifier(node.text, node);
 }
 
 /** Whether a namespace is declared in the program or in another namespace's body, the places tsc allows one. */

@@ -48,7 +48,10 @@ export interface Realm {
   regExpConstructor?: JsFunction;
   /** Node.js's `fs` module, which `require` returns. */
   fsModule?: JsObject;
+  /** Objects representing Node.js `fs` (the module and its ESM namespace wrappers), for unavailable-member checks. */
+  fsObjects?: WeakSet<JsObject>;
   loadNodeModule?: (runtime: Runtime, name: string) => Value;
+  importNodeModule?: (runtime: Runtime, name: string) => Value;
   regExpExec?: JsFunction;
   datePrototype: JsObject;
   mapPrototype: JsObject;
