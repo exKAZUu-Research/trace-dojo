@@ -101,12 +101,13 @@ function foldTernary(node: Node, enums: EnumsInScope): FoldedValue {
     : undefined;
 }
 
-/** `E.A` or `E["A"]`, a member of an enum compiled before. */
+/** `E.A` or `E["A"]`, a member of an enum compiled before whose constant value esbuild folded. */
 function foldedMember(node: Node, enums: EnumsInScope): FoldedValue {
   const object = node.childForFieldName('object');
   if (object?.type !== 'identifier') return undefined;
   const name = memberKeyName(node);
-  return name === undefined ? undefined : enums(nameOf(object))?.get(name);
+  const folded = name === undefined ? undefined : enums(nameOf(object))?.get(name);
+  return folded?.value === undefined ? undefined : folded;
 }
 
 export function memberKeyName(node: Node): string | undefined {
