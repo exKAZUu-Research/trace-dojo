@@ -74,6 +74,7 @@ import {
   UNIT,
   type VariantDef,
 } from './types';
+import { addWherePredicates, lowerTypeParamBounds } from './whereClauses';
 
 /** The traits a type derives, rejecting one derived twice as rustc does (E0119). */
 function derivedTraits(derives: readonly { name: string; span: Span }[]): Set<string> {
@@ -729,13 +730,21 @@ export class ItemCollector {
         lowerBoundIfTrait(bound, scope, { kind: 'param', param: own[index] })
       );
     }
-    addWherePredicates(item.generics, scope, (param, bounds) => {
-      // A method's bounds on its impl's parameters constrain only the method.
-      if (own.includes(param) || assocParams.includes(param)) return false;
-      def.extraBounds ??= [];
-      def.extraBounds.push(...bounds.map((bound) => ({ param, bound })));
-      return true;
-    });
+    addWherePredicates(
+      item.generics,
+      scope,
+      (param, bounds) => {
+        // A method's bounds on its impl's parameters constrain only the method.
+        if (own.includes(param) || assocParams.includes(param)) return false;
+        def.extraBounds ??= [];
+        def.extraBounds.push(...bounds.map((bound) => ({ param, bound })));
+        return true;
+      },
+      (type, bounds) => {
+        def.wherePredicates ??= [];
+        def.wherePredicates.push(...bounds.map((bound) => ({ type, bound })));
+      }
+    );
     const implParams: TypeParam[] = [];
     const paramScope: TypeScope = { ...scope, implParams };
     def.paramTypes = item.params.map((param) => lowerType(param.type, paramScope));
@@ -812,33 +821,6 @@ function describeImplType(type: Type): string {
   if (type.kind === 'adt') return type.def.name;
   if (type.kind === 'int' || type.kind === 'float') return type.name;
   return type.kind;
-}
-
-function lowerTypeParamBounds(params: TypeParam[], generics: Generics, scope: TypeScope): void {
-  for (const [index, param] of generics.params.entries()) {
-    const target = params[index];
-    target.bounds = param.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, { kind: 'param', param: target }));
-  }
-}
-
-/**
- * Adds the bounds of a `where` clause to the type parameters they constrain, unless `elsewhere` takes them (a
- * method's bounds on its impl's parameters).
- */
-function addWherePredicates(
-  generics: Generics,
-  scope: TypeScope,
-  elsewhere?: (param: TypeParam, bounds: TraitRef[]) => boolean
-): void {
-  for (const predicate of generics.where) {
-    const type = lowerType(predicate.type, scope);
-    if (type.kind !== 'param') {
-      compileError(predicate.span, 'where には、型引数の境界だけを書いてください。');
-    }
-    const bounds = predicate.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type));
-    if (elsewhere?.(type.param, bounds)) continue;
-    type.param.bounds.push(...bounds);
-  }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1579,7 +1561,7 @@ function lowerAdtPath(path: PathAst, def: AdtDef, written: Type[], scope: TypeSc
  * Lowers a bound that constrains the type's traits; `?Sized` and lifetime bounds lower to none, as the interpreter
  * lets type parameters be unsized and the borrow checker reads lifetimes from the types.
  */
-function lowerBoundIfTrait(bound: BoundAst, scope: TypeScope, self: Type | undefined): TraitRef[] {
+export function lowerBoundIfTrait(bound: BoundAst, scope: TypeScope, self: Type | undefined): TraitRef[] {
   if (bound.kind === 'maybeSized' || bound.kind === 'lifetime') return [];
   return [lowerBound(bound, scope, self)];
 }

@@ -668,19 +668,26 @@ export class Checker {
       item.params.map((param) => param.pattern),
       def.paramTypes
     );
-    const bodyType = this.checkBlock(body, this.body.retType);
-    if (body.tail) {
-      this.coerceReturned(body.tail, bodyType, this.body.retType);
-      this.markReborrows(body.tail, def.ret);
-    }
-    this.coerceTail(body, bodyType, this.body.retType, item);
-    for (const [opaque, type] of resultTypes) {
-      opaque.hidden = type;
-      for (const bound of opaque.bounds) {
-        this.obligations.push({ type, ref: bound, span: item.span });
+    // The body assumes its `where` bounds on other types (`Vec<T>: Debug`), as rustc does.
+    const enclosing = this.solver.assumptions;
+    this.solver.assumptions = def.wherePredicates ?? [];
+    try {
+      const bodyType = this.checkBlock(body, this.body.retType);
+      if (body.tail) {
+        this.coerceReturned(body.tail, bodyType, this.body.retType);
+        this.markReborrows(body.tail, def.ret);
       }
+      this.coerceTail(body, bodyType, this.body.retType, item);
+      for (const [opaque, type] of resultTypes) {
+        opaque.hidden = type;
+        for (const bound of opaque.bounds) {
+          this.obligations.push({ type, ref: bound, span: item.span });
+        }
+      }
+      this.finishBody(item.span);
+    } finally {
+      this.solver.assumptions = enclosing;
     }
-    this.finishBody(item.span);
     this.requireKnownTypes();
     // A `const fn` may run while the program compiles, so its body may do only what constants may.
     if (item.isConst) checkConstOperations(body, this.annotations);
@@ -1443,6 +1450,9 @@ export class Checker {
           ref: substituteTraitRef(bound, subst),
           span,
         });
+      }
+      for (const { type, bound } of fn.wherePredicates ?? []) {
+        this.obligations.push({ type: substitute(type, subst), ref: substituteTraitRef(bound, subst), span });
       }
     }
     return {

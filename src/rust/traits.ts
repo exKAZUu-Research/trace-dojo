@@ -53,6 +53,8 @@ const SAME_TYPE_OPERATORS = new Set([
 export class TraitSolver {
   private readonly implGoals: { trait: TraitDef; type: Type; args: Type[] }[] = [];
   private readonly sizedGoals: Type[] = [];
+  /** The `where` bounds on types other than parameters that the body being checked may assume. */
+  assumptions: readonly { type: Type; bound: TraitRef }[] = [];
 
   constructor(
     readonly program: Program,
@@ -68,6 +70,7 @@ export class TraitSolver {
       return this.implementsWithAssoc(t, ref);
     const { trait } = ref;
     if (t.kind === 'never') return 'yes';
+    if (this.assumptions.some(({ type: assumed, bound }) => assumes(bound, ref) && sameType(assumed, t))) return 'yes';
     if (t.kind === 'var') return this.varImplements(t, ref);
     // Type parameters are `Sized` unless they opt out with `?Sized`.
     if (t.kind === 'param') {
@@ -456,4 +459,12 @@ function closureKindAnswer(closure: ClosureType, need: string): Answer {
 export function closureKindAtLeast(have: string, need: string): boolean {
   const order = ['Fn', 'FnMut', 'FnOnce'];
   return order.includes(have) && order.indexOf(have) <= order.indexOf(need);
+}
+
+function assumes(bound: TraitRef, ref: TraitRef): boolean {
+  return (
+    bound.trait === ref.trait &&
+    bound.args.length === ref.args.length &&
+    bound.args.every((arg, i) => sameType(arg, ref.args[i]))
+  );
 }

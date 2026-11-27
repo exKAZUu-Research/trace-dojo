@@ -75,8 +75,8 @@ class UsageMarker {
       for (const part of partsOf(t)) this.mark(part);
       return;
     }
-    // A declared type's argument is used only where that type uses its parameter.
-    const passed = this.usages.get(t.def);
+    // A declared type's argument is used only where that type uses its parameter; a projection (`C::Out`) uses all.
+    const passed = t.def.projection ? undefined : this.usages.get(t.def);
     for (const [index, lifetime] of (t.lifetimes ?? []).entries()) {
       if (!passed || passed.lifetimes[index]) this.markLifetime(lifetime);
     }

@@ -8,6 +8,7 @@ import {
   type AssocTypeDef,
   freshVar,
   newTypeParam,
+  sameType,
   shallow,
   substituteTraitRef,
   type TraitDef,
@@ -31,7 +32,11 @@ export function lowerQualifiedPath(
 ): Type {
   if (path.segments.length !== 2) compileError(path.span, '<T as Trait>:: の後には、関連型の名前を1つ書いてください。');
   const self = lowerType(qualified.self, scope);
-  const trait = qualified.trait && resolveTraitPath(qualified.trait, scope, self);
+  const written = qualified.trait && resolveTraitPath(qualified.trait, scope, self);
+  // A parameter's own bound (`<T as Super>::Out` where `T: Super`) gives the same type as `T::Out`.
+  const t = shallow(self);
+  const own = written && t.kind === 'param' ? t.param.bounds.find((bound) => sameBound(bound, written)) : undefined;
+  const trait = own ?? written;
   const args = (path.segments[1].args ?? []).map((arg) => lowerType(arg, scope));
   return assocTypeOf(self, path.segments[1].name, trait, scope, path.span, args);
 }
@@ -122,7 +127,9 @@ export function projectionDef(trait: TraitDef, name: string, module: Module): Ad
     name: `${trait.name}::${name}`,
     path: `${trait.path}::${name}`,
     kind: 'struct',
-    params: [],
+    // Its arguments are the type it is of and the trait's arguments, which every pass that reads an ADT's
+    // parameters then sees.
+    params: [trait.self, ...trait.params],
     variants: [],
     derives: new Set(),
     span: trait.span ?? { row: 0, col: 1 },
@@ -150,4 +157,8 @@ export function assocItem(param: TypeParam, scope: TypeScope): Type | undefined 
     bound.item = { kind: 'param', param: item };
   }
   return bound.item ?? intoIterItem(paramType);
+}
+
+function sameBound(a: TraitRef, b: TraitRef): boolean {
+  return a.trait === b.trait && a.args.length === b.args.length && a.args.every((arg, i) => sameType(arg, b.args[i]));
 }

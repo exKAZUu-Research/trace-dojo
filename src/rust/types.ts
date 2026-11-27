@@ -336,6 +336,8 @@ export interface FnDef {
   selfWrapper?: SelfWrapper;
   /** Bounds that a method's `where` clause puts on its impl's or trait's type parameters. */
   extraBounds?: { param: TypeParam; bound: TraitRef }[];
+  /** The bounds a `where` clause puts on a type that is not a parameter (`Vec<T>: Debug`). */
+  wherePredicates?: { type: Type; bound: TraitRef }[];
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
