@@ -84,6 +84,8 @@ export class Scope {
   readonly values = new Map<string, Sym>();
   readonly types = new Map<string, Sym>();
 
+  private readonly clauseOnlyValues = new Set<string>();
+  private readonly clauseOnlyTypes = new Set<string>();
   /** The names a `declare global` block declares, which inside it stand for the global symbols of those names. */
   private readonly augmentedNames = new Set<string>();
   /** The nearest function or module scope, where `var` and function declarations live. */
@@ -105,11 +107,34 @@ export class Scope {
 
   lookupValue(name: string, budget?: ExecutionBudget): Sym | undefined {
     budget?.spend();
-    return this.values.get(name) ?? this.augmented(name)?.values.get(name) ?? this.parent?.lookupValue(name, budget);
+    const own = this.clauseOnlyValues.has(name) ? undefined : this.values.get(name);
+    return own ?? this.augmented(name)?.values.get(name) ?? this.parent?.lookupValue(name, budget);
   }
 
   lookupType(name: string): Sym | undefined {
-    return this.types.get(name) ?? this.augmented(name)?.types.get(name) ?? this.parent?.lookupType(name);
+    const own = this.clauseOnlyTypes.has(name) ? undefined : this.types.get(name);
+    return own ?? this.augmented(name)?.types.get(name) ?? this.parent?.lookupType(name);
+  }
+
+  exportViaDeclaration(name: string, symbol: Sym, meaning: 'value' | 'type'): void {
+    if (meaning === 'value') {
+      this.clauseOnlyValues.delete(name);
+      this.values.set(name, symbol);
+    } else {
+      this.clauseOnlyTypes.delete(name);
+      this.types.set(name, symbol);
+    }
+  }
+
+  exportViaClause(name: string, symbol: Sym, meaning: 'value' | 'type'): void {
+    const table = meaning === 'value' ? this.values : this.types;
+    const clauseOnly = meaning === 'value' ? this.clauseOnlyValues : this.clauseOnlyTypes;
+    if (!table.has(name)) clauseOnly.add(name);
+    table.set(name, symbol);
+  }
+
+  isClauseOnlyExport(name: string, meaning: 'value' | 'type'): boolean {
+    return meaning === 'value' ? this.clauseOnlyValues.has(name) : this.clauseOnlyTypes.has(name);
   }
 
   private augmented(name: string): Scope | undefined {
@@ -165,6 +190,7 @@ export class Scope {
   private exportedNamespaceSymbol(name: string, declaration: TreeNode, meaning: 'value' | 'type'): Sym | undefined {
     if (!this.namespace || !isExportedFromNamespace(this.isAmbient, declaration)) return undefined;
     const exports = this.namespace.namespaceExports;
+    if (exports?.isClauseOnlyExport(name, meaning)) return undefined;
     const exported = meaning === 'value' ? exports?.values.get(name) : exports?.types.get(name);
     if (!exported) return undefined;
     (meaning === 'value' ? this.values : this.types).set(name, exported);

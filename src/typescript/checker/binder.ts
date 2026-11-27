@@ -238,7 +238,11 @@ export class Binder {
     for (const part of namespacePath(name)) {
       const partName = canonicalIdentifier(part.text, part);
       // `namespace A.B` declared again adds to the `B` (or class/function/enum `B`) that an earlier `A` exports.
-      const exported = outer.namespace?.namespaceExports?.values.get(partName);
+      const namespaceExports = outer.namespace?.namespaceExports;
+      const exported =
+        namespaceExports && !namespaceExports.isClauseOnlyExport(partName, 'value')
+          ? namespaceExports.values.get(partName)
+          : undefined;
       if (exported && (outer !== scope || isAmbient || isExportedNamespaceRoot(node)) && !outer.values.has(partName))
         outer.values.set(partName, exported);
       namespace = outer.declareValue(partName, 'namespace', node, part);
@@ -286,9 +290,9 @@ export class Binder {
       aliasNode.type === 'string' ? stringValue(aliasNode) : canonicalIdentifier(aliasNode.text, aliasNode);
     const typeOnly = stmtTypeOnly || specifier.children.some((part) => !part.isNamed && part.type === 'type');
     const value = !typeOnly ? scope.values.get(localName) : undefined;
-    if (value) exports.values.set(exportedName, value);
+    if (value) exports.exportViaClause(exportedName, value, 'value');
     const type = scope.types.get(localName);
-    if (type) exports.types.set(exportedName, type);
+    if (type) exports.exportViaClause(exportedName, type, 'type');
   }
 
   /** `declare module "m" { ... }`, whose declarations are the exports an `import` of "m" sees. */
@@ -309,8 +313,12 @@ export class Binder {
     if (!body) return;
     const bodyScope = this.newNamespaceBody(node, module, true);
     const exports = module.namespaceExports as Scope;
-    for (const [exportName, exported] of exports.values) bodyScope.values.set(exportName, exported);
-    for (const [exportName, exported] of exports.types) bodyScope.types.set(exportName, exported);
+    for (const [exportName, exported] of exports.values) {
+      if (!exports.isClauseOnlyExport(exportName, 'value')) bodyScope.values.set(exportName, exported);
+    }
+    for (const [exportName, exported] of exports.types) {
+      if (!exports.isClauseOnlyExport(exportName, 'type')) bodyScope.types.set(exportName, exported);
+    }
     this.bindNamespaceBody(body, bodyScope, true);
   }
 
@@ -388,7 +396,7 @@ export class Binder {
   private exportFrom(scope: Scope, symbol: Sym, meaning: 'value' | 'type'): void {
     const namespace = scope.namespace as Sym;
     const exports = namespace.namespaceExports as Scope;
-    (meaning === 'value' ? exports.values : exports.types).set(symbol.name, symbol);
+    exports.exportViaDeclaration(symbol.name, symbol, meaning);
     if (meaning === 'value') symbol.exportedFrom = namespace;
   }
 
