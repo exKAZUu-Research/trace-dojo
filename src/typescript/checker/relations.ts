@@ -1494,8 +1494,7 @@ function literalTargetRelated(s: Type, t: LiteralType, relation: Relation): bool
 
 /**
  * Whether two enum declarations are compatible in TypeScript (`isEnumTypeRelatedTo`): the same declaration, or two
- * enums of the same name where every member of `source` exists in `target` with matching computedness and constant
- * value.
+ * enums of the same name where every member of `source` exists in `target` with compatible string or numeric values.
  */
 export function enumDeclarationsRelated(source: EnumMemberInfo, target: EnumMemberInfo): boolean {
   if (source.enumId === target.enumId) return true;
@@ -1503,10 +1502,17 @@ export function enumDeclarationsRelated(source: EnumMemberInfo, target: EnumMemb
   const [sourceMembers, targetMembers] = [source.members(), target.members()];
   for (const [name, member] of sourceMembers) {
     const other = targetMembers.get(name);
-    if (!other || other.computed !== member.computed) return false;
-    if (!member.computed && other.value !== member.value) return false;
+    if (!other || !enumMemberSummariesCompatible(member, other)) return false;
   }
   return true;
+}
+
+function enumMemberSummariesCompatible(
+  source: { value: number | string | undefined; computed: boolean },
+  target: { value: number | string | undefined; computed: boolean }
+): boolean {
+  if (typeof source.value === 'string' || typeof target.value === 'string') return source.value === target.value;
+  return source.computed || target.computed || source.value === target.value;
 }
 
 /**
