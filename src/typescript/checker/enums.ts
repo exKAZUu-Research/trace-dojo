@@ -553,7 +553,13 @@ export function isAllowedConstEnumUse(node: TreeNode): boolean {
   if (parent.childForFieldName('object')?.id !== node.id) return false;
   let outer: TreeNode | null = parent;
   while (outer?.type === 'member_expression') outer = outer.parent;
-  return outer?.type !== 'type_query';
+  return outer?.type !== 'type_query' || hasImportTypeRoot(node);
+}
+
+function hasImportTypeRoot(node: TreeNode): boolean {
+  let root: TreeNode | null = node;
+  while (root?.type === 'member_expression') root = root.childForFieldName('object');
+  return root?.type === 'call_expression' && root.childForFieldName('function')?.type === 'import';
 }
 
 /** What tsc reports of a const or ambient enum member's evaluated initializer, if anything. */
