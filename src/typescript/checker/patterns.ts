@@ -642,10 +642,10 @@ export class BindingPatterns {
         type.types.map((member) => this.asyncIteratedType(node, member)),
         true
       );
-    const asyncElement = this.iteratorElementType(type, 'asyncIterator');
+    const asyncElement = this.iteratorElementType(type, 'asyncIterator', node);
     if (asyncElement) return asyncElement;
     const element = this.iteratedType(undefined, type);
-    if (element !== errorType) return awaitedType(this.c, element);
+    if (element !== errorType) return awaitedType(this.c, element, node ? { node, kind: 'await' } : undefined);
     if (node)
       this.c.error(
         node,
@@ -659,8 +659,8 @@ export class BindingPatterns {
    * `value` of the results its `next()` gives that are not done (awaited for an async iterator), or else a library
    * iterator's type argument.
    */
-  private iteratorElementType(type: Type, method: 'iterator' | 'asyncIterator'): Type | undefined {
-    const iteration = this.iteratorResults(type, method);
+  private iteratorElementType(type: Type, method: 'iterator' | 'asyncIterator', node?: TreeNode): Type | undefined {
+    const iteration = this.iteratorResults(type, method, node);
     if (!iteration) return undefined;
     const { iteratorType, settled } = iteration;
     if (!settled) return iteratorType.typeArguments?.[0];
@@ -694,14 +694,19 @@ export class BindingPatterns {
   /** The iterator a value's iteration method returns, and what its `next()` settles to (awaited for an async one). */
   private iteratorResults(
     type: Type,
-    method: 'iterator' | 'asyncIterator'
+    method: 'iterator' | 'asyncIterator',
+    node?: TreeNode
   ): { iteratorType: ObjectType; settled: Type | undefined } | undefined {
     const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey(method));
     const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
     if (iteratorType?.kind !== 'object') return undefined;
     const next = this.c.propertyOf(iteratorType, 'next');
     const result = next && this.c.signaturesOf(next.type(), 'call')[0]?.returnType();
-    return { iteratorType, settled: result && (method === 'asyncIterator' ? awaitedType(this.c, result) : result) };
+    const site = node ? { node, kind: 'await' as const } : undefined;
+    return {
+      iteratorType,
+      settled: result && (method === 'asyncIterator' ? awaitedType(this.c, result, site) : result),
+    };
   }
 
   /** Whether an iterator result says it is done, as `IteratorReturnResult` does, so it yields no element. */

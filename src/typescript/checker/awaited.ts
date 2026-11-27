@@ -2,7 +2,25 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { hasToken } from './syntax';
-import { isAnyLike, isIntrinsic, mapType, type Type, typeMembers, unionOf, unknownType } from './types';
+import {
+  errorType,
+  isAnyLike,
+  isIntrinsic,
+  mapType,
+  neverType,
+  type Signature,
+  type Type,
+  typeMembers,
+  undefinedType,
+  unionOf,
+  unknownType,
+} from './types';
+
+export interface AwaitedErrorSite {
+  node: TreeNode;
+  kind: 'await' | 'yield' | 'return';
+  reported?: boolean;
+}
 
 /** How deeply a promise may hold promises before its awaited type stops unwrapping. */
 const MAX_AWAITED_DEPTH = 50;
@@ -24,17 +42,23 @@ const awaitBoundaries = new Set([
  * `then` method fulfills with, unwrapped through promises of promises, while keeping a generic type whose constraint
  * has no thenable value as itself and wrapping one that may in `Awaited<T>`.
  */
-export function awaitedType(c: Checker, type: Type, depth = 0): Type {
+export function awaitedType(c: Checker, type: Type, site?: AwaitedErrorSite, depth = 0): Type {
   if (isAnyLike(type) || depth > MAX_AWAITED_DEPTH) return type;
-  if (type.kind === 'union') return mapType(type, (member) => awaitedType(c, member, depth + 1));
+  if (type.kind === 'union') return mapType(type, (member) => awaitedType(c, member, site, depth + 1));
   if (isGenericAwaitedOperand(type)) {
     return mayBeThenableGeneric(c, type, depth) ? c.globalTypeAlias('Awaited', [type]) : type;
   }
   if (type.kind !== 'object' && type.kind !== 'intersection') return type;
   if (type.kind === 'object' && (c.isLibraryType(type, 'Promise') || c.isLibraryType(type, 'PromiseLike')))
-    return awaitedType(c, type.typeArguments?.[0] ?? unknownType, depth + 1);
-  const value = fulfilledValueOf(c, type);
-  return value ? awaitedType(c, value, depth + 1) : type;
+    return awaitedType(c, type.typeArguments?.[0] ?? unknownType, site, depth + 1);
+  const step = inspectThenable(c, type);
+  if (step.kind === 'nonThenable') return type;
+  if (step.kind === 'valid') return awaitedType(c, step.value, site, depth + 1);
+  if (site && !site.reported) {
+    site.reported = true;
+    c.error(site.node, invalidThenableMessage(site.kind));
+  }
+  return site ? errorType : neverType;
 }
 
 /** Unwraps `Awaited<T>` back to `T` when wrapping an async function's inferred return type in `Promise<...>`. */
@@ -85,19 +109,49 @@ function mayBeThenableConstraint(c: Checker, member: Type, depth: number): boole
   return (
     c.isLibraryType(member, 'Promise') ||
     c.isLibraryType(member, 'PromiseLike') ||
-    fulfilledValueOf(c, member) !== undefined
+    inspectThenable(c, member).kind !== 'nonThenable'
   );
 }
 
-function fulfilledValueOf(c: Checker, type: Type): Type | undefined {
-  const callback = thenableCallback(c, type);
-  return callback?.parameters[0]?.type;
+type ThenableStep = { kind: 'nonThenable' } | { kind: 'invalid' } | { kind: 'valid'; value: Type };
+
+function inspectThenable(c: Checker, type: Type): ThenableStep {
+  const thenType = c.propertyOf(type, 'then')?.type();
+  if (!thenType || isAnyLike(thenType)) return { kind: 'nonThenable' };
+  if (c.signaturesOf(c.relations.removeNullish(thenType), 'call').length === 0) return { kind: 'nonThenable' };
+  const signatures = c.relations.isNullable(thenType) ? [] : c.signaturesOf(thenType, 'call');
+  const values = signatures.length > 0 ? fulfilledValuesOfSignatures(c, signatures) : undefined;
+  return values ? { kind: 'valid', value: unionOf(values) } : { kind: 'invalid' };
 }
 
-function thenableCallback(c: Checker, type: Type): ReturnType<Checker['signaturesOf']>[number] | undefined {
-  const then = c.propertyOf(type, 'then');
-  const onfulfilled = then && c.signaturesOf(then.type(), 'call')[0]?.parameters[0]?.type;
-  return onfulfilled ? c.signaturesOf(c.relations.removeNullish(onfulfilled), 'call')[0] : undefined;
+function fulfilledValuesOfSignatures(c: Checker, signatures: readonly Signature[]): Type[] | undefined {
+  const values: Type[] = [];
+  for (const signature of signatures) {
+    const fulfilled = signatureFulfilledValue(c, signature);
+    if (!fulfilled) return undefined;
+    values.push(fulfilled);
+  }
+  return values;
+}
+
+function signatureFulfilledValue(c: Checker, signature: Signature): Type | undefined {
+  const onfulfilled = signature.parameters[0];
+  if (!onfulfilled || onfulfilled.rest) return undefined;
+  const callbackType = c.relations.removeNullish(onfulfilled.type);
+  if (isAnyLike(callbackType) || isIntrinsic(callbackType, 'unknown')) return undefined;
+  const callbacks = c.signaturesOf(callbackType, 'call');
+  if (callbacks.length === 0) return undefined;
+  return unionOf(callbacks.map((callback) => callback.parameters[0]?.type ?? undefinedType));
+}
+
+function invalidThenableMessage(kind: AwaitedErrorSite['kind']): string {
+  const subject =
+    kind === 'return'
+      ? '非同期関数の戻り値'
+      : kind === 'yield'
+        ? "非同期ジェネレーター内の 'yield' オペランド"
+        : "'await' オペランド";
+  return `${subject}の型は、有効な Promise であるか、呼び出し可能な 'then' メンバーを含んでいないかのどちらかであることが必要です。`;
 }
 
 /** Whether every value of `type` is a non-nullish Promise or thenable, which TS2801 flags when tested as a condition. */
@@ -116,7 +170,7 @@ function isAwaitableMember(c: Checker, member: Type, depth: number): boolean {
   return (
     c.isLibraryType(member, 'Promise') ||
     c.isLibraryType(member, 'PromiseLike') ||
-    thenableCallback(c, member) !== undefined
+    inspectThenable(c, member).kind === 'valid'
   );
 }
 

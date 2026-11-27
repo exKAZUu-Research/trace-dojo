@@ -512,7 +512,7 @@ export class FunctionChecker {
     context.inReturn = true;
     const contextual = this.returnExpressionContext(context, declaredReturn ?? context.contextualReturn);
     const checked = this.c.expressions.check(body, contextual);
-    const expressionType = context.isAsync ? awaitedType(this.c, checked) : checked;
+    const expressionType = context.isAsync ? this.awaitedReturnExpression(body, checked, context) : checked;
     context.inReturn = false;
     if (declaredReturn) this.c.expressions.checkReturnValue(body, expressionType, declaredReturn);
     context.returnTypes.push(expressionType);
@@ -525,7 +525,7 @@ export class FunctionChecker {
     const returns = isGeneratorFunction(node)
       ? this.generatorReturns(isAsync, contextualReturn, declaredReturn)
       : isAsync
-        ? this.asyncReturns(contextualReturn, declaredReturn)
+        ? this.asyncReturns(node, contextualReturn, declaredReturn)
         : { declaredReturn, contextualReturn };
     return {
       ...returns,
@@ -543,17 +543,24 @@ export class FunctionChecker {
 
   /** What an async function's `return` statements give: what the promise it returns fulfills with. */
   private asyncReturns(
+    node: TreeNode,
     contextualReturn: Type | undefined,
     declaredReturn: Type | undefined
   ): Pick<FunctionContext, 'asyncAnnotation' | 'declaredReturn' | 'contextualReturn'> {
     const contextual = contextualReturn && awaitedType(this.c, contextualReturn);
     if (!declaredReturn) return { contextualReturn: contextual };
     const isPromise = declaredReturn === errorType || this.c.isLibraryType(declaredReturn, 'Promise');
+    const errorNode = node.childForFieldName('name') ?? node;
     return {
       asyncAnnotation: { type: declaredReturn, isPromise },
-      declaredReturn: isPromise ? awaitedType(this.c, declaredReturn) : anyType,
+      declaredReturn: isPromise ? awaitedType(this.c, declaredReturn, { node: errorNode, kind: 'return' }) : anyType,
       contextualReturn: contextual,
     };
+  }
+
+  awaitedReturnExpression(returnSite: TreeNode, checked: Type, context: FunctionContext): Type {
+    const errorNode = context.declaredReturn ? returnSite : (context.node.childForFieldName('name') ?? context.node);
+    return awaitedType(this.c, checked, { node: errorNode, kind: 'return' });
   }
 
   /** What a generator yields, returns, and receives, by its annotation or else its contextual type. */
@@ -765,7 +772,9 @@ export class FunctionChecker {
 
   /** What a `yield` yields: its operand, or with `yield*` what that iterates, awaited in an async generator. */
   private yieldedType(operand: TreeNode | undefined, type: Type, delegated: boolean, isAsync: boolean): Type {
-    if (!delegated) return isAsync ? awaitedType(this.c, type) : type;
+    if (!delegated) {
+      return isAsync ? awaitedType(this.c, type, operand ? { node: operand, kind: 'yield' } : undefined) : type;
+    }
     return isAsync ? this.c.patterns.asyncIteratedType(operand, type) : this.c.patterns.iteratedType(operand, type);
   }
 

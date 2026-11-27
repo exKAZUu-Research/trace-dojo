@@ -4,7 +4,7 @@ import { assert } from 'es-toolkit';
 
 import { isAmbient, isCheckedAmbientDeclaration } from '../namespaceInstantiation';
 import { checkAmbientInitializer } from './ambientDeclarations';
-import { awaitedType, checkAwaitPlace } from './awaited';
+import { checkAwaitPlace } from './awaited';
 import { declaredNames } from './binder';
 import type { Checker } from './checker';
 import { checkConstraintDeclarations } from './circularConstraints';
@@ -1037,7 +1037,7 @@ export class StatementChecker {
     if (expression) {
       const declared = context.isConstructor ? this.constructorInstanceType(context.node) : context.declaredReturn;
       context.inReturn = true;
-      const type = this.returnedType(expression, context, declared);
+      const type = this.returnedType(node, expression, context, declared);
       context.inReturn = false;
       if (hasToken(context.node, 'set')) {
         this.c.error(node, 'set アクセサーは値を返せません。');
@@ -1053,10 +1053,15 @@ export class StatementChecker {
   }
 
   /** The type a `return` gives, where an async function returns what a promise it returns fulfills with. */
-  private returnedType(expression: TreeNode, context: FunctionContext, declared: Type | undefined): Type {
+  private returnedType(
+    returnNode: TreeNode,
+    expression: TreeNode,
+    context: FunctionContext,
+    declared: Type | undefined
+  ): Type {
     const contextual = this.c.functions.returnExpressionContext(context, declared ?? context.contextualReturn);
     const checked = this.c.expressions.check(expression, contextual);
-    return context.isAsync ? awaitedType(this.c, checked) : checked;
+    return context.isAsync ? this.c.functions.awaitedReturnExpression(returnNode, checked, context) : checked;
   }
 
   private returnWithoutValue(node: TreeNode, context: FunctionContext): void {

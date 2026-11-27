@@ -223,7 +223,9 @@ export class ExpressionChecker {
   private awaitExpression(node: TreeNode, contextual: Type | undefined): Type {
     checkAwaitPlace(this.c, node, false);
     const operand = named(node).find((child) => child.type !== 'comment');
-    return operand ? awaitedType(this.c, this.check(operand, awaitableContextualType(this.c, contextual))) : anyType;
+    return operand
+      ? awaitedType(this.c, this.check(operand, awaitableContextualType(this.c, contextual)), { node, kind: 'await' })
+      : anyType;
   }
 
   /**
