@@ -172,6 +172,7 @@ export class Flow {
   }
 
   readonly declaredTypes = new Map<string, Type>();
+  private readonly resolvingEnumAccess = new Set<number>();
 
   /** Runs `run` from `state`, returning the state it ends in. */
   from(state: State, run: () => void): State {
@@ -295,10 +296,27 @@ export class Flow {
 
   private isEnumMemberAccess(object: TreeNode, memberName: string): boolean {
     const symbol = this.c.namespaces.qualifiedValueSymbol(object);
-    if (symbol) return symbol.valueKind === 'enum' && Boolean(symbol.enumMembers?.values.has(memberName));
-    const objectType = this.c.silently(() => this.c.expressions.check(object));
-    const property = this.c.propertyOf(this.c.relations.removeNullish(objectType), memberName);
-    return property?.declaration?.parent?.type === 'enum_body';
+    if (symbol?.valueKind === 'enum') return Boolean(symbol.enumMembers?.values.has(memberName));
+    if (this.resolvingEnumAccess.has(object.id)) return false;
+    this.resolvingEnumAccess.add(object.id);
+    try {
+      const objectType = this.c.silently(() => this.c.expressions.check(object));
+      return this.hasEnumMemberProperty(this.c.relations.removeNullish(objectType), memberName);
+    } finally {
+      this.resolvingEnumAccess.delete(object.id);
+    }
+  }
+
+  private hasEnumMemberProperty(type: Type, memberName: string): boolean {
+    const apparent = this.c.apparentType(type);
+    if (apparent.kind === 'union' || apparent.kind === 'intersection') {
+      return apparent.types.some((member) => this.hasEnumMemberProperty(member, memberName));
+    }
+    const property = this.c.propertyOf(apparent, memberName);
+    if (!property) return false;
+    if (property.declaration?.parent?.type === 'enum_body') return true;
+    const propertyType = property.type();
+    return propertyType.kind === 'literal' && propertyType.fresh === true && propertyType.enumMember !== undefined;
   }
 
   /** Narrows the reference `node` to `narrow` of its current type. */
