@@ -25,6 +25,7 @@ import { intersectConstructSignatures } from './mixinConstructors';
 import { Namespaces } from './namespaces';
 import { OperatorChecker } from './operators';
 import { OverloadContexts } from './overloadContexts';
+import { checkTypeMemberModifiers } from './overrideModifiers';
 import { BindingPatterns } from './patterns';
 import { Printer } from './print';
 import { ReducedTypes } from './reducedTypes';
@@ -164,6 +165,7 @@ export class Checker {
       this.error(name, 'bigint リテラルはプロパティ名として使えません。');
     this.classes.checkThisTypePlacements(this.root);
     checkDecoratorPlacements(this, this.root);
+    checkTypeMemberModifiers(this, this.root);
     this.namespaces.pruneImportAliasMeanings(this.binder.allScopes);
     checkDuplicateDeclarations(this, this.binder.allScopes);
     this.signatures.checkTypeParameterDeclarations(this.binder.allScopes);

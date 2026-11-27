@@ -5,6 +5,22 @@ import { memberName } from './declarations';
 import { hasToken, named } from './syntax';
 import { isAnyLike } from './types';
 
+/** Reports class-only member modifiers (`override`, accessibility, `static`) written on interface or object-type members. */
+export function checkTypeMemberModifiers(c: Checker, root: TreeNode): void {
+  for (const body of root.descendantsOfType(['interface_body', 'object_type'])) {
+    c.budget.spend();
+    for (const member of named(body)) {
+      const nameId = member.childForFieldName('name')?.id;
+      for (const child of member.children) {
+        if (!child || child.id === nameId) continue;
+        if (child.type === 'override_modifier' || child.type === 'accessibility_modifier' || child.type === 'static') {
+          c.error(child, `'${child.text}' 修飾子は型メンバーでは使用できません。`);
+        }
+      }
+    }
+  }
+}
+
 /** A member marked `override`, including a parameter property, must override a member of the base class. */
 export function checkOverrideModifiers(c: Checker, node: TreeNode, members: TreeNode[]): void {
   const ctor = c.classes.constructorNode(node);
