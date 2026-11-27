@@ -101,6 +101,8 @@ function checkVariance(
     );
 }
 
+const classTypes = new Set(['class', 'class_declaration', 'abstract_class_declaration']);
+
 /** The declaration's type with one of its type parameters replaced. */
 function instantiated(
   c: Checker,
@@ -109,11 +111,12 @@ function instantiated(
   parameter: TypeParameter,
   marker: TypeParameter
 ): Type | undefined {
+  const args = parameters.map((each) => (each.id === parameter.id ? marker : each));
+  if (classTypes.has(node.type)) return c.reference(c.classes.classInfoOfNode(node).instanceType, args);
   const name = node.childForFieldName('name');
   const symbol = name ? c.scopeOf(node).lookupType(name.text) : undefined;
   if (!symbol) return undefined;
   const declared = c.typeNodes.declaredTypeOf(symbol);
-  const args = parameters.map((each) => (each.id === parameter.id ? marker : each));
   if (node.type !== 'type_alias_declaration') return c.reference(declared as ObjectType, args);
   return c.instantiate(declared, createMapper([[parameter.id, marker]]));
 }
