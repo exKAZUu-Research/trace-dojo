@@ -59,7 +59,6 @@ function pushScopeReferences(pending: unknown[], scope: Scope): void {
   for (const binding of scope.bindings.values()) {
     if (binding.value !== UNINITIALIZED) pending.push(binding.value);
     if (binding.initializingClass) pending.push(binding.initializingClass);
-    if (binding.declaredClass) pending.push(binding.declaredClass);
   }
   pending.push(scope.parent);
   // A `using` declaration's value and disposal method stay reachable until its scope ends.

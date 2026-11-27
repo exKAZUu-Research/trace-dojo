@@ -659,6 +659,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
       });
     if (decorated) {
       runtime.frame.temporaries.push(decorated.cls, ...decorated.staticInitializers, ...decorated.classInitializers);
+      for (const { field } of definitions)
+        if (field) runtime.frame.temporaries.push(...(field.transforms ?? []), ...(field.initializers ?? []));
       if (decorated.instanceInitializers.length > 0) behavior.initializers = decorated.instanceInitializers;
       if (decorated.staticInitializers.length > 0)
         staticInitializers.unshift(() => runInitializers(runtime, decorated.staticInitializers, fn));
