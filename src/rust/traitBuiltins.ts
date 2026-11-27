@@ -253,14 +253,17 @@ const RULES: Record<string, Rule> = {
  */
 function indexes({ solver, t, ref }: Goal, mutable: boolean): Answer {
   const index = ref.args[0] && normalize(shallow(ref.args[0]));
-  const sequence = t.kind === 'array' || t.kind === 'slice' || isBuiltin(t, 'Vec') || isBuiltin(t, 'VecDeque');
-  if (sequence) {
-    if (!index) return 'yes';
-    if (index.kind === 'var') return solver.unifier.tryUnify(index, USIZE) ? 'yes' : 'no';
-    return index.kind === 'int' && index.name === 'usize' ? 'yes' : 'no';
+  if (t.kind === 'array' || t.kind === 'slice' || isBuiltin(t, 'Vec') || isBuiltin(t, 'VecDeque')) {
+    return indexesByUsize(solver, index);
   }
   const map = isBuiltin(t, 'HashMap') || isBuiltin(t, 'BTreeMap');
   return map && !mutable && (!index || index.kind === 'ref' || index.kind === 'var') ? 'yes' : 'no';
+}
+
+function indexesByUsize(solver: TraitSolver, index: Type | undefined): Answer {
+  if (!index) return 'yes';
+  if (index.kind === 'var') return solver.unifier.tryUnify(index, USIZE) ? 'yes' : 'no';
+  return index.kind === 'int' && index.name === 'usize' ? 'yes' : 'no';
 }
 
 /** What names a file: text, a `Path`, or a `PathBuf`, or a reference to one. */
@@ -307,21 +310,25 @@ function numericOperator({ solver, t, ref }: Goal, name: string, assign: boolean
   if (t.kind === 'adt' && t.def.builtin === 'String' && name === 'Add') return stringAdd(solver, rhs);
   const left = operatorNumber(t);
   if (!left || !numberTakes(left, name)) return 'no';
-  if (!rhs || rhs.kind === 'var') {
-    if (name === 'Shl' || name === 'Shr') return 'unknown';
-    // A right side that is not a number literal (the argument of `a.add(&b)`) may still be a reference.
-    if (rhs && !rhs.v.literal) return 'unknown';
-    return rhs ? (solver.unifier.tryUnify(rhs, left) ? 'yes' : 'no') : 'yes';
-  }
-  const target = rhs.kind === 'ref' && !rhs.mutable ? normalize(shallow(rhs.target)) : undefined;
-  // `&` of a number literal (`1i32.add(&2)`) takes the left side's type.
-  if (target?.kind === 'var' && target.v.literal && name !== 'Shl' && name !== 'Shr') {
-    return solver.unifier.tryUnify(target, left) ? 'yes' : 'no';
-  }
+  const untyped = untypedRight(solver, left, rhs, name);
+  if (untyped) return untyped;
   const right = operatorNumber(rhs);
   if (!right) return 'no';
   if (name === 'Shl' || name === 'Shr') return left.kind === 'int' && right.kind === 'int' ? 'yes' : 'no';
   return solver.unifier.tryUnify(left, right) ? 'yes' : 'no';
+}
+
+/**
+ * The answer for a right side not known yet: a number literal, or `&` of one (`1i32.add(&2)`), takes the left side's
+ * type; anything else (the argument of `a.add(&b)`) may still be a reference. Undefined for a right side known.
+ */
+function untypedRight(solver: TraitSolver, left: Type, rhs: Type | undefined, name: string): Answer | undefined {
+  const shift = name === 'Shl' || name === 'Shr';
+  if (!rhs) return 'yes';
+  const target = rhs.kind === 'ref' && !rhs.mutable ? normalize(shallow(rhs.target)) : rhs;
+  if (target.kind !== 'var') return undefined;
+  if (shift || !target.v.literal) return rhs.kind === 'var' || !shift ? 'unknown' : undefined;
+  return solver.unifier.tryUnify(target, left) ? 'yes' : 'no';
 }
 
 /** `String + &str`, which settles a right side not known yet as `&str`. */
