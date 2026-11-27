@@ -16,7 +16,6 @@ import type { TypeArgumentMismatch } from './typeNodes';
 import {
   anonymousObject,
   anyType,
-  baseTypeOfLiteral,
   errorType,
   functionType,
   isAnyLike,
@@ -26,7 +25,6 @@ import {
   numberType,
   type Parameter,
   type Signature,
-  stringType,
   type TupleElement,
   type Type,
   typeMembers,
@@ -197,8 +195,7 @@ export class Calls {
     const typeArguments = this.typeArguments.written(node);
     if (callee.type === 'super') return this.c.classes.superCall(node, args);
     if (callee.type === 'import') return this.checkArgumentsOnly(args, anyType);
-    const required = this.requiredModule(callee, args);
-    if (required) return required;
+    const beforeDiagnostics = this.c.diagnostics.length;
     const optional = node.childForFieldName('optional_chain') !== null;
     if (this.isEvolvingPush(callee)) {
       if (typeArguments) this.c.error(node, '型引数は 0 個にしてください。');
@@ -216,7 +213,9 @@ export class Calls {
     if (checkedCallee === errorType) return this.checkArgumentsOnly(args, errorType);
     const calleeType = this.nonNullableCallee(callee, checkedCallee, optional);
     const shortCircuits = chained !== undefined || (optional && calleeType !== checkedCallee);
-    if (isAnyLike(calleeType)) return this.untypedCall(node, args, typeArguments);
+    if (isAnyLike(calleeType)) {
+      return this.finishRequireCall(callee, args, this.untypedCall(node, args, typeArguments), beforeDiagnostics);
+    }
     if (isIntrinsic(calleeType, 'unknown')) {
       this.c.error(
         callee,
@@ -228,7 +227,10 @@ export class Calls {
     const { signatures } = callable;
     if (signatures.length === 0) {
       for (const arg of args) this.c.expressions.check(arg);
-      return callable.untyped ? this.untypedCall(node, [], typeArguments) : this.uncallableType(callee, calleeType);
+      const fallback = callable.untyped
+        ? this.untypedCall(node, [], typeArguments)
+        : this.uncallableType(callee, calleeType);
+      return this.finishRequireCall(callee, args, fallback, beforeDiagnostics);
     }
     const receiver = access?.receiver;
     const resolution = this.resolveWithTextConversions(node, callee, signatures, args, {
@@ -238,8 +240,8 @@ export class Calls {
     });
     if (!resolution) return errorType;
     this.resolved.set(node.id, resolution.signature);
-    const result = resolution.returnType;
-    return shortCircuits ? this.c.members.chainResult(node, result) : result;
+    const result = shortCircuits ? this.c.members.chainResult(node, resolution.returnType) : resolution.returnType;
+    return this.finishRequireCall(callee, args, result, beforeDiagnostics);
   }
 
   private resolveWithTextConversions(
@@ -519,74 +521,27 @@ export class Calls {
   }
 
   /**
-   * `require("fs")`, Node.js's `require` of a module this interpreter provides, which @types/node types as `any`; any
-   * other module, or one a string literal does not name, is rejected before the program runs.
+   * Enforces that calls to Node.js's `require` load only a constant module this interpreter provides while preserving
+   * normal call signature and type-argument resolution on direct or wrapped `require` callees.
    */
-  private requiredModule(callee: TreeNode, args: TreeNode[]): Type | undefined {
-    const target = withoutAssertions(callee);
-    if (target.type !== 'identifier' || target.text !== 'require') return undefined;
-    const library = this.c.libraryBinder.moduleScope.lookupValue('require');
-    if (!library || this.c.scopeOf(target).lookupValue('require') !== library) return undefined;
-    if (callee !== target && !this.checkWrappedRequireCallee(callee, target, this.c.expressions.valueTypeOf(library))) {
-      return this.checkArgumentsOnly(args, errorType);
-    }
-    // @types/node declares `require(id: string)`, whose argument count and type tsc checks first.
-    if (args.length !== 1) {
-      this.c.error(args[1] ?? callee, `引数は 1 個必要ですが、${args.length} 個渡されています。`);
-      return this.checkArgumentsOnly(args, errorType);
-    }
-    const [id] = args;
-    const idType = this.c.expressions.check(id);
-    if (!this.c.relations.isAssignable(idType, stringType)) {
+  private finishRequireCall(callee: TreeNode, args: TreeNode[], result: Type, beforeDiagnostics: number): Type {
+    if (!this.isLibraryRequireCallee(callee)) return result;
+    const name = args.length === 1 ? this.c.flow.constantIndexName(withoutAssertions(args[0])) : undefined;
+    if (name !== undefined && this.c.namespaces.moduleObjectType(name)) return result;
+    if (this.c.diagnostics.length === beforeDiagnostics) {
       this.c.error(
-        id,
-        `型 '${this.c.print(baseTypeOfLiteral(idType))}' の引数を型 'string' のパラメーターに渡すことはできません。`
+        callee,
+        unsupportedMessage(name === undefined ? '名前が定数で決まらない require' : `モジュール '${name}' の require`)
       );
-      return errorType;
     }
-    // `require("fs" as const)` names fs as `require("fs")` does.
-    const name = this.c.flow.constantIndexName(withoutAssertions(id));
-    if (name !== undefined && this.c.namespaces.moduleObjectType(name)) return anyType;
-    this.c.error(
-      callee,
-      unsupportedMessage(name === undefined ? '名前が定数で決まらない require' : `モジュール '${name}' の require`)
-    );
     return errorType;
   }
 
-  private checkWrappedRequireCallee(callee: TreeNode, target: TreeNode, requireType: Type): boolean {
-    let currentType: Type | undefined = requireType;
-    for (const wrapper of wrapperChain(target, callee)) {
-      currentType = this.applyRequireWrapper(wrapper, currentType);
-      if (!currentType) return false;
-    }
-    if (!isAnyLike(currentType) && this.c.signaturesOf(currentType, 'call').length === 0) {
-      this.uncallableType(callee, currentType);
-      return false;
-    }
-    return true;
-  }
-
-  private applyRequireWrapper(wrapper: TreeNode, currentType: Type): Type | undefined {
-    if (wrapper.type === 'parenthesized_expression' || wrapper.type === 'non_null_expression') return currentType;
-    const typeNode = wrapper.type === 'type_assertion' ? named(named(wrapper)[0])[0] : named(wrapper)[1];
-    if (!typeNode) return currentType;
-    const written = this.c.typeNodes.typeFromNode(typeNode);
-    if (wrapper.type === 'satisfies_expression') {
-      if (this.c.relations.isAssignable(currentType, written)) return currentType;
-      this.c.error(
-        wrapper,
-        `型 '${this.c.print(currentType)}' は想定された型 '${this.c.print(written)}' を満たしていません。`
-      );
-      return undefined;
-    }
-    if (!this.c.relations.isAssignable(currentType, written) && !this.c.relations.isAssignable(written, currentType)) {
-      this.c.error(
-        wrapper,
-        `型 '${this.c.print(currentType)}' から型 '${this.c.print(written)}' への変換は、互いに十分に重なっていないため間違っている可能性があります。意図的な変換である場合は、まず式を 'unknown' に変換してください。`
-      );
-    }
-    return written;
+  private isLibraryRequireCallee(callee: TreeNode): boolean {
+    const target = withoutAssertions(callee);
+    if (target.type !== 'identifier' || target.text !== 'require') return false;
+    const library = this.c.libraryBinder.moduleScope.lookupValue('require');
+    return Boolean(library) && this.c.scopeOf(target).lookupValue('require') === library;
   }
 
   private isStringRawTag(callee: TreeNode): boolean {
@@ -1414,15 +1369,6 @@ function restTupleContexts(c: Checker, restType: Type, args: ExpressionListFlow)
     args.nodes.map((node) => args.length(node))
   );
   return contexts.map((context, index) => (args.nodes[index].type === 'spread_element' ? undefined : context));
-}
-
-function wrapperChain(target: TreeNode, callee: TreeNode): TreeNode[] {
-  const wrappers: TreeNode[] = [];
-  for (let current: TreeNode | null = target.parent; current; current = current.parent) {
-    wrappers.push(current);
-    if (current.id === callee.id) break;
-  }
-  return wrappers;
 }
 
 function mutatedWriteTarget(node: TreeNode): TreeNode | null | undefined {

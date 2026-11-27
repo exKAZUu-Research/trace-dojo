@@ -29,6 +29,7 @@ import {
   skipParentheses,
   stringValue,
   templateFragmentText,
+  withoutAssertions,
 } from './syntax';
 import {
   isTemplateLiteralContext,
@@ -495,7 +496,8 @@ export class ExpressionChecker {
       this.c.error(node, `'import type' を使用してインポートされたため、'${name}' は値として使用できません。`);
       return errorType;
     }
-    if (symbol === this.c.libraryBinder.moduleScope.lookupValue('require')) return this.reportRequireValue(node);
+    if (symbol === this.c.libraryBinder.moduleScope.lookupValue('require') && !isDirectOrWrappedRequireCallee(node))
+      return this.reportRequireValue(node);
     this.checkUsedBeforeDeclaration(node, symbol);
     if (symbol.valueKind === 'enum') this.c.enums.checkConstEnumUse(node, symbol);
     if (symbol.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, symbol)) return errorType;
@@ -1270,6 +1272,29 @@ function objectTargets(target: Type): Type[] {
 }
 
 /** Whether an expression, through parentheses, is what a call or `new` calls. */
+function isDirectOrWrappedRequireCallee(node: TreeNode): boolean {
+  let current = node;
+  while (
+    current.parent &&
+    [
+      'parenthesized_expression',
+      'as_expression',
+      'satisfies_expression',
+      'non_null_expression',
+      'type_assertion',
+    ].includes(current.parent.type)
+  ) {
+    current = current.parent;
+  }
+  const call = current.parent;
+  return (
+    call?.type === 'call_expression' &&
+    call.childForFieldName('function')?.id === current.id &&
+    call.childForFieldName('arguments')?.type !== 'template_string' &&
+    withoutAssertions(current).id === node.id
+  );
+}
+
 function isCallee(node: TreeNode): boolean {
   let expression = node;
   while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;
