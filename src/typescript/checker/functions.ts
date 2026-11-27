@@ -549,7 +549,7 @@ export class FunctionChecker {
   ): Pick<FunctionContext, 'asyncAnnotation' | 'declaredReturn' | 'contextualReturn'> {
     const contextual = contextualReturn && awaitedType(this.c, contextualReturn);
     if (!declaredReturn) return { contextualReturn: contextual };
-    const isPromise = isAnyLike(declaredReturn) || this.c.isLibraryType(declaredReturn, 'Promise');
+    const isPromise = declaredReturn === errorType || this.c.isLibraryType(declaredReturn, 'Promise');
     return {
       asyncAnnotation: { type: declaredReturn, isPromise },
       declaredReturn: isPromise ? awaitedType(this.c, declaredReturn) : anyType,
