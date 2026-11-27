@@ -125,11 +125,13 @@ function scheduler(ctx: NativeContext): Scheduler {
 
 function spawn(ctx: NativeContext, f: Value): ThreadHandle {
   return scheduler(ctx).spawn(() => {
-    const result = call(ctx, f, []);
-    // The thread owns its closure, whose captured values go when it ends.
-    const closure = deref(f);
-    if (closure instanceof FnValue) closure.dropCaptures?.();
-    return result;
+    try {
+      return call(ctx, f, []);
+    } finally {
+      // The thread owns its closure, whose captured values go when it ends, by a panic too.
+      const closure = deref(f);
+      if (closure instanceof FnValue) closure.dropCaptures?.();
+    }
   });
 }
 

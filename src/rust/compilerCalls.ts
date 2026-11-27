@@ -85,12 +85,14 @@ function compileReceiver(c: Compiler, expr: ExprOf<'methodCall'>, method: Method
   const byValue = adjust.autoref === 'none' && method.fn.selfMode === 'value' && adjust.derefs.length === 0;
   // rustc reborrows a `&mut` receiver rather than moving it out of its variable.
   const reborrowed = byValue && isMutReference(expr.receiver.ty);
-  const read = byValue && !reborrowed ? c.value(expr.receiver) : valueThrough(c, expr.receiver, adjust.derefs);
+  const borrowed = adjust.autoref !== 'none';
+  const read =
+    byValue && !reborrowed ? c.value(expr.receiver) : valueThrough(c, expr.receiver, adjust.derefs, borrowed);
   if (iterFrom) return (frame) => c.support.toIter(read(frame), iterFrom(frame));
   if (method.fn.selfMode === 'value' && adjust.autoref === 'none' && adjust.derefs.length > 0) {
     return derefedSelf(c, expr.receiver, adjust.derefs, read);
   }
-  return adjust.autoref === 'ref' && adjust.derefs.length === 0 ? dropsBorrowedTemporary(c, expr.receiver, read) : read;
+  return read;
 }
 
 /** A receiver taken by value after derefs: a `Copy` value is copied, and through owners only (a `Box`), one that is not `Copy` moves out of the place that owns it. */

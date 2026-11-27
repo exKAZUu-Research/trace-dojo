@@ -252,13 +252,20 @@ export class Compiler {
     };
     if (!clearsLocals || declared.length === 0) return run;
     return (frame) => {
+      const mark = frame.runtime.liveGuards.length;
+      let result: Value | undefined;
       try {
-        return run(frame);
+        result = run(frame);
+        return result;
       } catch (error) {
         // The block's variables go as the panic unwinds, which poisons a lock one of them holds.
         if (error instanceof RustPanic) frame.runtime.unwinding = true;
+        // A `break` value's temporaries go before the variables, as a tail's do.
+        if (error instanceof ControlSignal) result = error.value;
         throw error;
       } finally {
+        // The temporaries of the block's tail go before its variables (edition 2024).
+        frame.runtime.releaseGuards(frame, mark, result);
         frame.endScope(declared);
       }
     };
@@ -781,7 +788,8 @@ export class Compiler {
 
   /** The concrete type of a value that may need dropping where code discards it, or undefined when none can. */
   droppedType(type: Type | undefined): ((frame: Frame) => Type) | undefined {
-    if (!type || !this.support.dropper.active) return undefined;
+    // The dropper may switch on only once the program runs (a native activates it), so the check waits until then.
+    if (!type) return undefined;
     const runtime = runtimeType(type);
     return (frame) => runtime(frame);
   }

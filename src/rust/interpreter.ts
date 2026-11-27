@@ -265,13 +265,14 @@ export class Interpreter implements CallSupport {
       result = error.value;
     } finally {
       try {
-        // The parameters go when the function ends, after its body's variables; `process::exit` drops nothing.
+        // The temporaries of the body's tail or `return` value go first (edition 2024), then the body's variables,
+        // then the parameters; `process::exit` drops nothing.
+        runtime.releaseGuards(frame, guards, result);
         if (!exiting && runtime.dropper) {
           const bodySlots = compiled.bodySlots ?? [];
           const others = compiled.info.locals.map((local) => local.slot).filter((slot) => !bodySlots.includes(slot));
           runtime.dropper.dropSlots(frame, [...others.toSorted((a, b) => a - b), ...bodySlots]);
         }
-        runtime.releaseGuards(frame, guards, result);
         onEnd?.(frame, result);
       } finally {
         runtime.popFrame();
@@ -293,6 +294,7 @@ export class Interpreter implements CallSupport {
       const borrowers = args.filter((arg, index) => this.runtime.borrowCandidate(arg, types[index]));
       return this.runtime.withActiveBorrows(borrowers, () => native(args, context));
     });
+    releaseConsumed(def, typeArgs, args, result);
     // Library functions build `String`s through these two ways out: a result, and a receiver they write to.
     if ((typeof result === 'string' || result instanceof StringValue) && shallow(def.ret).kind !== 'ref') {
       this.runtime.allocateString(textOf(result).length);
@@ -678,4 +680,45 @@ function receiverText(receiver: Value | undefined): string | undefined {
   while (isPlace(value)) value = value.get();
   if (typeof value === 'string' || value instanceof StringValue) return isPlace(receiver) ? textOf(value) : undefined;
   return value instanceof FormatterValue ? value.text : undefined;
+}
+
+/**
+ * What a library function takes by value and does not keep goes when it returns: a closure's captured values
+ * (`Option::map(move |x| ..)`), and what an iterator it consumes holds (`collect`); an iterator adaptor that keeps them
+ * (`map`) lets them go when it goes.
+ */
+function releaseConsumed(def: FnDef, typeArgs: Type[], args: Value[], result: Value): void {
+  if (KEEPS_CLOSURE.has(def.nativeKey ?? '') || !args.some((arg) => releaseOf(arg))) return;
+  const types = nativeArgumentTypes(def, typeArgs);
+  for (const [index, arg] of args.entries()) {
+    const release = releaseOf(arg);
+    const type = types[index] as Type | undefined;
+    // A method's receiver is taken by value only for `self`.
+    const borrowed = (index === 0 && def.selfMode !== undefined && def.selfMode !== 'value') || !type;
+    if (!release || arg === result || borrowed || normalize(shallow(type)).kind === 'ref') continue;
+    if (result instanceof IterValue) (result.releases ??= []).push(release);
+    else if (!returnsParam(def, index)) release();
+  }
+}
+
+/** Natives that keep a closure to run later, which then drop its captured values themselves. */
+const KEEPS_CLOSURE = new Set(['std::thread::spawn', 'Scope::spawn']);
+
+function releaseOf(value: Value): (() => void) | undefined {
+  if (value instanceof FnValue && value.dropCaptures) return value.dropCaptures;
+  if (value instanceof IterValue && value.releases) return () => value.release();
+  return undefined;
+}
+
+/** Whether a function's result can hold its argument, as its result type names the argument's type parameter. */
+function returnsParam(def: FnDef, index: number): boolean {
+  const params = def.selfMode ? [def.impl?.selfType, ...def.paramTypes] : def.paramTypes;
+  const param = params[index] && shallow(params[index]);
+  return param?.kind === 'param' && mentions(def.ret, param.param);
+}
+
+function mentions(type: Type, param: TypeParam): boolean {
+  const t = shallow(type);
+  if (t.kind === 'param') return t.param === param;
+  return childTypes(t).some((child) => mentions(child, param));
 }

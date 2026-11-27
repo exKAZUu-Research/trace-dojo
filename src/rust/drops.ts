@@ -135,6 +135,7 @@ export class Dropper {
   /** Drops the elements an iterator that owns them has not yielded. */
   dropRest(iter: IterValue): void {
     if (iter.rest && iter.ownedItemType) for (const item of iter.rest()) this.drop(item, iter.ownedItemType);
+    iter.release();
   }
 
   // code-gauge-allow functionNcss -- One case per kind of owning type.

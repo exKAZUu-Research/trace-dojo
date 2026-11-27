@@ -220,6 +220,16 @@ export class IterValue {
   /** Elements pushed back by `peekable`. */
   peeked: Next[] | undefined;
 
+  /** What goes when the iterator does: the captured values of the closures its adaptors took (`map(move |x| ..)`). */
+  releases: (() => void)[] | undefined;
+
+  /** Runs what goes with the iterator, once. */
+  release(): void {
+    const releases = this.releases;
+    this.releases = undefined;
+    for (const release of releases ?? []) release();
+  }
+
   /**
    * The next element when a consumer folds the iterator (`collect`, `sum`, `for_each`), where it differs from `next`:
    * a `zip` of two `TrustedLen` iterators folds as many pairs as the shorter has, taking nothing more from the longer.

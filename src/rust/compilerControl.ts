@@ -136,7 +136,10 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
           for (;;) {
             frame.runtime.spend();
             const next = iterator.next();
-            if (next === DONE) return UNIT_VALUE;
+            if (next === DONE) {
+              iterator.release();
+              return UNIT_VALUE;
+            }
             frame.temporaries.push(bind(frame, next));
             let broke = false;
             try {

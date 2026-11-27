@@ -267,8 +267,9 @@ function readOnlyPlace(value: Value): Place {
 }
 
 /** An operand's value after derefs, reading through `&mut` references. */
-export function valueThrough(c: Compiler, operand: Expr, derefs: Derefs): Eval {
-  const read = c.read(operand);
+export function valueThrough(c: Compiler, operand: Expr, derefs: Derefs, temporary = false): Eval {
+  // An operand no variable holds (`make().0`, `vec![..][0]`, `[x].len()`) is a temporary, which goes later.
+  const read = temporary ? dropsBorrowedTemporary(c, operand, c.read(operand)) : c.read(operand);
   if (!derefs.includes('mutRef') && !derefs.includes('user')) return read;
   const calls = userDerefs(c, operand, derefs, false);
   return (frame) => {
@@ -284,9 +285,7 @@ export function valueThrough(c: Compiler, operand: Expr, derefs: Derefs): Eval {
 export function compileField(c: Compiler, expr: ExprOf<'field'>): Eval {
   const field = c.annotations.fields.get(expr);
   if (!field) throw new Error('Unresolved field');
-  const through = valueThrough(c, expr.operand, field.derefs);
-  // A field of a value no variable holds (`make().0`) leaves that value a temporary, which goes later.
-  const base = field.derefs.length === 0 ? dropsBorrowedTemporary(c, expr.operand, through) : through;
+  const base = valueThrough(c, expr.operand, field.derefs, true);
   const { index } = field;
   if (field.range) {
     const endpoint = rangeEndpoint(expr.name);
@@ -350,7 +349,7 @@ function fromBits(bits: bigint, width: number, type: Type): Value | undefined {
 export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
   const res = c.annotations.indexes.get(expr);
   if (!res) throw new Error('Unresolved index');
-  const base = valueThrough(c, expr.operand, res.derefs);
+  const base = valueThrough(c, expr.operand, res.derefs, true);
   const index = c.value(expr.index);
   if (res.container === 'user') return userIndexCall(c, expr, res, 'Index', 'index', base);
   // A range goes through the `Index` impls, which report their panics at the `[`, as `Vec`'s indexes do.
