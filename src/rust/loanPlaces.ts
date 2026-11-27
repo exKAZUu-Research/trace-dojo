@@ -2,7 +2,7 @@ import type { Annotations } from './annotations';
 import type { Expr, Pattern } from './ast';
 import { normalize } from './infer';
 import type { Place } from './loanGraph';
-import { type Layout, NONE, type Outlives, relate } from './regions';
+import { derefLayout, isNone, type Layout, NONE, type Outlives, ownedDerefLayout, relate } from './regions';
 import { arrayTryFrom } from './traitConversions';
 import { type FnDef, shallow, type Type } from './types';
 
@@ -91,6 +91,20 @@ export function derefCoercedLayout(annotations: Annotations, expr: Expr, layout:
     inner = inner.target;
   }
   return inner.kind === 'ref' && !inner.mutable ? inner : undefined;
+}
+
+/**
+ * For a reference coerced through a smart pointer or a guard (`&Rc<RefCell<T>>` to `&RefCell<T>`), a reborrow of what
+ * it points to: the outer reference's region, and the pointee's layout, which holds the regions the pointer holds.
+ */
+export function reborrowedPointeeLayout(annotations: Annotations, expr: Expr, layout: Layout): Layout | undefined {
+  const coercion = annotations.coercions.get(expr);
+  if (coercion?.kind !== 'deref' || layout.kind !== 'ref') return undefined;
+  if (coercion.derefs.every((step) => step === 'ref' || step === 'mutRef')) return undefined;
+  // The steps go from what the reference points to.
+  let target: Layout = layout.target;
+  for (const step of coercion.derefs) target = step === 'own' ? ownedDerefLayout(target) : derefLayout(target);
+  return isNone(target) ? undefined : { kind: 'ref', region: layout.region, mutable: false, target };
 }
 
 /**

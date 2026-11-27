@@ -22,6 +22,7 @@ import {
   isReference,
   matchDeref,
   project,
+  reborrowedPointeeLayout,
   refTarget,
   relateArrayBorrow,
   storedElement,
@@ -714,7 +715,9 @@ export class LoanBuilder {
    */
   private derefCoercedValue(expr: Expr, value: Value): Value {
     if (value === undefined) return value;
-    const layout = derefCoercedLayout(this.annotations, expr, this.layout(value));
+    const layout =
+      derefCoercedLayout(this.annotations, expr, this.layout(value)) ??
+      reborrowedPointeeLayout(this.annotations, expr, this.layout(value));
     if (!layout) return value;
     const inner = this.newVarWithLayout('{coerced}', layout);
     this.point({ uses: [value], defs: [inner] });
