@@ -441,6 +441,9 @@ export function isAnyLike(type: Type): boolean {
  */
 export function aliasedDeclaredType(type: Type, name: string, typeParameters: TypeParameter[], aliasId: number): Type {
   if (type.kind !== 'object' && type.kind !== 'conditional') return type;
+  if (type.aliasName !== undefined && typeParameters.length > 0 && (type.aliasArguments?.length ?? 0) === 0) {
+    return type;
+  }
   const arguments_ = type.aliasArguments ?? [];
   const renames =
     type.aliasName !== undefined &&

@@ -11,7 +11,6 @@ const varianceOwners = new Set([
   'interface_declaration',
   'type_alias_declaration',
 ]);
-const varianceAliasValues = new Set(['object_type', 'function_type', 'constructor_type']);
 
 /**
  * Checks the `in` and `out` annotations of a declaration's type parameters as tsc does: only classes, interfaces, and
@@ -58,35 +57,22 @@ function checkAnnotationPlaces(c: Checker, node: TreeNode, annotated: TreeNode[]
     }
     return false;
   }
-  const value = node.type === 'type_alias_declaration' ? (node.childForFieldName('value') ?? undefined) : undefined;
-  if (!value || allowsVarianceAliasValue(c, value, new Set())) return true;
-  for (const parameter of annotated)
-    c.error(parameter, '分散の注釈は、オブジェクト・関数・コンストラクター・マップ型の型エイリアスでしか使えません。');
-  return false;
+  if (node.type === 'type_alias_declaration' && !allowsVarianceAlias(c, node)) {
+    for (const parameter of annotated)
+      c.error(
+        parameter,
+        '分散の注釈は、オブジェクト・関数・コンストラクター・マップ型の型エイリアスでしか使えません。'
+      );
+    return false;
+  }
+  return true;
 }
 
-function allowsVarianceAliasValue(c: Checker, node: TreeNode | null | undefined, seen: Set<number>): boolean {
-  let current = node;
-  while (current?.type === 'parenthesized_type') current = named(current)[0];
-  if (!current) return false;
-  if (varianceAliasValues.has(current.type)) return true;
-  const targetName =
-    current.type === 'generic_type'
-      ? (current.childForFieldName('name') ?? undefined)
-      : current.type === 'type_identifier' || current.type === 'nested_type_identifier'
-        ? current
-        : undefined;
-  if (!targetName) return false;
-  let symbol =
-    targetName.type === 'type_identifier'
-      ? c.scopeOf(targetName).lookupType(targetName.text)
-      : c.namespaces.qualifiedTypeSymbol(targetName).symbol;
-  if (symbol && (symbol.typeKind === 'import' || symbol.typeKind === 'importAlias')) {
-    symbol = c.namespaces.imported(symbol, 'type');
-  }
-  if (!symbol || symbol.typeKind !== 'alias' || seen.has(symbol.id)) return false;
-  seen.add(symbol.id);
-  return allowsVarianceAliasValue(c, symbol.typeDeclarations[0]?.childForFieldName('value'), seen);
+function allowsVarianceAlias(c: Checker, node: TreeNode): boolean {
+  const name = node.childForFieldName('name');
+  const symbol = name ? c.scopeOf(node).lookupType(name.text) : undefined;
+  const declared = symbol ? c.typeNodes.declaredTypeOf(symbol) : undefined;
+  return declared?.kind === 'object' && (declared.objectKind === 'anonymous' || declared.objectKind === 'mapped');
 }
 
 /** `out T` needs the type with a subtype of `T` assignable to that with a supertype, and `in T` the other way. */
