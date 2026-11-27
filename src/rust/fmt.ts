@@ -418,6 +418,9 @@ export class Formatter {
       case 'CStr': {
         return padString(`"${(v as bigint[]).map((byte) => escapeAscii(Number(byte))).join('')}"`, spec, write);
       }
+      case 'OsStr': {
+        return quotedDebug(textOf(v), false, write);
+      }
       case 'File': {
         const stream = v as IoStream;
         const { fd, path } = stream.file ?? { fd: 0, path: '' };

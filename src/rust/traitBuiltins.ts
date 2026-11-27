@@ -53,6 +53,7 @@ const CLONE_CONTAINERS = new Set([
 
 const DEBUG_TYPES = new Set([
   'CStr',
+  'OsStr',
   'Pin',
   'Arc',
   'Mutex',
@@ -669,7 +670,7 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
     return values === 'no' ? 'no' : keys;
   }
   if (builtin === 'BTreeMap' || builtin === 'BTreeSet') return all(t.args);
-  if (builtin === 'Duration' || builtin === 'CStr') return 'yes';
+  if (builtin === 'Duration' || builtin === 'CStr' || builtin === 'OsStr') return 'yes';
   if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse', 'Rc', 'RefCell', 'Arc'].includes(builtin)) {
     return name === 'Hash' && builtin === 'RefCell' ? 'no' : all(t.args);
   }

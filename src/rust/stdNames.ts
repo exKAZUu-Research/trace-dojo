@@ -162,6 +162,7 @@ export const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   Waker: 'Waker',
   Condvar: 'Condvar',
   CStr: 'CStr',
+  OsStr: 'OsStr',
 };
 
 export const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {

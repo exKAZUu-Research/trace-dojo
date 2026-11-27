@@ -322,6 +322,9 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
     case 'Cell': {
       return valuesEqual(t.args[0], pointee(x), pointee(y));
     }
+    case 'OsStr': {
+      return textOf(x) === textOf(y);
+    }
     case 'CStr': {
       const a = x as bigint[];
       const b = y as bigint[];
@@ -525,6 +528,9 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
     }
     case 'CStr': {
       return compareBytes(x as bigint[], y as bigint[]);
+    }
+    case 'OsStr': {
+      return textOf(x) < textOf(y) ? -1 : textOf(x) > textOf(y) ? 1 : 0;
     }
     case 'Duration': {
       const a = (x as DurationValue).nanos;

@@ -1556,6 +1556,15 @@ pub mod ffi {
         pub fn is_empty(&self) -> bool;
     }
     pub fn c_str_literal(bytes: &'static [u8]) -> &'static CStr;
+    /** A file name or other text of the operating system, which is text here. */
+    pub struct OsStr;
+    impl OsStr {
+        pub fn new<S: super::pseudo::AsPath>(s: &S) -> &OsStr;
+        pub fn to_str(&self) -> Option<&str>;
+        pub fn to_string_lossy(&self) -> String;
+        pub fn len(&self) -> usize;
+        pub fn is_empty(&self) -> bool;
+    }
 }
 pub mod future {
     use super::pin::Pin;
@@ -1826,8 +1835,8 @@ pub mod path {
         pub fn to_str(&self) -> Option<&str>;
         pub fn display(&self) -> &str;
         pub fn join<P: AsPath>(&self, path: P) -> PathBuf;
-        pub fn file_name(&self) -> Option<&str>;
-        pub fn extension(&self) -> Option<&str>;
+        pub fn file_name(&self) -> Option<&super::ffi::OsStr>;
+        pub fn extension(&self) -> Option<&super::ffi::OsStr>;
         pub fn to_path_buf(&self) -> PathBuf;
     }
     impl PathBuf {

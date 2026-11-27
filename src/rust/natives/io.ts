@@ -367,6 +367,11 @@ define({
   'Path::display': ([self]) => pathOf(self),
   'Path::join': ([self, part]) => joinPath(pathOf(self), pathOf(part)),
   'Path::file_name': ([self], ctx) => option(ctx, fileName(pathOf(self))),
+  'OsStr::new': ([text]) => pathOf(text),
+  'OsStr::to_str': ([self], ctx) => some(ctx, textOf(deref(self))),
+  'OsStr::to_string_lossy': ([self]) => textOf(deref(self)),
+  'OsStr::len': ([self]) => BigInt(new TextEncoder().encode(textOf(deref(self))).length),
+  'OsStr::is_empty': ([self]) => textOf(deref(self)) === '',
   'Path::extension': ([self], ctx) => {
     const name = fileName(pathOf(self));
     const dot = name?.lastIndexOf('.') ?? -1;
