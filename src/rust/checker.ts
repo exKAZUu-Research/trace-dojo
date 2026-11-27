@@ -629,6 +629,8 @@ export class Checker {
     const selfType: Type | undefined = def.trait ? { kind: 'param', param: def.trait.self } : def.impl?.selfType;
     const resultTypes: [OpaqueType, Type][] = [];
     const returnType = hasOpaque(def.ret) ? openOpaqueResults(def.ret, resultTypes) : def.ret;
+    // The body sees what an `impl Trait` result is bound by, as a closure returned for `impl Fn(..)` takes its signature.
+    for (const [opaque, hidden] of resultTypes) this.recordTypeBounds(hidden, opaque.bounds);
     this.body = this.newBody({
       name: def.name,
       module,
