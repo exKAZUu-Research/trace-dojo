@@ -11,6 +11,7 @@ import {
   isBuiltin,
   isIteratorShape,
   isSigned,
+  ref,
   shallow,
   substitute,
   type TraitRef,
@@ -359,7 +360,8 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
   }
   if (t.kind === 'tuple') return all(t.elems);
   if (t.kind === 'array' || t.kind === 'slice') return all([t.elem]);
-  if (t.kind === 'closure') return all(t.closure.captures?.map(({ type }) => type) ?? []);
+  // A closure holds what it captures by reference as `&T` or `&mut T`, which need `T: Sync` and `T: Send` to send.
+  if (t.kind === 'closure') return all(capturedTypes(t));
   // `Rc` shares its count between threads unsynchronized, and `Cell`, `RefCell`, and their guards may not be shared.
   if (t.kind === 'adt' && ['Rc', 'Weak'].includes(t.def.builtin ?? '')) return 'no';
   if (t.kind === 'adt' && t.def.builtin === 'Arc') {
@@ -983,6 +985,11 @@ function isPrimitive(t: Type): boolean {
  * Whether a closure is `Copy` (or `Clone`), which it is when what it captures is: a shared reference always, a
  * `&mut` never, a value when its type is.
  */
+/** The types of what a closure holds: a reference for what it captures by reference, or the value itself. */
+function capturedTypes(t: Type & { kind: 'closure' }): Type[] {
+  return (t.closure.captures ?? []).map(({ type, mode }) => (mode === 'value' ? type : ref(type, mode === 'mut')));
+}
+
 function closureCaptures(t: Type & { kind: 'closure' }, all: (types: Type[]) => Answer): Answer {
   const captures = t.closure.captures ?? [];
   if (captures.some((capture) => capture.mode === 'mut')) return 'no';
