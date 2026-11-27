@@ -564,6 +564,8 @@ export class LoanBuilder {
 
   /** What a pattern matching an expression matches: the place it denotes, or a temporary with its value. */
   private source(expr: Expr): Place {
+    const coerced = this.derefCoercedPlace(expr);
+    if (coerced) return coerced.place;
     const place = this.annotations.reborrows.has(expr) ? undefined : this.place(expr);
     return place ?? this.valuePlace(this.value(expr));
   }
@@ -693,7 +695,27 @@ export class LoanBuilder {
       const place = this.place(expr, mutable);
       if (place) return this.borrow(project(place, '*'), mutable, expr.span, refTarget(expr.ty)).value;
     }
+    const coerced = this.derefCoercedPlace(expr);
+    if (coerced) return this.read(coerced.place, coerced.type, expr.span);
     return this.valueInner(expr);
+  }
+
+  /**
+   * For a reference coerced by derefs through shared references (`&&'a str` to `&str`), the place of the inner
+   * reference it copies: what it points to lives as long as that reference says, not the outer one.
+   */
+  private derefCoercedPlace(expr: Expr): { place: Place; type: Type } | undefined {
+    const coercion = this.annotations.coercions.get(expr);
+    if (coercion?.kind !== 'deref' || coercion.fromMut || coercion.derefs.length === 0) return undefined;
+    if (!coercion.derefs.every((step) => step === 'ref')) return undefined;
+    let place = this.place(expr);
+    let type = expr.ty && normalize(shallow(expr.ty));
+    for (let step = 0; step < coercion.derefs.length; step++) {
+      if (!place || type?.kind !== 'ref') return undefined;
+      place = project(place, '*');
+      type = normalize(shallow(type.target));
+    }
+    return place && type?.kind === 'ref' ? { place, type } : undefined;
   }
 
   // code-gauge-allow functionNcss -- One case per kind of expression.
