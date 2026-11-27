@@ -10,7 +10,7 @@ import { copyValue, needsCopy } from './ops';
 import { MOVED } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { shallow, type Type } from './types';
-import { CellPlace, DynValue } from './values';
+import { CellPlace, DynValue, FnValue } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 
@@ -42,11 +42,19 @@ export function compileCall(c: Compiler, expr: ExprOf<'call'>): Eval {
       return construct(def, variant, evaluateValues(frame, args));
     };
   }
-  const calleeValue = c.annotations.callKinds.get(expr) === 'FnOnce' ? c.value(callee) : c.read(callee);
+  const once = c.annotations.callKinds.get(expr) === 'FnOnce';
+  // A closure no variable holds (`(move |x| ..)(5)`) is a temporary, which goes when the statement ends.
+  const calleeValue = once ? c.value(callee) : dropsBorrowedTemporary(c, callee, c.read(callee));
   const operands: Eval[] = [(frame) => derefAll(calleeValue(frame)), ...args];
   return (frame) => {
     const [fn, ...values] = evaluateValues(frame, operands);
-    return c.support.callValue(fn instanceof DynValue ? fn.value : fn, values, callRow);
+    const closure = fn instanceof DynValue ? fn.value : fn;
+    try {
+      return c.support.callValue(closure, values, callRow);
+    } finally {
+      // A call that takes the closure by value consumes it, and what its body did not take goes when it ends.
+      if (once && closure instanceof FnValue) closure.dropCaptures?.();
+    }
   };
 }
 
