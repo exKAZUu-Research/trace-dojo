@@ -186,6 +186,7 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
   const restLocal = restBinding && c.annotations.bindings.get(restBinding);
   const restType = restLocal && normalize(shallow(restLocal.type));
   const restMode = restType?.kind !== 'ref' ? 'value' : restType.mutable ? 'mut' : 'ref';
+  const restMovesOut = restLocal !== undefined && restMode === 'value' && !c.isCopy(restLocal.type);
   // An element after the `..` counts from the end.
   const offsetOf = (index: number, after: number): number =>
     rest !== undefined && index > rest ? index - 1 + after : index;
@@ -203,6 +204,12 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
     if (restLocal) {
       const from = start + (rest as number);
       bindings.push(() => (frame.locals[restLocal.slot] = sliceRest(target, base, from, from + after, restMode)));
+      if (restMovesOut && (place || isPlace(value))) {
+        const moveRest = (): void => {
+          base.fill(MOVED, from, from + after);
+        };
+        bindings.push(Object.assign(moveRest, { movesOut: true }));
+      }
     }
     return true;
   };
