@@ -40,14 +40,17 @@ function collectAmbientReExports(
     if (!exports) continue;
     for (const declaration of module.valueDeclarations) {
       const body = declaration.childForFieldName('body');
-      if (!body || !ownScopes.has(body.id)) continue;
-      for (const child of named(body)) {
-        const source = child.type === 'export_statement' ? child.childForFieldName('source') : undefined;
-        if (source) entries.push({ node: child, exports, specifier: stringValue(source) });
-      }
+      if (body && ownScopes.has(body.id)) collectBodyReExports(body, exports, entries);
     }
   }
   return entries;
+}
+
+function collectBodyReExports(body: TreeNode, exports: Scope, entries: ReExportEntry[]): void {
+  for (const child of named(body)) {
+    const source = child.type === 'export_statement' ? child.childForFieldName('source') : undefined;
+    if (source) entries.push({ node: child, exports, specifier: stringValue(source) });
+  }
 }
 
 function applyReExportPass(

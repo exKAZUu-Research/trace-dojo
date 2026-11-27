@@ -33,35 +33,42 @@ export function checkOverrideModifiers(c: Checker, node: TreeNode, members: Tree
   const hasBase = c.classes.extendsClause(node) !== undefined && !c.classes.extendsNull(node);
   const className = node.childForFieldName('name')?.text ?? '(Anonymous class)';
   for (const member of [...members, ...parameters]) {
-    const modifier = named(member).find((child) => child.type === 'override_modifier');
-    if (!modifier) continue;
-    if (
-      (member.type === 'method_definition' || member.type === 'method_signature') &&
-      isConstructorName(member.childForFieldName('name'))
-    ) {
-      c.error(modifier, "'override' 修飾子は、コンストラクターの宣言には付けられません。");
-      continue;
-    }
-    if (!hasBase) {
-      c.error(
-        member,
-        `このメンバーには 'override' 修飾子を付けられません。クラス '${className}' は、ほかのクラスを継承していません。`
-      );
-      continue;
-    }
-    const name = memberName(c, member);
-    const nameNode = member.childForFieldName('name') ?? member.childForFieldName('pattern');
-    if (name === undefined && nameNode?.type === 'computed_property_name') {
-      c.error(member, "名前が動的であるため、このメンバーに 'override' 修飾子を指定することはできません。");
-      continue;
-    }
-    const isStatic = hasToken(member, 'static');
-    const base = isStatic ? c.classes.baseStaticType(node) : c.classes.baseInstanceType(node);
-    if (name === undefined || !base || base === errorType || base === permissiveAnyType || c.propertyOf(base, name))
-      continue;
+    checkOverrideMember(c, node, member, hasBase, className);
+  }
+}
+
+function checkOverrideMember(c: Checker, node: TreeNode, member: TreeNode, hasBase: boolean, className: string): void {
+  const modifier = named(member).find((child) => child.type === 'override_modifier');
+  if (!modifier) return;
+  if (isConstructorDeclaration(member)) {
+    c.error(modifier, "'override' 修飾子は、コンストラクターの宣言には付けられません。");
+    return;
+  }
+  if (!hasBase) {
     c.error(
       member,
-      `このメンバーには 'override' 修飾子を付けられません。基底クラス '${c.print(c.classes.baseInstanceType(node) ?? base)}' で宣言されていません。`
+      `このメンバーには 'override' 修飾子を付けられません。クラス '${className}' は、ほかのクラスを継承していません。`
     );
+    return;
   }
+  const name = memberName(c, member);
+  const nameNode = member.childForFieldName('name') ?? member.childForFieldName('pattern');
+  if (name === undefined && nameNode?.type === 'computed_property_name') {
+    c.error(member, "名前が動的であるため、このメンバーに 'override' 修飾子を指定することはできません。");
+    return;
+  }
+  const base = hasToken(member, 'static') ? c.classes.baseStaticType(node) : c.classes.baseInstanceType(node);
+  if (name === undefined || !base || base === errorType || base === permissiveAnyType || c.propertyOf(base, name))
+    return;
+  c.error(
+    member,
+    `このメンバーには 'override' 修飾子を付けられません。基底クラス '${c.print(c.classes.baseInstanceType(node) ?? base)}' で宣言されていません。`
+  );
+}
+
+function isConstructorDeclaration(member: TreeNode): boolean {
+  return (
+    (member.type === 'method_definition' || member.type === 'method_signature') &&
+    isConstructorName(member.childForFieldName('name'))
+  );
 }

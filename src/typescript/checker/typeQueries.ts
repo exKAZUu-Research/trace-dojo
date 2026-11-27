@@ -37,23 +37,25 @@ function readQueryTarget(c: Checker, node: TreeNode, identifier: QueryTarget, ex
   if (node.type !== 'member_expression') return expression(node);
   const object = node.childForFieldName('object') as TreeNode;
   const property = node.childForFieldName('property') as TreeNode;
-  if (isImportTypeCall(object)) {
-    const module = c.namespaces.resolveImportTypeModule(object);
-    if (!module) return errorType;
-    const receiver = c.namespaces.importTypeQuery(object);
-    if (receiver === errorType) return errorType;
-    if (!module.exportEquals && receiver.kind === 'object' && !c.propertyOf(receiver, property.text)) {
-      const nsExport = module.namespaceExports?.namespaces.get(property.text);
-      if (nsExport && c.namespaces.isInstantiated(nsExport)) return c.namespaces.objectType(nsExport);
-      c.error(property, `名前空間 '"${module.name}"' にエクスポートされたメンバー '${property.text}' がありません。`);
-      return errorType;
-    }
-    return c.members.propertyAccess(node, object, property, receiver, property.text);
-  }
+  if (isImportTypeCall(object)) return readImportTypeMemberQuery(c, node, object, property);
   const receiver = readQueryTarget(c, object, identifier, expression);
   const type = c.members.propertyAccess(node, object, property, receiver, property.text);
   const key = c.flow.referenceKey(node);
   return key ? (queryEntry(c, key, true)?.type ?? type) : type;
+}
+
+function readImportTypeMemberQuery(c: Checker, node: TreeNode, object: TreeNode, property: TreeNode): Type {
+  const module = c.namespaces.resolveImportTypeModule(object);
+  if (!module) return errorType;
+  const receiver = c.namespaces.importTypeQuery(object);
+  if (receiver === errorType) return errorType;
+  if (!module.exportEquals && receiver.kind === 'object' && !c.propertyOf(receiver, property.text)) {
+    const nsExport = module.namespaceExports?.namespaces.get(property.text);
+    if (nsExport && c.namespaces.isInstantiated(nsExport)) return c.namespaces.objectType(nsExport);
+    c.error(property, `名前空間 '"${module.name}"' にエクスポートされたメンバー '${property.text}' がありません。`);
+    return errorType;
+  }
+  return c.members.propertyAccess(node, object, property, receiver, property.text);
 }
 
 function queryEntry(c: Checker, key: string, capture: boolean): FlowEntry | undefined {
