@@ -26,6 +26,11 @@ export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
     checkMergedTypeExportConsistency(c, symbol, reportedExportMix);
     checkReservedTypeName(c, symbol);
   }
+  for (const symbol of uniqueSymbols(scopes, (scope) => scope.namespaces.values())) {
+    if (!symbol.namespaceEntries.some((entry) => !c.isLibrary(entry.name))) continue;
+    checkNamespaceDuplicates(c, symbol);
+    checkMergedNamespaceExportConsistency(c, symbol, reportedExportMix);
+  }
 }
 
 function checkNamespaceClauseExportConflicts(c: Checker, scopes: Scope[]): void {
@@ -63,7 +68,8 @@ function clauseExportCollidesWithDeclaration(
 ): boolean {
   return (
     (Boolean(entry.value?.valueEntries.length) && exports.hasDeclarationExport(name, 'value')) ||
-    (Boolean(entry.type?.typeEntries.length) && exports.hasDeclarationExport(name, 'type'))
+    (Boolean(entry.type?.typeEntries.length) && exports.hasDeclarationExport(name, 'type')) ||
+    (Boolean(entry.namespace?.namespaceEntries.length) && exports.hasDeclarationExport(name, 'namespace'))
   );
 }
 
@@ -330,6 +336,21 @@ function checkMergedTypeExportConsistency(c: Checker, symbol: Sym, reported: Set
   const kinds = entries.map((entry) => entry.kind);
   if (!mergesTypeDeclarations(kinds)) return;
   reportMixedExports(c, symbol.name, entries, symbol.typeDeclarations, reported);
+}
+
+function checkNamespaceDuplicates(c: Checker, symbol: Sym): void {
+  const entries = symbol.namespaceEntries;
+  if (entries.length < 2) return;
+  if (entries.some((entry) => importKinds.has(entry.kind))) {
+    reportImportConflict(c, symbol.name, entries);
+  }
+}
+
+function checkMergedNamespaceExportConsistency(c: Checker, symbol: Sym, reported: Set<number>): void {
+  const entries = symbol.namespaceEntries;
+  if (entries.length < 2 || !checksExportConsistencyInScope(symbol.scope)) return;
+  if (!entries.every((entry) => entry.kind === 'namespace')) return;
+  reportMixedExports(c, symbol.name, entries, symbol.namespaceDeclarations, reported);
 }
 
 function checksExportConsistencyInScope(scope: Scope): boolean {

@@ -192,12 +192,18 @@ export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node 
   });
   const context = new ViewContext(root, budget);
   viewContexts.set(binder, context);
-  for (const scope of binder.allScopes)
+  for (const scope of binder.allScopes) {
     for (const symbol of scope.values.values()) {
       budget.spend();
       const name = symbol.valueEntries[0]?.name;
       if (name) scope.values.set(nameOf(name), symbol);
     }
+    for (const symbol of scope.namespaces.values()) {
+      budget.spend();
+      const name = symbol.namespaceEntries[0]?.name;
+      if (name) scope.namespaces.set(nameOf(name), symbol);
+    }
+  }
   const previousDisplayNames = activeDisplayNames;
   activeDisplayNames = context.displayNames;
   try {
@@ -843,10 +849,11 @@ function buildNamespacePath(
 
 function namespacePathSymbols(node: TreeNode, body: TreeNode, path: TreeNode[], binder: Binder): (Sym | undefined)[] {
   const symbols: (Sym | undefined)[] = [];
-  let current = binder.lookupValue(node, nameOf(path[0]));
+  let current = binder.lookupValue(node, nameOf(path[0])) ?? binder.lookupNamespace(node, nameOf(path[0]));
   symbols.push(current);
   for (const part of path.slice(1)) {
-    current = current?.namespaceExports?.values.get(nameOf(part));
+    const partName = nameOf(part);
+    current = current?.namespaceExports?.values.get(partName) ?? current?.namespaceExports?.namespaces.get(partName);
     symbols.push(current);
   }
   symbols[path.length - 1] ??= binder.ownScope(body)?.namespace;

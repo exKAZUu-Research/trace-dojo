@@ -10,7 +10,9 @@ const typeOnlyStatementTypes = new Set(['interface_declaration', 'type_alias_dec
  * both ask this, so a namespace has an object in the types when a non-ambient block of it compiles to one at run time.
  */
 export function isInstantiatedNamespace(symbol: Sym): boolean {
-  return symbol.valueDeclarations.some((declaration) => {
+  const declarations =
+    symbol.namespaceDeclarations.length > 0 ? symbol.namespaceDeclarations : symbol.valueDeclarations;
+  return declarations.some((declaration) => {
     if (declaration.type !== 'internal_module' && declaration.type !== 'module') return false;
     const body = declaration.childForFieldName('body');
     return body !== null && blockHasRuntimeCode(body);

@@ -675,13 +675,18 @@ export class TypeNodes {
 
   private reportMissingOrValueTypeName(nameNode: TreeNode, scope: Sym['scope'], name: string): void {
     const value = scope.lookupValue(name);
+    const namespace = scope.lookupNamespace(name);
     const unaliased =
       value && (value.valueKind === 'import' || value.valueKind === 'importAlias')
         ? this.c.namespaces.imported(value, 'value')
         : value;
+    const unaliasedNamespace =
+      namespace && (namespace.namespaceKind === 'import' || namespace.namespaceKind === 'importAlias')
+        ? this.c.namespaces.imported(namespace, 'namespace')
+        : namespace;
     this.c.error(
       nameNode,
-      unaliased?.valueKind === 'namespace'
+      unaliased?.valueKind === 'namespace' || (!value && unaliasedNamespace?.namespaceExports)
         ? `名前空間 '${name}' を型として使用することはできません。`
         : value
           ? `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。`
@@ -695,7 +700,8 @@ export class TypeNodes {
     const target = this.c.namespaces.imported(symbol, 'type');
     if (target) return this.reportUnusableSymbol(node, nameNode, target) ? undefined : target;
     const valueTarget = this.c.namespaces.imported(symbol, 'value');
-    if (valueTarget?.valueKind === 'namespace')
+    const namespaceTarget = this.c.namespaces.imported(symbol, 'namespace');
+    if (valueTarget?.valueKind === 'namespace' || (!valueTarget && namespaceTarget?.namespaceExports))
       this.c.error(nameNode, `名前空間 '${nameNode.text}' を型として使用することはできません。`);
     else if (valueTarget)
       this.c.error(
@@ -745,9 +751,10 @@ export class TypeNodes {
       root = (root.childForFieldName('module') ?? root.childForFieldName('object')) as TreeNode;
     const symbol = this.c.scopeOf(root).lookupType(root.text) ?? this.c.scopeOf(root).lookupValue(root.text);
     const value = this.c.scopeOf(root).lookupValue(root.text);
+    const namespace = this.c.scopeOf(root).lookupNamespace(root.text, this.c.budget);
     if (value && root.id === node.childForFieldName('module')?.id && namesEnumMember(this.c, node, value))
       return this.enumMemberTypeNamed(node, value, root.text);
-    if (value?.namespaceExports || value?.valueKind === 'importAlias' || value?.valueKind === 'import')
+    if (namespace || value?.namespaceExports || value?.valueKind === 'importAlias' || value?.valueKind === 'import')
       return this.namespaceMemberType(node, root);
     this.c.error(
       node,

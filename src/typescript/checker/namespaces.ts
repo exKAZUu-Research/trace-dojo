@@ -5,7 +5,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import { FlowState } from './flow';
 import { unavailableNodeMember } from './nodeLibrary';
-import { canonicalIdentifier, type Scope, type Sym } from './scopes';
+import { canonicalIdentifier, type MeaningSpace, type Scope, type Sym } from './scopes';
 import { nameSuggestionHint, spellingSuggestion } from './spelling';
 import { globalAugmentationPlacementMessage } from './statements';
 import {
@@ -83,17 +83,19 @@ export class Namespaces {
     return false;
   }
 
-  /** What `import X = N.Y` names, as a value or as a type, or undefined when its path names nothing. */
-  aliasTarget(alias: Sym, meaning: 'value' | 'type'): Sym | undefined {
+  /** What `import X = N.Y` names, as a value, a type, or a namespace, or undefined when its path names nothing. */
+  aliasTarget(alias: Sym, meaning: MeaningSpace): Sym | undefined {
     const declaration =
       alias.valueDeclarations.find((node) => node.type === 'import_alias') ??
       alias.typeDeclarations.find((node) => node.type === 'import_alias') ??
+      alias.namespaceDeclarations.find((node) => node.type === 'import_alias') ??
       alias.valueDeclaration ??
-      alias.typeDeclarations[0];
+      alias.typeDeclarations[0] ??
+      alias.namespaceDeclarations[0];
     return declaration ? this.aliasDeclarationTarget(declaration, meaning) : undefined;
   }
 
-  aliasDeclarationTarget(declaration: TreeNode, meaning: 'value' | 'type'): Sym | undefined {
+  aliasDeclarationTarget(declaration: TreeNode, meaning: MeaningSpace): Sym | undefined {
     const target = named(declaration)[1];
     if (!target || this.resolvingAliases.has(declaration.id)) return undefined;
     this.resolvingAliases.add(declaration.id);
@@ -104,23 +106,24 @@ export class Namespaces {
     }
   }
 
-  /** Drops the unused value or type binding of an `import X = N.Y` that resolves only in the other symbol space. */
+  /** Drops the unused bindings of an `import` or `import X = N.Y` that resolves only in other symbol spaces. */
   pruneImportAliasMeanings(scopes: Scope[]): void {
     for (const scope of scopes) {
       this.pruneScopeImportAliases(scope, 'value');
       this.pruneScopeImportAliases(scope, 'type');
+      this.pruneScopeImportAliases(scope, 'namespace');
     }
   }
 
-  private pruneScopeImportAliases(scope: Scope, meaning: 'value' | 'type'): void {
-    const { table, entriesOf, declarationsOf, other } = scopeAliasTables(scope, meaning);
+  private pruneScopeImportAliases(scope: Scope, meaning: MeaningSpace): void {
+    const { table, entriesOf, declarationsOf, others } = scopeAliasTables(scope, meaning);
     for (const [name, symbol] of table) {
       const entries = entriesOf(symbol);
       const declarations = declarationsOf(symbol);
       if (!entries.some((entry) => entry.kind === 'importAlias' || entry.kind === 'import')) continue;
       const keptIndices = entries
         .map((_, index) => index)
-        .filter((index) => !this.isOtherSpaceImport(symbol, entries[index].kind, declarations[index], meaning, other));
+        .filter((index) => !this.isOtherSpaceImport(symbol, entries[index].kind, declarations[index], meaning, others));
       if (keptIndices.length === entries.length) continue;
       if (keptIndices.length === 0) {
         table.delete(name);
@@ -132,7 +135,7 @@ export class Namespaces {
     }
   }
 
-  private restoreKeptSymbolKind(symbol: Sym, keptIndices: number[], meaning: 'value' | 'type'): void {
+  private restoreKeptSymbolKind(symbol: Sym, keptIndices: number[], meaning: MeaningSpace): void {
     if (meaning === 'value') {
       retainIndices(symbol.valueEntries, keptIndices);
       const merged = symbol.valueEntries.find(
@@ -142,25 +145,36 @@ export class Namespaces {
         symbol.valueEntries[0].kind === 'namespace' && merged ? merged.kind : symbol.valueEntries[0].kind;
       return;
     }
-    retainIndices(symbol.typeEntries, keptIndices);
-    symbol.typeKind = symbol.typeEntries.some((entry) => entry.kind === 'class') ? 'class' : symbol.typeEntries[0].kind;
+    if (meaning === 'type') {
+      retainIndices(symbol.typeEntries, keptIndices);
+      symbol.typeKind = symbol.typeEntries.some((entry) => entry.kind === 'class')
+        ? 'class'
+        : symbol.typeEntries[0].kind;
+      return;
+    }
+    retainIndices(symbol.namespaceEntries, keptIndices);
+    symbol.namespaceKind = symbol.namespaceEntries[0].kind;
   }
 
   private isOtherSpaceImport(
     symbol: Sym,
     kind: string,
     declaration: TreeNode | undefined,
-    meaning: 'value' | 'type',
-    other: 'value' | 'type'
+    meaning: MeaningSpace,
+    others: readonly MeaningSpace[]
   ): boolean {
-    if (kind === 'import' && declaration?.type === 'import_statement' && !symbol.importTarget?.typeOnly) {
-      return this.importTarget(symbol, meaning) === undefined && this.importTarget(symbol, other) !== undefined;
+    if (kind === 'import' && declaration?.type === 'import_statement') {
+      if (symbol.importTarget?.typeOnly && meaning !== 'namespace') return false;
+      return (
+        this.importTarget(symbol, meaning) === undefined &&
+        others.some((other) => this.importTarget(symbol, other) !== undefined)
+      );
     }
     return (
       kind === 'importAlias' &&
       declaration?.type === 'import_alias' &&
       this.aliasDeclarationTarget(declaration, meaning) === undefined &&
-      this.aliasDeclarationTarget(declaration, other) !== undefined
+      others.some((other) => this.aliasDeclarationTarget(declaration, other) !== undefined)
     );
   }
 
@@ -170,17 +184,23 @@ export class Namespaces {
     if (!target) return;
     const path = qualifiedPath(target);
     const value = this.resolvePath(path, 'value');
-    const type = value.symbol ? undefined : this.resolvePath(path, 'type');
+    const namespace = this.resolvePath(path, 'namespace');
+    const type = value.symbol || namespace.symbol ? undefined : this.resolvePath(path, 'type');
     if (path.length === 1) {
-      this.checkSingleNameAlias(target, value.symbol, type?.symbol);
+      this.checkSingleNameAlias(target, value.symbol, namespace.symbol, type?.symbol);
       return;
     }
-    if (!value.symbol && !type?.symbol && value.error) this.c.error(target, value.error);
+    if (!value.symbol && !namespace.symbol && !type?.symbol && value.error) this.c.error(target, value.error);
   }
 
   /** `import X = Y` names a namespace or an enum, as a namespace path names its first name. */
-  private checkSingleNameAlias(target: TreeNode, value: Sym | undefined, type: Sym | undefined): void {
-    if (value?.namespaceExports || value?.valueKind === 'enum') return;
+  private checkSingleNameAlias(
+    target: TreeNode,
+    value: Sym | undefined,
+    namespace: Sym | undefined,
+    type: Sym | undefined
+  ): void {
+    if (namespace?.namespaceExports || value?.namespaceExports || value?.valueKind === 'enum') return;
     const name = target.text;
     if (value?.unsupported) this.c.error(target, unsupportedMessage(value.unsupported));
     else if (type || this.c.scopeOf(target).lookupType(name))
@@ -193,20 +213,19 @@ export class Namespaces {
       );
   }
 
-  /** The symbol the last name of a path names, as a value or a type, through the namespaces of the names before it. */
-  private resolvePath(path: TreeNode[], meaning: 'value' | 'type'): { symbol?: Sym; error?: string } {
+  /** The symbol the last name of a path names, as a value, a type, or a namespace, through the namespaces before it. */
+  private resolvePath(path: TreeNode[], meaning: MeaningSpace): { symbol?: Sym; error?: string } {
     const [root, ...rest] = path;
-    const rootValue = this.unaliased(this.c.scopeOf(root).lookupValue(root.text), 'value');
-    if (rest.length === 0)
-      return {
-        symbol: meaning === 'value' ? rootValue : this.unaliased(this.c.scopeOf(root).lookupType(root.text), 'type'),
-      };
-    const isEnumMember = rootValue?.valueKind === 'enum' && rest.length === 1;
-    if (!rootValue?.namespaceExports && !isEnumMember) return { error: `名前空間 ${root.text} が見つかりません。` };
-    let current = rootValue as Sym;
+    const scope = this.c.scopeOf(root);
+    if (rest.length === 0) return { symbol: this.directSymbol(scope, root.text, meaning) };
+    const rootContainer = this.unaliasedContainer(scope.lookupContainer(root.text, this.c.budget));
+    const isEnumMember = rootContainer?.valueKind === 'enum' && rest.length === 1;
+    if (!rootContainer?.namespaceExports && !isEnumMember) return { error: `名前空間 ${root.text} が見つかりません。` };
+    let current = rootContainer as Sym;
     for (const [index, part] of rest.entries()) {
       const remaining = rest.length - 1 - index;
-      const next = this.pathMember(current, part.text, remaining === 0 ? meaning : 'value');
+      const next =
+        remaining === 0 ? this.pathMember(current, part.text, meaning) : this.pathContainerMember(current, part.text);
       if (next.error) return next;
       const symbol = next.symbol as Sym;
       // An enum's members are the last name of a path, as in `import X = N.E.A`.
@@ -217,41 +236,70 @@ export class Namespaces {
     return { symbol: current };
   }
 
+  private directSymbol(scope: Scope, name: string, meaning: MeaningSpace): Sym | undefined {
+    if (meaning === 'value') return this.unaliased(scope.lookupValue(name, this.c.budget), 'value');
+    if (meaning === 'namespace') return this.unaliased(scope.lookupNamespace(name, this.c.budget), 'namespace');
+    return this.unaliased(scope.lookupType(name), 'type');
+  }
+
+  private unaliasedContainer(symbol: Sym | undefined): Sym | undefined {
+    if (!symbol) return undefined;
+    if (symbol.namespaceKind === 'import' || symbol.namespaceKind === 'importAlias') {
+      return this.imported(symbol, 'namespace') ?? this.unaliased(symbol, 'value');
+    }
+    return this.unaliased(symbol, 'value');
+  }
+
+  private pathContainerMember(container: Sym, name: string): { symbol?: Sym; error?: string } {
+    const member = this.containerMemberOf(container, name);
+    return member ? { symbol: member } : this.missingPathMember(container, name);
+  }
+
+  private containerMemberOf(container: Sym, name: string): Sym | undefined {
+    return container.namespaceExports
+      ? (this.exportedMember(container, name, 'namespace') ?? this.exportedMember(container, name, 'value'))
+      : container.enumMembers?.values.get(name);
+  }
+
   /** What a name of a path names in the namespace or enum before it, or why it names nothing there. */
-  private pathMember(container: Sym, name: string, meaning: 'value' | 'type'): { symbol?: Sym; error?: string } {
+  private pathMember(container: Sym, name: string, meaning: MeaningSpace): { symbol?: Sym; error?: string } {
     const symbol = container.namespaceExports
       ? this.exportedMember(container, name, meaning)
-      : container.enumMembers?.values.get(name);
-    if (symbol) return { symbol };
+      : meaning === 'value'
+        ? container.enumMembers?.values.get(name)
+        : undefined;
+    return symbol ? { symbol } : this.missingPathMember(container, name);
+  }
+
+  private missingPathMember(container: Sym, name: string): { error: string } {
     // The Node library declares only part of @types/node's NodeJS namespace.
     if (container.name === 'NodeJS' && container.valueDeclarations.every((node) => this.c.isLibrary(node)))
       return { error: `NodeJS.${name} は、この採点環境では使えません。` };
     return { error: missingMemberError(container, name) };
   }
 
-  private exportedMember(namespace: Sym, name: string, meaning: 'value' | 'type'): Sym | undefined {
-    const exports = namespace.namespaceExports as Scope;
-    return this.unaliased((meaning === 'type' ? exports.types : exports.values).get(name), meaning);
+  private exportedMember(namespace: Sym, name: string, meaning: MeaningSpace): Sym | undefined {
+    return this.unaliased((namespace.namespaceExports as Scope).tableOf(meaning).get(name), meaning);
   }
 
-  private unaliased(symbol: Sym | undefined, meaning: 'value' | 'type'): Sym | undefined {
-    const kind = meaning === 'value' ? symbol?.valueKind : symbol?.typeKind;
+  private unaliased(symbol: Sym | undefined, meaning: MeaningSpace): Sym | undefined {
+    const kind =
+      meaning === 'value' ? symbol?.valueKind : meaning === 'namespace' ? symbol?.namespaceKind : symbol?.typeKind;
     return symbol && (kind === 'import' || kind === 'importAlias') ? this.imported(symbol, meaning) : symbol;
   }
 
-  /** What a name that `import` or `import X = N.Y` declares stands for, as a value or as a type. */
-  imported(symbol: Sym, meaning: 'value' | 'type'): Sym | undefined {
+  /** What a name that `import` or `import X = N.Y` declares stands for, as a value, a type, or a namespace. */
+  imported(symbol: Sym, meaning: MeaningSpace): Sym | undefined {
     return symbol.importTarget ? this.importTarget(symbol, meaning) : this.aliasTarget(symbol, meaning);
   }
 
   /** What a name an `import` declares stands for: the module, or what the module exports by that name. */
-  importTarget(symbol: Sym, meaning: 'value' | 'type'): Sym | undefined {
+  importTarget(symbol: Sym, meaning: MeaningSpace): Sym | undefined {
     const target = symbol.importTarget;
     const module = target && this.moduleNamed(target.module);
     if (!target || !module) return undefined;
     if (target.name === '*' || this.isSyntheticDefault(module, target.name)) return module;
-    const exports = module.namespaceExports as Scope;
-    return (meaning === 'value' ? exports.values : exports.types).get(target.name);
+    return (module.namespaceExports as Scope).tableOf(meaning).get(target.name);
   }
 
   /**
@@ -326,25 +374,21 @@ export class Namespaces {
     let label = `"${module.name}"`;
     for (const [index, part] of members.entries()) {
       const isLast = index === members.length - 1;
-      const member = this.importContainerMember(current, part.text, isLast ? 'type' : 'value');
+      const member = isLast
+        ? current.namespaceExports
+          ? this.exportedMember(current, part.text, 'type')
+          : current.enumMembers?.values.get(part.text)
+        : this.containerMemberOf(current, part.text);
       if (
         !member ||
         (!isLast && !member.namespaceExports && !(member.valueKind === 'enum' && index === members.length - 2))
       ) {
-        return {
-          error: `名前空間 '${label}' にエクスポートされたメンバー '${part.text}' がありません。`,
-          site: part,
-        };
+        return { error: `名前空間 '${label}' にエクスポートされたメンバー '${part.text}' がありません。`, site: part };
       }
       current = member;
       label = `${label}.${part.text}`;
     }
     return { symbol: current };
-  }
-
-  private importContainerMember(container: Sym, name: string, meaning: 'value' | 'type'): Sym | undefined {
-    if (container.namespaceExports) return this.exportedMember(container, name, meaning);
-    return container.enumMembers?.values.get(name);
   }
 
   /** Reports a default import of a module without a default export, and a name a module does not export. */
@@ -414,6 +458,7 @@ export class Namespaces {
         exported &&
         !exports.values.has(exported) &&
         !exports.types.has(exported) &&
+        !exports.namespaces.has(exported) &&
         !this.isSyntheticDefault(module, exported)
       )
         this.reportMissingImport(name, exports, moduleName);
@@ -422,7 +467,7 @@ export class Namespaces {
 
   /** A name a module does not export, with the export tsc suggests for a misspelling of one. */
   private reportMissingImport(name: TreeNode, exports: Scope, moduleName: string): void {
-    const candidates = new Set([...exports.values.keys(), ...exports.types.keys()]);
+    const candidates = new Set([...exports.values.keys(), ...exports.types.keys(), ...exports.namespaces.keys()]);
     const suggestion = spellingSuggestion(name.text, candidates, this.c.budget);
     this.c.error(
       name,
@@ -610,26 +655,27 @@ function retainIndices<T>(items: T[], indices: number[]): void {
   items.splice(0, items.length, ...kept);
 }
 
-interface AliasSpaceTables {
+const allMeanings: readonly MeaningSpace[] = ['value', 'type', 'namespace'];
+
+function scopeAliasTables(
+  scope: Scope,
+  meaning: MeaningSpace
+): {
   table: Map<string, Sym>;
   entriesOf: (symbol: Sym) => { kind: string; name: TreeNode }[];
   declarationsOf: (symbol: Sym) => TreeNode[];
-  other: 'value' | 'type';
-}
-
-function scopeAliasTables(scope: Scope, meaning: 'value' | 'type'): AliasSpaceTables {
-  if (meaning === 'value') {
-    return {
-      table: scope.values,
-      entriesOf: (symbol: Sym) => symbol.valueEntries,
-      declarationsOf: (symbol: Sym) => symbol.valueDeclarations,
-      other: 'type',
-    };
-  }
+  others: readonly MeaningSpace[];
+} {
   return {
-    table: scope.types,
-    entriesOf: (symbol: Sym) => symbol.typeEntries,
-    declarationsOf: (symbol: Sym) => symbol.typeDeclarations,
-    other: 'value',
+    table: scope.tableOf(meaning),
+    entriesOf: (symbol) =>
+      meaning === 'value' ? symbol.valueEntries : meaning === 'type' ? symbol.typeEntries : symbol.namespaceEntries,
+    declarationsOf: (symbol) =>
+      meaning === 'value'
+        ? symbol.valueDeclarations
+        : meaning === 'type'
+          ? symbol.typeDeclarations
+          : symbol.namespaceDeclarations,
+    others: allMeanings.filter((other) => other !== meaning),
   };
 }

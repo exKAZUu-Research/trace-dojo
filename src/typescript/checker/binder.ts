@@ -2,7 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
-import { isAmbient } from '../namespaceInstantiation';
+import { blockHasRuntimeCode, isAmbient } from '../namespaceInstantiation';
 import { memberNameOf } from './enums';
 import { fsImportMeanings } from './nodeLibrary';
 import { canonicalIdentifier, Scope, Sym, type ValueKind } from './scopes';
@@ -155,6 +155,10 @@ export class Binder {
     return this.scopeOf(node).lookupValue(name, this.options?.budget);
   }
 
+  lookupNamespace(node: TreeNode, name: string): Sym | undefined {
+    return this.scopeOf(node).lookupNamespace(name, this.options?.budget);
+  }
+
   private bindChildren(node: TreeNode, scope: Scope): void {
     for (const child of node.namedChildren) if (child) this.bind(child, scope);
   }
@@ -233,14 +237,19 @@ export class Binder {
       return;
     }
     if (!name) return;
+    const instantiated = body !== null && blockHasRuntimeCode(body);
     let outer = scope;
     let namespace: Sym | undefined;
     for (const part of namespacePath(name)) {
       const partName = canonicalIdentifier(part.text, part);
-      this.seedMergedNamespacePart(outer, scope, node, partName, isAmbient);
-      namespace = outer.declareValue(partName, 'namespace', node, part);
+      this.seedMergedNamespacePart(outer, scope, node, partName, isAmbient, instantiated);
+      namespace = outer.declareNamespace(partName, 'namespace', node, part);
+      if (instantiated) outer.declareValue(partName, 'namespace', node, part);
       // The path's first name is exported only by an `export` or an ambient body, which `exportDeclared` handles.
-      if (outer !== scope) this.exportFrom(outer, namespace, 'value');
+      if (outer !== scope) {
+        this.exportFrom(outer, namespace, 'namespace');
+        if (instantiated) this.exportFrom(outer, namespace, 'value');
+      }
       namespace.namespaceExports ??= new Scope('block', outer, node);
       outer = this.newNamespaceBody(node, namespace, isAmbient);
     }
@@ -252,16 +261,27 @@ export class Binder {
     rootScope: Scope,
     node: TreeNode,
     partName: string,
-    isAmbient: boolean
+    isAmbient: boolean,
+    instantiated: boolean
   ): void {
     // `namespace A.B` declared again adds to the `B` (or class/function/enum `B`) that an earlier `A` exports.
+    if (outer === rootScope && !isAmbient && !isExportedNamespaceRoot(node)) return;
     const namespaceExports = outer.namespace?.namespaceExports;
-    const exported =
-      namespaceExports && !namespaceExports.isClauseOnlyExport(partName, 'value')
-        ? namespaceExports.values.get(partName)
-        : undefined;
-    if (exported && (outer !== rootScope || isAmbient || isExportedNamespaceRoot(node)) && !outer.values.has(partName))
-      outer.values.set(partName, exported);
+    if (!namespaceExports) return;
+    const exportedNamespace = !namespaceExports.isClauseOnlyExport(partName, 'namespace')
+      ? namespaceExports.namespaces.get(partName)
+      : undefined;
+    if (exportedNamespace && !outer.namespaces.has(partName)) outer.namespaces.set(partName, exportedNamespace);
+    const exportedValue = !namespaceExports.isClauseOnlyExport(partName, 'value')
+      ? namespaceExports.values.get(partName)
+      : undefined;
+    if (
+      exportedValue &&
+      (instantiated || ['class', 'function', 'enum'].includes(exportedValue.valueKind ?? '')) &&
+      !outer.values.has(partName)
+    ) {
+      outer.values.set(partName, exportedValue);
+    }
   }
 
   /** The statements of a namespace's body, where those of a `declare namespace` are ambient and all exported. */
@@ -303,7 +323,9 @@ export class Binder {
     if (value) exports.exportViaClause(exportedName, value, 'value');
     const type = scope.types.get(localName);
     if (type) exports.exportViaClause(exportedName, type, 'type');
-    if (value || type) exports.recordClauseExport(exportedName, aliasNode, value, type);
+    const namespace = scope.namespaces.get(localName);
+    if (namespace) exports.exportViaClause(exportedName, namespace, 'namespace');
+    if (value || type || namespace) exports.recordClauseExport(exportedName, aliasNode, { value, type, namespace });
   }
 
   /** `declare module "m" { ... }`, whose declarations are the exports an `import` of "m" sees. */
@@ -316,10 +338,12 @@ export class Binder {
     if (!module) {
       module = new Sym(name, scope);
       module.valueKind = 'namespace';
+      module.namespaceKind = 'namespace';
       module.namespaceExports = new Scope('block', scope, node);
       if (registersModule) this.ambientModules.set(name, module);
     }
     module.valueDeclarations.push(node);
+    module.namespaceDeclarations.push(node);
     const body = node.childForFieldName('body');
     if (!body) return;
     const bodyScope = this.newNamespaceBody(node, module, true);
@@ -333,6 +357,9 @@ export class Binder {
     }
     for (const [exportName, exported] of exports.types) {
       if (!exports.isClauseOnlyExport(exportName, 'type')) bodyScope.types.set(exportName, exported);
+    }
+    for (const [exportName, exported] of exports.namespaces) {
+      if (!exports.isClauseOnlyExport(exportName, 'namespace')) bodyScope.namespaces.set(exportName, exported);
     }
   }
 
@@ -357,20 +384,25 @@ export class Binder {
       if (meanings.type) {
         scope.declareType(localName, 'import', node, local).importTarget = { module, name, typeOnly };
       }
+      if (meanings.namespace) {
+        scope.declareNamespace(localName, 'import', node, local).importTarget = { module, name, typeOnly };
+      }
     }
   }
 
-  private importMeaningsOf(module: string, name: string): { value: boolean; type: boolean } {
+  private importMeaningsOf(module: string, name: string): { value: boolean; type: boolean; namespace: boolean } {
     const fsMeanings = fsImportMeanings(module, name);
     const ambient = (this.ambientModules.get(module) ?? this.options?.existingModules?.get(module))?.namespaceExports;
     if (ambient && name !== '*') {
       const value = Boolean(fsMeanings?.value) || ambient.values.has(name);
       const type = Boolean(fsMeanings?.type) || ambient.types.has(name);
-      if (value || type) return { value, type };
+      const namespace =
+        ambient.namespaces.has(name) || (Boolean(fsMeanings) && (name === 'default' || name === 'promises'));
+      if (value || type || namespace) return { value, type, namespace };
     }
-    if (fsMeanings) return fsMeanings;
-    if (ambient && name === '*') return { value: true, type: false };
-    return { value: true, type: name !== '*' };
+    if (fsMeanings) return { ...fsMeanings, namespace: name === '*' || name === 'default' || name === 'promises' };
+    if (ambient && name === '*') return { value: true, type: false, namespace: true };
+    return { value: true, type: name !== '*', namespace: true };
   }
 
   private newNamespaceBody(node: TreeNode, namespace: Sym, isAmbient: boolean): Scope {
@@ -380,12 +412,13 @@ export class Binder {
     return body;
   }
 
-  /** `import X = N.Y` names what `N.Y` names, as a value and as a type. */
+  /** `import X = N.Y` names what `N.Y` names, as a value, a type, and a namespace. */
   private bindImportAlias(node: TreeNode, scope: Scope): void {
     const name = named(node)[0];
     if (!name) return;
     scope.declareValue(name.text, 'importAlias', node, name);
     scope.declareType(name.text, 'importAlias', node, name);
+    scope.declareNamespace(name.text, 'importAlias', node, name);
   }
 
   /** `export` in a namespace adds the names its declaration declares to the namespace's exports. */
@@ -404,14 +437,20 @@ export class Binder {
       const type = scope.types.get(name);
       if (type && type.typeDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id))
         this.exportFrom(scope, type, 'type');
+      const namespace = scope.namespaces.get(name);
+      if (
+        namespace &&
+        namespace.namespaceDeclarations.some((node) => isWithin(node, declaration) || node.id === declaration.id)
+      )
+        this.exportFrom(scope, namespace, 'namespace');
     }
   }
 
-  private exportFrom(scope: Scope, symbol: Sym, meaning: 'value' | 'type'): void {
+  private exportFrom(scope: Scope, symbol: Sym, meaning: 'value' | 'type' | 'namespace'): void {
     const namespace = scope.namespace as Sym;
     const exports = namespace.namespaceExports as Scope;
     exports.exportViaDeclaration(symbol.name, symbol, meaning);
-    if (meaning === 'value') symbol.exportedFrom = namespace;
+    if (meaning === 'value' || meaning === 'namespace') symbol.exportedFrom = namespace;
   }
 
   /** An enum is a value and a type; its initializers see its members by name. */
@@ -631,6 +670,14 @@ class SignatureScope extends Scope {
     const symbol = this.declaring.types.get(name);
     if (symbol?.typeKind === 'typeParameter') return symbol;
     return this.parent?.lookupType(name);
+  }
+
+  override lookupNamespace(name: string, budget?: ExecutionBudget): Sym | undefined {
+    return this.parent?.lookupNamespace(name, budget);
+  }
+
+  override lookupContainer(name: string, budget?: ExecutionBudget): Sym | undefined {
+    return this.parent?.lookupContainer(name, budget);
   }
 }
 

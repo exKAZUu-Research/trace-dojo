@@ -628,11 +628,17 @@ export class ExpressionChecker {
   }
 
   private reportUnknownValue(node: TreeNode, name: string): Type {
-    const typeSymbol = this.c.scopeOf(node).lookupType(name);
-    if (typeSymbol && typeSymbol.typeKind !== 'class') {
+    const scope = this.c.scopeOf(node);
+    const namespaceSymbol = scope.lookupNamespace(name, this.c.budget);
+    const typeSymbol = scope.lookupType(name);
+    if (namespaceSymbol?.importTarget?.typeOnly) {
+      this.c.error(node, `'import type' を使用してインポートされたため、'${name}' は値として使用できません。`);
+    } else if (namespaceSymbol) {
+      this.c.error(node, `名前空間 '${name}' は値として使えません。`);
+    } else if (typeSymbol && typeSymbol.typeKind !== 'class') {
       this.c.error(node, `${name} は型であり、値としては使えません。`);
     } else {
-      const hint = nodeGlobalHint(name) || nameSuggestionHint(this.c.scopeOf(node), name, 'value', this.c.budget);
+      const hint = nodeGlobalHint(name) || nameSuggestionHint(scope, name, 'value', this.c.budget);
       this.c.error(node, `名前 ${name} が見つかりません。${hint}`);
     }
     return errorType;

@@ -498,11 +498,17 @@ export class AssignmentChecker {
       this.c.error(expression, "変数ではないため、'undefined' に割り当てられません。");
       return errorType;
     }
-    const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
+    const scope = this.c.scopeOf(expression);
+    const symbol = scope.lookupValue(expression.text);
     if (!symbol) {
+      const namespaceSymbol = scope.lookupNamespace(expression.text, this.c.budget);
       this.c.error(
         expression,
-        `名前 ${expression.text} が見つかりません。${nameSuggestionHint(this.c.scopeOf(expression), expression.text, 'value', this.c.budget)}`
+        namespaceSymbol?.importTarget?.typeOnly
+          ? `'import type' を使用してインポートされたため、'${expression.text}' は値として使用できません。`
+          : namespaceSymbol
+            ? `名前空間 '${expression.text}' は値として使えません。`
+            : `名前 ${expression.text} が見つかりません。${nameSuggestionHint(scope, expression.text, 'value', this.c.budget)}`
       );
       return errorType;
     }

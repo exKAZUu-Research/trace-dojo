@@ -147,13 +147,23 @@ export class Enums {
     const name = memberNameOf(member);
     const exports = symbol.namespaceExports;
     if (name === undefined || !exports) return;
-    const exported = [exports.values.get(name), exports.types.get(name)].filter((other) => other !== undefined);
+    const exported = [exports.values.get(name), exports.types.get(name), exports.namespaces.get(name)].filter(
+      (other) => other !== undefined
+    );
     if (exported.length === 0) return;
     const { node, message } = duplicateError(member, name);
     this.c.error(node, message);
+    const seen = new Set<number>();
     for (const other of exported)
-      for (const declaration of [...other.valueDeclarations, ...other.typeDeclarations])
+      for (const declaration of [
+        ...other.valueDeclarations,
+        ...other.typeDeclarations,
+        ...other.namespaceDeclarations,
+      ]) {
+        if (seen.has(declaration.id)) continue;
+        seen.add(declaration.id);
         this.c.error(declaration.childForFieldName('name') ?? declaration, message);
+      }
   }
 
   private infoOf(symbol: Sym): EnumInfo | undefined {
