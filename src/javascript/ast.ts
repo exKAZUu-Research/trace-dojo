@@ -265,6 +265,7 @@ export interface MemberExpression extends Span {
   object: Expression | SuperReference;
   property: PropertyName;
   optional: boolean;
+  inferredName?: string;
   isUnboundCall?: boolean;
 }
 
