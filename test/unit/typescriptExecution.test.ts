@@ -1023,6 +1023,14 @@ test('enforces variance, thenable, import-query, optional-assertion, ambient-mod
     "2: 分散の注釈が示すとおりには、型 'Outer<sub-T>' を型 'Outer<super-T>' に代入できません。",
   ]);
   expect(
+    diagnosticsOf(
+      'type Box<in out T> = {};\ntype Outer<out T> = { box: Box<T> };\nconst s: Box<string> = {};\nconst n: Box<number> = s;'
+    )
+  ).toEqual([
+    "2: 分散の注釈が示すとおりには、型 'Outer<sub-T>' を型 'Outer<super-T>' に代入できません。",
+    "4: 型 'Box<string>' を型 'Box<number>' に代入することはできません。",
+  ]);
+  expect(
     executeProgram(
       'typescript',
       'type Consumer<in T> = ((x: T) => void);\nconst f: Consumer<number> = (x) => console.log(x);\nf(1);'

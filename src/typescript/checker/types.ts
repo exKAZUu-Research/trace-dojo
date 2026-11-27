@@ -456,6 +456,17 @@ export function aliasedDeclaredType(type: Type, name: string, typeParameters: Ty
 /** An anonymous or mapped object type printed as an alias applied to type arguments; any other type as it is. */
 export function withAlias<T extends Type>(type: T, name: string, typeArguments: Type[], aliasId?: number): T {
   if (type.kind !== 'object' || (type.objectKind !== 'anonymous' && type.objectKind !== 'mapped')) return type;
+  if (typeArguments.length > 0 && type.nonGeneric) {
+    return {
+      ...type,
+      id: newTypeId(),
+      nonGeneric: false,
+      origin: type.origin ?? type,
+      aliasName: name,
+      aliasArguments: typeArguments,
+      aliasId,
+    };
+  }
   return { ...type, aliasName: name, aliasArguments: typeArguments, aliasId };
 }
 
@@ -586,7 +597,7 @@ function intersectionConstraintOperand(variable: Type, bound: Type): Type | unde
   return isPrimitive(bound) ||
     bound.kind === 'literal' ||
     isIntrinsic(bound, 'object') ||
-    bound.id === emptyObjectType.id ||
+    isEmptyObject(bound) ||
     isPatternLiteralType(bound)
     ? variable
     : undefined;
@@ -632,7 +643,7 @@ function reducedIntersectionMembers(members: Type[]): Type[] {
     (type) =>
       (type.kind !== 'intrinsic' || !narrowDomains.has(type.name)) &&
       (!isIntrinsic(type, 'void') || !hasUndefined) &&
-      (type.id !== emptyObjectType.id || !hasNonNullableMember)
+      (!isEmptyObject(type) || !hasNonNullableMember)
   );
 }
 
@@ -643,7 +654,7 @@ function narrowIntersectionDomain(type: Type): string | undefined {
 
 function nonNullableIntersectionMember(type: Type): boolean {
   return (
-    (type.kind === 'object' && type.id !== emptyObjectType.id) ||
+    (type.kind === 'object' && !isEmptyObject(type)) ||
     isTemplateOrStringMapping(type) ||
     (isPrimitive(type) && !isIntrinsic(type, 'void')) ||
     type.kind === 'literal' ||
@@ -720,7 +731,7 @@ function canBlockInference(type: Type, budget: ExecutionBudget): boolean {
     budget.spend(type.types.length);
     return type.types.some((member) => canBlockInference(member, budget));
   }
-  if (type.kind === 'object') return type.id !== emptyObjectType.id;
+  if (type.kind === 'object') return !isEmptyObject(type);
   if (isTemplateOrStringMapping(type)) return !isPatternLiteralType(type);
   return (
     type.kind === 'typeParameter' ||
@@ -728,6 +739,10 @@ function canBlockInference(type: Type, budget: ExecutionBudget): boolean {
     type.kind === 'indexedAccess' ||
     type.kind === 'keyof'
   );
+}
+
+function isEmptyObject(type: Type): boolean {
+  return type.kind === 'object' && (type.origin ?? type).id === emptyObjectType.id;
 }
 
 function primitiveDomain(type: Type): string | undefined {
