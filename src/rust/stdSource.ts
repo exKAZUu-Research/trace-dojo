@@ -906,7 +906,7 @@ pub mod ptr {
         pub unsafe fn sub(self, count: usize) -> ConstPtr<T>;
         pub unsafe fn offset(self, count: isize) -> ConstPtr<T>;
         pub fn is_null(self) -> bool;
-        pub unsafe fn read(self) -> T where T: Copy;
+        pub unsafe fn read(self) -> T;
         pub unsafe fn as_ref(self) -> Option<&T>;
     }
     impl<T> MutPtr<T> {
@@ -914,7 +914,7 @@ pub mod ptr {
         pub unsafe fn sub(self, count: usize) -> MutPtr<T>;
         pub unsafe fn offset(self, count: isize) -> MutPtr<T>;
         pub fn is_null(self) -> bool;
-        pub unsafe fn read(self) -> T where T: Copy;
+        pub unsafe fn read(self) -> T;
         pub unsafe fn write(self, value: T);
         pub unsafe fn as_ref(self) -> Option<&T>;
         pub unsafe fn as_mut(self) -> Option<&mut T>;
