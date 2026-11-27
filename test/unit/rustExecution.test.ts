@@ -9006,6 +9006,19 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3] 10 1 55 1.5s\n' });
 });
 
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('range patterns, #[cfg] on a tuple element, and an operator trait method run', () => {
+  const program = `use std::ops::Add;
+fn main() {
+    match 3 { 1..=5 => println!("in"), _ => println!("out") }
+    match -1 { ..0 => println!("neg"), 0..5 => println!("small"), 5.. => println!("big") }
+    println!("{:?}", (#[cfg(any())] 1, 2));
+    let n = 1i32;
+    println!("{} {}", n.add(2), n.add(&3));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'in\nneg\n(2,)\n3 4\n' });
+});
+
 // Rust would wait forever on these; the interpreter stops them as deadlocks rather than ending them early.
 test('a receive that no thread can ever answer, or a lock taken twice, stops as a deadlock', () => {
   const waiting = `use std::sync::mpsc;
