@@ -23,7 +23,12 @@ export function addWherePredicates(
     const type = lowerType(predicate.type, scope);
     if (type.kind !== 'param') {
       // A function's bound on another type (`Vec<T>: Debug`) is checked at each call and assumed in its body.
-      if (!onOtherType) compileError(predicate.span, 'where には、型引数の境界だけを書いてください。');
+      if (!onOtherType) {
+        compileError(
+          predicate.span,
+          '型や impl の where 節で、型引数でない型に付ける境界は、この採点環境では使えません。'
+        );
+      }
       onOtherType(
         type,
         predicate.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type))

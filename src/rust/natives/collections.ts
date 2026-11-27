@@ -154,6 +154,8 @@ function insertEntry(ctx: NativeContext, m: MapValue, k: Value, v: Value): Value
   if (existing) {
     const old = existing[1];
     existing[1] = v;
+    // The map keeps its own key, so the one given goes now.
+    discard(ctx, k, ctx.typeArgs[0]);
     return some(ctx, old);
   }
   storeNewEntry(ctx, m, key, k, v);
@@ -274,7 +276,11 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
     insert: ([self, value], ctx) => {
       const s = set(self);
       const hash = entryKey(ctx, s.entries, value);
-      if (s.entries.has(hash)) return false;
+      if (s.entries.has(hash)) {
+        // The set keeps the value it holds, so the one given goes now.
+        discard(ctx, value, ctx.typeArgs[0]);
+        return false;
+      }
       ctx.runtime.allocate(1);
       s.entries.set(hash, value);
       return true;
@@ -430,9 +436,13 @@ function entryValue(entry: Value): EntryValue {
 }
 
 /** Inserts an entry's key with a value when the map lacks it, returning a place for the entry's value. */
-function orInsertWith(ctx: NativeContext, entry: EntryValue, make: () => Value): Value {
+function orInsertWith(ctx: NativeContext, entry: EntryValue, make: () => Value, given?: Value): Value {
   let existing = entry.map.entries.get(entry.lookup);
-  if (!existing) {
+  if (existing) {
+    // An occupied entry keeps the map's key and value, so the key it was made with and a value given go now.
+    discard(ctx, entry.key, ctx.typeArgs[0]);
+    if (given !== undefined) discard(ctx, given, ctx.typeArgs[1]);
+  } else {
     ctx.runtime.allocate(2);
     existing = [entry.key, make()];
     entry.map.entries.set(entry.lookup, existing);
@@ -441,7 +451,7 @@ function orInsertWith(ctx: NativeContext, entry: EntryValue, make: () => Value):
 }
 
 const entryNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
-  or_insert: ([self, value], ctx) => orInsertWith(ctx, entryValue(self), () => value),
+  or_insert: ([self, value], ctx) => orInsertWith(ctx, entryValue(self), () => value, value),
   or_insert_with: ([self, f], ctx) => orInsertWith(ctx, entryValue(self), () => call(ctx, f, [])),
   or_insert_with_key: ([self, f], ctx) => {
     const entry = entryValue(self);
@@ -540,3 +550,8 @@ natives['&HashSet<_>::into_iter'] = ([self], ctx) => setIter(set(self), keyType(
 natives['&BTreeSet<_>::into_iter'] = ([self], ctx) => setIter(set(self), keyType(ctx));
 void cloneValue;
 define(natives);
+
+/** Drops a value a native was given and does not keep, as std drops it. */
+function discard(ctx: NativeContext, value: Value, type: Type | undefined): void {
+  if (type && ctx.interp.dropper.active) ctx.interp.dropper.drop(value, type);
+}
