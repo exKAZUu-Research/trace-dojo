@@ -97,6 +97,8 @@ export interface BodyContext {
   unsafeDepth: number;
   /** While checking the left side of an assignment, whose union field the assignment writes without reading it. */
   writingUnionField?: boolean;
+  /** Whether the path being checked is the place of `&raw const` or `&raw mut`, which reads nothing. */
+  rawBorrowing?: boolean;
 }
 
 interface CoverageCheck {

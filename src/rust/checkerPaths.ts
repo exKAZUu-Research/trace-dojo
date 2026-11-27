@@ -44,7 +44,9 @@ import {
 export function pathExpr(c: Checker, expr: Extract<Expr, { kind: 'path' }>, expected: Type | undefined): Type {
   const res = resolveValuePath(c, expr.path, expr.span);
   c.annotations.paths.set(expr, res);
-  if (res.kind === 'const' && res.def.ast.isMutable) c.requireUnsafe(expr.span, 'static mut を使うこと');
+  if (res.kind === 'const' && res.def.ast.isMutable && !c.body.rawBorrowing) {
+    c.requireUnsafe(expr.span, 'static mut を使うこと');
+  }
   return typeOfRes(c, res, expr.span, expected);
 }
 
