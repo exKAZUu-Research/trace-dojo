@@ -149,7 +149,7 @@ export class SignatureInstance {
     inputRegions: RVar[]
   ): void {
     if (isNone(actual)) return;
-    const t = shallow(declared);
+    const t = this.indexedElement(shallow(declared));
     // An associated type borrows nothing from the inputs: what it holds comes with the type it stands for.
     if (t.kind === 'adt' && t.def.projection) return;
     const edge = (a: RVar, b: RVar, fixed = false): void => {
@@ -176,6 +176,15 @@ export class SignatureInstance {
     if ((t.kind === 'dyn' && t.lifetime) || forEachPart(t, actual, invariant, recurse)) return;
     // An `impl Trait` result: it may borrow from any input.
     for (const a of inputRegions) for (const b of regionsOf(actual)) edge(a, b);
+  }
+
+  /** What indexing a slice gives (`Indexed<I, T>`), as the type it stands for: `T`, or `[T]` for a range of indexes. */
+  private indexedElement(t: Type): Type {
+    if (t.kind !== 'adt' || t.def.builtin !== 'Indexed') return t;
+    const index = shallow(t.args[0]);
+    const known = index.kind === 'param' ? this.typeArgs[this.fn.params.indexOf(index.param)] : index;
+    const range = known !== undefined && normalize(shallow(known)).kind === 'adt';
+    return range ? { kind: 'slice', elem: t.args[1] } : shallow(t.args[1]);
   }
 
   /** `&'a dyn T` is `&'a (dyn T + 'a)`: the object's lifetime is the reference's. Returns whether `t` is one. */
