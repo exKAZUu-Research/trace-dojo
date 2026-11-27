@@ -159,8 +159,13 @@ function isFinished(ctx: NativeContext, handle: Value): boolean {
 function threadScope(ctx: NativeContext, f: Value): Value {
   const threads = scheduler(ctx);
   const count = threads.spawnedCount;
-  const result = call(ctx, f, [UNIT_VALUE]);
-  threads.runAll(ctx);
+  let result: Value;
+  try {
+    result = call(ctx, f, [UNIT_VALUE]);
+  } finally {
+    // The scope waits for its threads however its body ends, a panic included, before the panic goes on.
+    threads.runAll(ctx);
+  }
   if (threads.spawnedSince(count).some((thread) => thread.state === 'panicked' && !thread.joined)) {
     panic(ctx, 'a scoped thread panicked');
   }
