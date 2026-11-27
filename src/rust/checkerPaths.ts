@@ -438,12 +438,13 @@ export function structExpr(c: Checker, expr: Extract<Expr, { kind: 'struct' }>, 
   c.annotations.paths.set(expr, { kind: 'ctor', def, variant, typeArgs });
   if (expr.base) {
     if (def.kind === 'enum') compileError(expr.base.span, '列挙子には .. を書けません。');
+    if (def.isUnion) compileError(expr.base.span, '共用体の式には .. を書けません（E0436）。');
     for (const field of variantDef.fields) if (!seen.has(field.name)) checkFieldVisible(c, def, field, expr.base.span);
     c.coerceExpr(expr.base, self);
     return self;
   }
   if (def.isUnion) {
-    if (expr.fields.length !== 1 || expr.base)
+    if (expr.fields.length !== 1)
       compileError(expr.span, '共用体は、フィールドを1つだけ書いて作ってください（E0784）。');
     return self;
   }
