@@ -26,6 +26,8 @@ export const IMPORTED_MODULE = 'imported_module';
 class ViewNode implements Node {
   /** Whether the view added this statement without a step of its own, as an assignment exporting a namespace's member. */
   isUnstepped = false;
+  /** Whether a synthesized function (such as a namespace body wrapper) hides its call frame from trace `callLines`. */
+  hidesCallRow = false;
   readonly startIndex: number;
   readonly endIndex: number;
   readonly startPosition: { row: number; column: number };
@@ -576,6 +578,7 @@ function namespaceCall(node: TreeNode, name: string, statements: ViewNode[], arg
     { node: token(node, '=>'), fieldName: undefined },
     { node: block, fieldName: 'body' },
   ]);
+  arrow.hidesCallRow = true;
   const callee = assemble(node, 'parenthesized_expression', [
     { node: token(node, '('), fieldName: undefined },
     { node: arrow, fieldName: undefined },
@@ -666,6 +669,11 @@ function unstepped(statement: ViewNode): ViewNode {
 /** Whether the view added a statement that records no step of its own. */
 export function isUnsteppedStatement(node: Node): boolean {
   return node instanceof ViewNode && node.isUnstepped;
+}
+
+/** Whether the view synthesized a wrapper function whose invocation is not a source-level call in traces. */
+export function isHiddenCallFunction(node: Node): boolean {
+  return node instanceof ViewNode && node.hidesCallRow;
 }
 
 function namespacePathOf(name: TreeNode): TreeNode[] {

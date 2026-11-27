@@ -129,6 +129,8 @@ export interface FunctionNode extends Span {
   scope: ScopeDeclarations;
   /** Whether a trace shows a call to this function as part of its caller's step, marked by `// atomic`. */
   isAtomic: boolean;
+  /** Whether calling this function omits its call site from trace `callLines`, as for a synthesized namespace wrapper. */
+  hidesCallRow?: boolean;
   /** The text `toString()` returns. */
   source: string;
   /** Whether the function is strict mode code, which a class or a `"use strict"` directive makes it. */

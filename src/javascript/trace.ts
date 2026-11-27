@@ -41,6 +41,7 @@ export function recordProgram(parsed: Program, input?: ProgramInput, showsStatic
   const snapshotter = new Snapshotter(runtime, showsStatics);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
+    hidesCallRow: (frame) => frame.callee?.behavior.kind === 'user' && frame.callee.behavior.node.hidesCallRow === true,
     variablesOf: (frame) => snapshotter.variablesOf(frame.scope, true),
   });
   runtime.steps.recorder = recorder;

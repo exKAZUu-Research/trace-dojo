@@ -1,11 +1,20 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
-import type { ClassNode, Expression, IterationSource, MemberExpression, Program, Statement } from '../javascript/ast';
+import type {
+  ClassNode,
+  Expression,
+  FunctionKind,
+  FunctionNode,
+  IterationSource,
+  MemberExpression,
+  Program,
+  Statement,
+} from '../javascript/ast';
 import { nameOf, type Node, rowOf, unsupported, unwrapParentheses } from '../javascript/convertNodes';
 import { decodeStringLiteral } from '../javascript/literals';
 import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
 import { countedEnumValue, type EnumsInScope, type FoldedValue, foldEnumValue, memberKeyName } from './enumFolding';
-import { IMPORTED_MODULE, isUnsteppedStatement, PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
+import { IMPORTED_MODULE, isHiddenCallFunction, isUnsteppedStatement, PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 
 const functionScopeTypes = new Set([
   'function_declaration',
@@ -313,6 +322,12 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     const decorators = node.namedChildren.filter((child) => child.type === 'decorator');
     if (decorators.length === 0) return undefined;
     return decorators.map((decorator) => this.expression(decorator.namedChildren[0] as Node));
+  }
+
+  override functionNode(node: Node, kind: FunctionKind, name?: string): FunctionNode {
+    const fn = super.functionNode(node, kind, name);
+    if (isHiddenCallFunction(node)) fn.hidesCallRow = true;
+    return fn;
   }
 
   protected override stepRowOf(node: Node): number | undefined {
