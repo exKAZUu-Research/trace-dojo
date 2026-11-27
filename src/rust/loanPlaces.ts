@@ -63,10 +63,13 @@ export function refTarget(type: Type | undefined): Type | undefined {
   return t?.kind === 'ref' ? t.target : undefined;
 }
 
-/** Whether `*` of a value of the type goes through a pointer: a reference, a raw pointer, or a `Deref` impl. */
+/**
+ * Whether `*` of a value of the type goes through a pointer the value does not own: a reference or a raw pointer. What
+ * an owner or a `Deref` impl (`Vec`, `Rc`, a guard) derefs to is borrowed from the owner itself.
+ */
 export function isReference(type: Type | undefined): boolean {
   const t = type && normalize(shallow(type));
-  return t?.kind === 'ref' || (t?.kind === 'adt' && t.def.builtin !== 'Box');
+  return t?.kind === 'ref' || (t?.kind === 'adt' && (t.def.builtin === 'ConstPtr' || t.def.builtin === 'MutPtr'));
 }
 
 export function variantOf(annotations: Annotations, pattern: Pattern): number {

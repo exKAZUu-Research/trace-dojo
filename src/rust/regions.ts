@@ -453,7 +453,7 @@ export function ownedDerefLayout(layout: Layout): Layout {
 
 /** The projections of derefs: `*` through a reference, `#` through an owner (a `Box`, a collection's slice). */
 export function derefSteps(derefs: readonly DerefKind[] | undefined): string[] {
-  return (derefs ?? []).map((step) => (step === 'own' ? '#' : '*'));
+  return (derefs ?? []).map((step) => (step === 'ref' || step === 'mutRef' ? '*' : '#'));
 }
 
 /** The type of a receiver after the derefs of its method call's adjustment. */
