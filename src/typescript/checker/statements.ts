@@ -172,7 +172,7 @@ export class StatementChecker {
    */
   private usingDeclaration(node: TreeNode): void {
     const name = hasToken(node, 'await') ? 'AsyncDisposable' : 'Disposable';
-    if (!this.reportedMissingTypes.has(name)) {
+    if (this.c.silent === 0 && !this.reportedMissingTypes.has(name)) {
       this.reportedMissingTypes.add(name);
       this.c.error(node, `グローバル型 '${name}' が見つかりません。`);
     }
