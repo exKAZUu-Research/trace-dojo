@@ -372,6 +372,12 @@ export class Namespaces {
     }
   }
 
+  checkReExport(clause: TreeNode | undefined, source: TreeNode): void {
+    const module = this.moduleNamed(stringValue(source));
+    if (!module || !clause) return;
+    this.checkNamedImports(clause, module, `'"${stringValue(source)}"'`);
+  }
+
   private checkNamedImports(imports: TreeNode, module: Sym, moduleName: string): void {
     const exports = module.namespaceExports as Scope;
     for (const specifier of named(imports)) {

@@ -199,7 +199,11 @@ export class StatementChecker {
     const assigned = named(node).find((child) => child.type !== 'export_clause' && child.type !== 'comment');
     this.checkExportPlacement(node, { declaration, value, clause, source, assigned });
     this.checkDuplicateExports(node);
-    if (!clause || source) return;
+    if (source) {
+      if (!isNamespaceBody(node.parent)) this.c.namespaces.checkReExport(clause, source);
+      return;
+    }
+    if (!clause) return;
     for (const specifier of named(clause)) {
       const name = specifier.childForFieldName('name');
       const scope = name && this.c.scopeOf(name);
