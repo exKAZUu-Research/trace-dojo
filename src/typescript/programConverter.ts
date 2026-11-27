@@ -23,6 +23,7 @@ const blockScopeTypes = new Set([
   'for_in_statement',
   'switch_body',
   'catch_clause',
+  'class',
 ]);
 
 /** Converts a TypeScript program, viewed as JavaScript, to the JavaScript interpreter's AST. */
@@ -171,11 +172,18 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   private indexEnumScopes(node: Node, blockScope: Node, fnScope: Node): void {
     this.enclosingScope.set(node, blockScope);
     this.enclosingFnScope.set(node, fnScope);
-    this.recordScopeDeclaration(node, blockScope, fnScope);
+    this.recordOwnScopeBindings(node, fnScope);
     for (const child of node.namedChildren) {
+      this.recordScopeDeclaration(child, blockScope, fnScope);
       const next = childScopesOf(child, blockScope, fnScope);
       if (next.block !== blockScope && !this.scopeParent.has(next.block)) this.scopeParent.set(next.block, blockScope);
       this.indexEnumScopes(child, next.block, next.fn);
+    }
+  }
+
+  private recordOwnScopeBindings(node: Node, fnScope: Node): void {
+    for (const entry of ownScopeEntries(node, fnScope)) {
+      for (const name of entry.names) this.addScopeEntry(entry.scope, name);
     }
   }
 
@@ -340,6 +348,30 @@ const blockNamedDeclarationTypes = new Set([
   'class_declaration',
 ]);
 const variableDeclarationTypes = new Set(['variable_declaration', 'lexical_declaration', 'using_declaration']);
+
+const selfNamedExpressionTypes = new Set(['function_expression', 'generator_function', 'class']);
+
+function ownScopeEntries(node: Node, fnScope: Node): { scope: Node; names: string[] }[] {
+  const entries: { scope: Node; names: string[] }[] = [];
+  if (selfNamedExpressionTypes.has(node.type)) entries.push({ scope: node, names: declaredNodeName(node) });
+  if (functionScopeTypes.has(node.type)) entries.push({ scope: node, names: functionParameterNames(node) });
+  if (node.type === 'catch_clause') {
+    const parameter = node.childForFieldName('parameter');
+    if (parameter) entries.push({ scope: node, names: patternIdentifierNames(parameter) });
+  }
+  if (node.type === 'for_in_statement' && node.childForFieldName('kind')) {
+    const left = node.childForFieldName('left');
+    const target = node.childForFieldName('kind')?.text === 'var' ? fnScope : node;
+    if (left) entries.push({ scope: target, names: patternIdentifierNames(left) });
+  }
+  return entries;
+}
+
+function functionParameterNames(node: Node): string[] {
+  const single = node.childForFieldName('parameter');
+  if (single) return patternIdentifierNames(single);
+  return (node.childForFieldName('parameters')?.namedChildren ?? []).flatMap(patternIdentifierNames);
+}
 
 function declaredScopeEntry(
   node: Node,
