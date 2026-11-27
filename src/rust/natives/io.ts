@@ -219,12 +219,7 @@ function readLineInto(ctx: NativeContext, reader: TextReader, buf: Value): Value
  */
 function openFile(ctx: NativeContext, path: string, options: OpenOptionsValue): Value {
   const writes = options.write || options.append;
-  const invalid =
-    !options.read && !writes
-      ? 'must specify at least one of read, write, or append access'
-      : !writes && (options.create || options.truncate || options.createNew)
-        ? 'creating or truncating a file requires write or append access'
-        : undefined;
+  const invalid = invalidOptions(options);
   if (invalid) return err(ctx, ioError(ctx, { kind: 'InvalidInput', message: invalid }));
   if (options.read && writes) {
     panic(
@@ -404,6 +399,16 @@ function setOption(self: Value, key: keyof OpenOptionsValue, flag: Value): Value
 
 function some(ctx: NativeContext, value: Value): Value {
   return new EnumValue(ctx.interp.program.adtDef('Option'), 1, [value]);
+}
+
+/** std's message for options it rejects with `InvalidInput`, before it asks the system. */
+function invalidOptions(options: OpenOptionsValue): string | undefined {
+  const writes = options.write || options.append;
+  if (!options.read && !writes) return 'must specify at least one of read, write, or append access';
+  if (!writes && (options.create || options.truncate || options.createNew)) {
+    return 'creating or truncating a file requires write or append access';
+  }
+  return undefined;
 }
 
 function option(ctx: NativeContext, value: Value | undefined): Value {
