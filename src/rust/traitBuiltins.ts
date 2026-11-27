@@ -410,7 +410,7 @@ function unpin({ t, all }: Goal): Answer {
   if (t.kind === 'dyn') return 'no';
   if (t.kind === 'tuple') return all(t.elems);
   if (t.kind === 'array' || t.kind === 'slice') return all([t.elem]);
-  if (t.kind === 'closure') return all(t.closure.captures?.map(({ type }) => type) ?? []);
+  if (t.kind === 'closure') return all(capturedTypes(t));
   if (t.kind !== 'adt' || ['Box', 'Pin', 'Rc', 'Arc', 'ConstPtr', 'MutPtr'].includes(t.def.builtin ?? '')) return 'yes';
   return t.def.builtin === 'AsyncFuture' ? 'no' : all(t.args);
 }
