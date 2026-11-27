@@ -1026,13 +1026,10 @@ function rawPointer(c: Compiler, expr: Expr, read: Eval): Eval {
     const place = c.place(expr.operand);
     return (frame) => new RawPtr(place(frame));
   }
-  // Text a method gives (`s.as_str()`) is a place of its own; equal literals are one place, as rustc merges them.
-  const ownText = expr.kind === 'methodCall';
   return (frame) => {
     const value = read(frame);
     if (value instanceof RawPtr) return value;
-    if (isPlace(value)) return new RawPtr(value);
-    return new RawPtr(new CellPlace(value), typeof value === 'string' && ownText);
+    return new RawPtr(isPlace(value) ? value : new CellPlace(value));
   };
 }
 

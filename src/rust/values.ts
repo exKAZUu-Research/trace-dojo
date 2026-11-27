@@ -389,11 +389,7 @@ let nextAddress = 0x7f_f7_b0_00_00_00;
 export class RawPtr {
   /** The address `{:?}` shows, which only tells pointers apart, as real addresses differ between runs. */
   readonly address: number;
-  constructor(
-    readonly place: Place | undefined,
-    /** Whether it points to text no variable holds (`s.as_str()`), which is the same place only as itself. */
-    readonly distinct = false
-  ) {
+  constructor(readonly place: Place | undefined) {
     this.address = place ? (nextAddress += 16) : 0;
   }
 }
