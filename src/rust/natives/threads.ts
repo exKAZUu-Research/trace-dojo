@@ -16,7 +16,7 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { call, define, deref, err, type NativeContext, none, ok, panic, placeOf, some } from './support';
+import { call, define, deref, err, libraryPanic, type NativeContext, none, ok, panic, placeOf, some } from './support';
 
 /**
  * The threads of a run, which run one at a time by a fixed rule, since the interpreter runs one thread of JavaScript:
@@ -480,28 +480,46 @@ define({
   'Duration::as_secs_f64': ([d]) => Number(duration(d)) / 1e9,
   'Duration::subsec_millis': ([d]) => (duration(d) % NANOS) / 1_000_000n,
   'Duration::subsec_nanos': ([d]) => duration(d) % NANOS,
-  'Duration::checked_add': ([a, b], ctx) => some(ctx, new DurationValue(duration(a) + duration(b))),
+  'Duration::checked_add': ([a, b], ctx) => {
+    const sum = duration(a) + duration(b);
+    return sum > MAX_DURATION ? none(ctx) : some(ctx, new DurationValue(sum));
+  },
   'Duration::checked_sub': ([a, b], ctx) =>
     duration(a) >= duration(b) ? some(ctx, new DurationValue(duration(a) - duration(b))) : none(ctx),
   'Duration::mul_f64': ([d, factor]) => new DurationValue(BigInt(Math.round(Number(duration(d)) * (factor as number)))),
   'const:ZERO': () => new DurationValue(0n),
-  'Duration::add': ([a, b]) => new DurationValue(duration(a) + duration(b)),
+  'Duration::add': ([a, b], ctx) => bounded(ctx, duration(a) + duration(b), 'overflow when adding durations'),
   'Duration::sub': ([a, b], ctx) => {
-    if (duration(a) < duration(b)) panic(ctx, 'overflow when subtracting durations');
+    if (duration(a) < duration(b)) libraryPanic(ctx, 'overflow when subtracting durations', 'core/src/time.rs:1277:31');
     return new DurationValue(duration(a) - duration(b));
   },
-  'Duration::mul': ([d, factor]) => new DurationValue(duration(d) * (factor as bigint)),
+  'Duration::mul': ([d, factor], ctx) => bounded(ctx, duration(d) * (factor as bigint), MUL_OVERFLOW),
   'Duration::div': ([d, divisor], ctx) => divided(ctx, d, divisor),
   // `u32 * Duration`, the one operator impl std gives `u32` with a right operand that is not a number.
-  'u32::mul': ([factor, d]) => new DurationValue((factor as bigint) * duration(d)),
-  'Duration::add_assign': ([d, other]) => assigned(d, new DurationValue(duration(d) + duration(other))),
+  'u32::mul': ([factor, d], ctx) => bounded(ctx, (factor as bigint) * duration(d), MUL_OVERFLOW),
+  'Duration::add_assign': ([d, other], ctx) =>
+    assigned(d, bounded(ctx, duration(d) + duration(other), 'overflow when adding durations')),
   'Duration::sub_assign': ([d, other], ctx) => {
-    if (duration(d) < duration(other)) panic(ctx, 'overflow when subtracting durations');
+    if (duration(d) < duration(other))
+      libraryPanic(ctx, 'overflow when subtracting durations', 'core/src/time.rs:1277:31');
     return assigned(d, new DurationValue(duration(d) - duration(other)));
   },
-  'Duration::mul_assign': ([d, factor]) => assigned(d, new DurationValue(duration(d) * (factor as bigint))),
+  'Duration::mul_assign': ([d, factor], ctx) =>
+    assigned(d, bounded(ctx, duration(d) * (factor as bigint), MUL_OVERFLOW)),
   'Duration::div_assign': ([d, divisor], ctx) => assigned(d, divided(ctx, d, divisor)),
 });
+
+/** The longest `Duration`: `u64::MAX` seconds and 999_999_999 nanoseconds. */
+const MAX_DURATION = (2n ** 64n - 1n) * NANOS + (NANOS - 1n);
+
+const MUL_OVERFLOW = 'overflow when multiplying duration by scalar';
+
+/** A `Duration` of `nanos`, panicking as std does when it is longer than the longest one. */
+function bounded(ctx: NativeContext, nanos: bigint, message: string): DurationValue {
+  if (nanos > MAX_DURATION)
+    libraryPanic(ctx, message, message === MUL_OVERFLOW ? 'core/src/time.rs:1297:31' : 'core/src/time.rs:1257:31');
+  return new DurationValue(nanos);
+}
 
 function divided(ctx: NativeContext, d: Value, divisor: Value): DurationValue {
   if (divisor === 0n) panic(ctx, 'divide by zero error when dividing duration by scalar');
