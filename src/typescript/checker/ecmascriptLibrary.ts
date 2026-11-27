@@ -244,7 +244,7 @@ interface DateConstructor {
     (): string;
     readonly prototype: Date;
     parse(s: string): number;
-    UTC(year: number, monthIndex: number, date?: number, hours?: number, minutes?: number, seconds?: number, ms?: number): number;
+    UTC(year: number, monthIndex?: number, date?: number, hours?: number, minutes?: number, seconds?: number, ms?: number): number;
     now(): number;
 }
 declare var Date: DateConstructor;
