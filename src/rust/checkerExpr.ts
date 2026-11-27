@@ -253,14 +253,7 @@ function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }
   const lengthParam = constParamOf(expr.count, { params: c.body.typeParams });
   if (lengthParam) {
     c.coerceExpr(expr.count, USIZE);
-    c.deferredChecks.push(() => {
-      if (!c.solver.isCopy(resolve(elem, true))) {
-        compileError(
-          expr.span,
-          `[値; 個数] の値は Copy の型にしてください（${typeToString(resolve(elem))} は Copy ではありません）。`
-        );
-      }
-    });
+    c.deferredChecks.push(() => requireRepeatable(c, expr, elem));
     return arrayOfLength(elem, { kind: 'param', param: lengthParam });
   }
   const len = constUsize(c, expr.count);
@@ -268,20 +261,24 @@ function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }
     c.annotations.unevaluatedRepeatOperands.add(expr.value);
   }
   c.deferredChecks.push(() => {
-    if (len !== 1 && len !== 0 && !c.solver.isCopy(resolve(elem, true))) {
-      const value = expr.value;
-      const constant =
-        (value.kind === 'block' && value.isConst) ||
-        (value.kind === 'path' && c.annotations.paths.get(value)?.kind === 'const');
-      if (!constant) {
-        compileError(
-          expr.span,
-          `[値; 個数] の値は Copy の型にしてください（${typeToString(resolve(elem))} は Copy ではありません）。`
-        );
-      }
-    }
+    if (len !== 1 && len !== 0) requireRepeatable(c, expr, elem);
   });
   return { kind: 'array', elem, len };
+}
+
+/** `[value; count]` copies its value unless the value is a constant (a `const` item or block), which is made anew. */
+function requireRepeatable(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }>, elem: Type): void {
+  if (c.solver.isCopy(resolve(elem, true))) return;
+  const value = expr.value;
+  const constant =
+    (value.kind === 'block' && value.isConst) ||
+    (value.kind === 'path' && c.annotations.paths.get(value)?.kind === 'const');
+  if (!constant) {
+    compileError(
+      expr.span,
+      `[値; 個数] の値は Copy の型にしてください（${typeToString(resolve(elem))} は Copy ではありません）。`
+    );
+  }
 }
 
 function loopExpr(c: Checker, expr: Extract<Expr, { kind: 'loop' }>): Type {
