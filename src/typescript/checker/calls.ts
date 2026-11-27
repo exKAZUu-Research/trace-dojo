@@ -1124,7 +1124,6 @@ export class Calls {
         signature.returnType(),
         true
       );
-    const returnContext = this.c.inference.contextualMapper(parameters, run.inferences);
     // A `this` parameter infers from the object the method is called on.
     if (receiver && signature.thisType)
       this.c.inference.inferTypes({ ...run, contextualSignatures: false }, receiver, signature.thisType, true);
@@ -1134,7 +1133,10 @@ export class Calls {
     );
     for (const [index, arg] of arguments_.entries()) {
       if (restIndex !== undefined && index >= restIndex) continue;
-      if (!sensitive[index]) this.inferFromArgument(run, arg, parameterTypes[index], returnContext);
+      if (!sensitive[index]) {
+        const argContext = this.c.inference.contextualMapper(parameters, run.inferences);
+        this.inferFromArgument(run, arg, parameterTypes[index], argContext);
+      }
     }
     // `...args: T` infers `T` as the tuple of the arguments it takes.
     if (restIndex !== undefined)
@@ -1297,17 +1299,13 @@ export class Calls {
       this.c.inference.inferTypes(run, this.spreadValueType(arg.spread), parameterType, true);
       return;
     }
-    this.c.inference.probeInferential(() => {
-      const argType = this.probeArgumentType(arg, parameterType, mapper);
-      this.c.silently(() => this.c.inference.inferArgument(run, argType, parameterType));
-    });
+    const argType = this.probeArgumentType(arg, parameterType, mapper);
+    this.c.silently(() => this.c.inference.inferArgument(run, argType, parameterType));
   }
 
   private probeArgumentType(arg: ExpandedArgument, contextual: Type | undefined, mapper?: Mapper): Type {
     const context = contextual && mapper ? this.c.instantiateContextual(contextual, mapper) : contextual;
-    return this.c.inference.probeInferential(() =>
-      this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, context)), arg.before)
-    );
+    return this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, context)), arg.before);
   }
 
   private spreadElements(arg: TreeNode, type: Type): TupleElement[] {

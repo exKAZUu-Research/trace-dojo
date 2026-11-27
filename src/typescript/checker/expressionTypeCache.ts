@@ -67,6 +67,6 @@ export class ExpressionTypeCache {
       environmentId = this.silentEnvironments.size;
       this.silentEnvironments.set(environment, environmentId);
     }
-    return `${this.c.inference.isInferential}/${this.c.expressions.deferredContexts.id}/${this.c.overloadContexts.cacheKey}/${node.id}/${typeCacheKey(contextual)}/${this.c.literals.isConstContext(node, contextual)}/${retainFreshBoolean}/${environmentId}`;
+    return `${this.c.expressions.deferredContexts.id}/${this.c.overloadContexts.cacheKey}/${node.id}/${typeCacheKey(contextual)}/${this.c.literals.isConstContext(node, contextual)}/${retainFreshBoolean}/${environmentId}`;
   }
 }
