@@ -300,7 +300,6 @@ export class ItemCollector {
   }
 
   // code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of item.
   collectItems(items: Item[], module: Module): void {
     for (const item of items) {
       switch (item.kind) {
