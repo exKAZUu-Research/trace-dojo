@@ -8,8 +8,15 @@ import { construct, derefAll, evaluateValues, isPlaceExpr, isRefType, LocalPlace
 import { compileFor, compileIf, compileLoop, compileMatch, compileWhile } from './compilerControl';
 import { compileMacro } from './compilerMacros';
 import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
-import { compileConstant, compileMatcher, compilePatternInput, type Matcher, takesWhole } from './compilerPatterns';
-import { compileField, compileIndex, compilePlace, userDerefCall } from './compilerPlaces';
+import {
+  compileConstant,
+  compileMatcher,
+  compilePatternInput,
+  type Matcher,
+  readsThroughUserImpl,
+  takesWhole,
+} from './compilerPatterns';
+import { compileField, compileIndex, compilePlace, readPlace, userDerefCall } from './compilerPlaces';
 import { dropsBorrowedTemporary } from './compilerTemporaries';
 import type { Dropper } from './drops';
 import type { Formatter } from './fmt';
@@ -418,7 +425,7 @@ export class Compiler {
    * applies to the value read from that one evaluation of the place, so an index's expression runs once.
    */
   private directBorrow(expr: Expr, operand: Expr, slot: number): Eval {
-    const place = this.place(operand);
+    const place = readsThroughUserImpl(this, operand) ? readPlace(this.read(operand)) : this.place(operand);
     let root = operand;
     while (root.kind === 'field' || root.kind === 'index' || root.kind === 'unary') root = root.operand;
     const res = this.annotations.paths.get(root);
@@ -708,7 +715,7 @@ export class Compiler {
     const res = expr.target.kind === 'path' ? this.annotations.paths.get(expr.target) : undefined;
     // `_ = place` neither moves nor drops what the place holds, though evaluating the place still checks its indexes.
     if (res?.kind === 'discard' && isPlaceExpr(expr.value, this.annotations)) {
-      const place = this.place(expr.value);
+      const place = readsThroughUserImpl(this, expr.value) ? this.read(expr.value) : this.place(expr.value);
       return (frame) => {
         place(frame);
         return UNIT_VALUE;

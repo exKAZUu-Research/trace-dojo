@@ -248,6 +248,11 @@ export function userDerefCall(
   return (frame, value) => c.support.callFn(fn, [type(frame)], [value], undefined, span, frame);
 }
 
+/** A place over what `read` gives, for code that only reads it. */
+export function readPlace(read: Eval): PlaceEval {
+  return (frame) => readOnlyPlace(read(frame));
+}
+
 function readOnlyPlace(value: Value): Place {
   return new AccessorPlace(
     () => value,

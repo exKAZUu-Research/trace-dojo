@@ -42,7 +42,7 @@ export function compilePatternInput(
   expr: Expr,
   patterns: Pattern[]
 ): (frame: Frame) => { value: Value; place: Place } {
-  const overloaded = isOverloadedPlace(c, expr) && !patterns.some((pattern) => bindsByRefMut(c, pattern));
+  const overloaded = readsThroughUserImpl(c, expr) && !patterns.some((pattern) => bindsByRefMut(c, pattern));
   if (overloaded || (expr.kind === 'index' && c.annotations.indexes.get(expr)?.container === 'map')) {
     const read = c.read(expr);
     return (frame) => {
@@ -64,13 +64,23 @@ export function compilePatternInput(
   };
 }
 
-function isOverloadedPlace(c: Compiler, expr: Expr): boolean {
-  if (expr.kind === 'index') return c.annotations.indexes.get(expr)?.container === 'user';
-  return (
-    expr.kind === 'unary' &&
-    expr.op === '*' &&
-    derefOnce(c.program, normalize(shallow(expr.operand.ty!)))?.kind === 'user'
-  );
+/**
+ * Whether a place is reached through the program's `Deref` or `Index`, where reading it calls `deref` or `index` and
+ * only writing it calls `deref_mut` or `index_mut`.
+ */
+export function readsThroughUserImpl(c: Compiler, expr: Expr): boolean {
+  for (let part = expr; ; part = part.operand) {
+    if (part.kind === 'index') {
+      const index = c.annotations.indexes.get(part);
+      if (index?.container === 'user' || index?.derefs.includes('user')) return true;
+    } else if (part.kind === 'field') {
+      if (c.annotations.fields.get(part)?.derefs.includes('user')) return true;
+    } else if (part.kind === 'unary' && part.op === '*') {
+      if (derefOnce(c.program, normalize(shallow(part.operand.ty!)))?.kind === 'user') return true;
+    } else {
+      return false;
+    }
+  }
 }
 
 function bindsByRefMut(c: Compiler, pattern: Pattern): boolean {
