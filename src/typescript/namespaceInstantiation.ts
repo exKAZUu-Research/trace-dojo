@@ -1,30 +1,35 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Sym } from './checker/scopes';
-import { erasedStatementTypes } from './erasedSyntax';
+
+const typeOnlyStatementTypes = new Set(['interface_declaration', 'type_alias_declaration', 'comment']);
 
 /**
- * Whether a namespace has an object: a block of it has code to run, or it is declared in an ambient context, as tsc's
- * module instance state decides. The checker and the JavaScript view both ask this, so a namespace has an object in the
- * types exactly when it has one at run time.
+ * Whether a namespace has an object: a block of it declares a value or statement rather than only types, as tsc's
+ * `getModuleInstanceState` decides for both ambient and non-ambient namespaces. The checker and the JavaScript view
+ * both ask this, so a namespace has an object in the types when a non-ambient block of it compiles to one at run time.
  */
 export function isInstantiatedNamespace(symbol: Sym): boolean {
   return symbol.valueDeclarations.some((declaration) => {
     if (declaration.type !== 'internal_module' && declaration.type !== 'module') return false;
     const body = declaration.childForFieldName('body');
-    return isAmbient(declaration) || (body !== null && blockHasRuntimeCode(body));
+    return body !== null && blockHasRuntimeCode(body);
   });
 }
 
-/** Whether a namespace block's body has code to run, rather than only types and namespaces of types. */
+/** Whether a namespace block's body declares values or statements, rather than only types and type-only namespaces. */
 export function blockHasRuntimeCode(body: TreeNode): boolean {
   return body.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child));
 }
 
 function statementHasRuntimeCode(statement: TreeNode): boolean {
-  if (statement.type === 'comment') return false;
+  if (typeOnlyStatementTypes.has(statement.type)) return false;
+  if (statement.type === 'ambient_declaration')
+    return statement.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child));
   const declaration = statement.type === 'export_statement' ? statement.childForFieldName('declaration') : statement;
-  if (!declaration || erasedStatementTypes.has(declaration.type)) return false;
+  if (!declaration || typeOnlyStatementTypes.has(declaration.type)) return false;
+  if (declaration.type === 'ambient_declaration')
+    return declaration.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child));
   // tsc counts an import alias only when it is exported.
   if (declaration.type === 'import_alias') return statement.type === 'export_statement';
   const inner = declaration.type === 'expression_statement' ? declaration.namedChildren[0] : declaration;
