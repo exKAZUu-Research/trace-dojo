@@ -275,12 +275,15 @@ export class StatementChecker {
 
   /** `declare global` augments the globals only directly inside an external or ambient module. */
   private ambientDeclaration(node: TreeNode): void {
+    const validContainer = isValidAmbientDeclarationContainer(node);
     for (const child of named(node)) {
       if (child.type === 'statement_block') {
         if (!isDirectGlobalAugmentationContainer(node, this.c.isModule))
           this.c.error(node, globalAugmentationPlacementMessage(node));
         else this.checkAmbientBodyStatements(child);
       } else if (isCheckedAmbientDeclaration(child)) {
+        if (!validContainer && !isModuleOrNamespaceDeclaration(child))
+          this.c.error(node, 'ここで修飾子を使用することはできません。');
         this.check(child);
       }
     }
@@ -1219,6 +1222,21 @@ export function globalAugmentationPlacementMessage(node: TreeNode): string {
   return node.parent?.type === 'program' || owner?.type === 'internal_module' || owner?.type === 'module'
     ? 'グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。'
     : 'アンビエント モジュール宣言は、ファイルの最上位にのみ使用できます。';
+}
+
+function isValidAmbientDeclarationContainer(node: TreeNode): boolean {
+  const container = node.parent?.type === 'export_statement' ? node.parent.parent : node.parent;
+  return (
+    container?.type === 'program' ||
+    isNamespaceBody(container) ||
+    isAmbientModuleBody(container) ||
+    (container?.type === 'statement_block' && isAmbient(container))
+  );
+}
+
+function isModuleOrNamespaceDeclaration(node: TreeNode): boolean {
+  const inner = node.type === 'expression_statement' ? named(node)[0] : node;
+  return inner?.type === 'internal_module' || inner?.type === 'module';
 }
 
 /**
