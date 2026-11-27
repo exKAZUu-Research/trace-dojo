@@ -100,7 +100,11 @@ function projectionType(solver: TraitSolver, type: Type & { kind: 'adt' }): Type
   const self = normalize(shallow(type.args[0]));
   const traitArgs = type.args.slice(1, 1 + trait.params.length);
   const assocArgs = type.args.slice(1 + trait.params.length);
-  if (self.kind === 'var') return undefined;
+  if (self.kind === 'var') {
+    // An untyped number on the left of an operator trait's method (`Add::add(2, x)`) still has std's impls.
+    const operator = name === 'Output' && self.v.literal && OPERATOR_OUTPUTS.has(trait.builtin as string);
+    return operator ? operatorOutput(trait.builtin as string, self, traitArgs) : undefined;
+  }
   const bounds = boundsOf(self);
   if (bounds) return boundAssocType(bounds, self, trait, name);
   if (name === 'Item' && (trait.builtin === 'Iterator' || trait.builtin === 'IntoIterator')) {
@@ -168,15 +172,24 @@ function operatorOutput(builtin: string, self: Type, args: Type[]): Type | undef
   // An untyped number on the left takes the type of the number on the right (`Add::add(2, x)`), but a shift does not.
   const right = args[0] && primitiveOperand(args[0]);
   if (right && untypedNumber(self, right) && builtin !== 'Shl' && builtin !== 'Shr') return right;
+  // Two untyped numbers of one kind (`Add::add(4, 1)`) give one of that kind, which falls back as they do.
+  const lhs = normalize(shallow(self));
+  if (lhs.kind === 'var' && lhs.v.literal && args[0] && literalKind(args[0]) === lhs.v.literal) return lhs;
   if (builtin === 'Add' && self.kind === 'adt' && self.def.builtin === 'String') return self;
   return undefined;
 }
 
 /** Whether an operand is a number literal whose type is not known yet, of the kind of the number on the left. */
 function untypedNumber(type: Type, left: Type): boolean {
+  const literal = literalKind(type);
+  return literal !== undefined && literal === left.kind;
+}
+
+/** The kind of number literal a type not known yet is (through references), if it is one. */
+function literalKind(type: Type): 'int' | 'float' | undefined {
   const t = normalize(shallow(type));
-  if (t.kind === 'ref') return untypedNumber(t.target, left);
-  return t.kind === 'var' && t.v.literal !== undefined && t.v.literal === left.kind;
+  if (t.kind === 'ref') return literalKind(t.target);
+  return t.kind === 'var' ? t.v.literal : undefined;
 }
 
 function primitiveOperand(type: Type | undefined): Type | undefined {
