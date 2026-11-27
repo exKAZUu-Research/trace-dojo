@@ -181,6 +181,7 @@ function shorthandPropertyView(node: TreeNode, binder: Binder): ViewNode {
 }
 
 function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode | undefined {
+  if (node.parent?.childForFieldName('name')?.id === node.id) return undefined;
   const symbol = binder.lookupValue(node, nameOf(node));
   const namespace = namespaceOfReference(node, symbol);
   if (namespace) return memberReference(node, namespace, nameOf(node));
@@ -196,9 +197,11 @@ function rewrittenIdentifierReference(node: TreeNode, binder: Binder): ViewNode 
  */
 function namespaceOfReference(node: TreeNode, symbol: Sym | undefined): string | undefined {
   if (!symbol?.exportedFrom) return undefined;
-  const isProperty =
-    exportedVariableKinds.has(symbol.valueKind ?? '') ||
-    namespaceBodyOf(node)?.id !== namespaceBodyOf(symbol.valueDeclaration)?.id;
+  const currentBodyId = namespaceBodyOf(node)?.id;
+  const hasLocalBinding = symbol.valueDeclarations.some(
+    (declaration) => currentBodyId === namespaceBodyOf(declaration)?.id
+  );
+  const isProperty = exportedVariableKinds.has(symbol.valueKind ?? '') || !hasLocalBinding;
   return isProperty ? symbol.exportedFrom.name : undefined;
 }
 
@@ -518,10 +521,26 @@ function exportStatements(declaration: TreeNode, namespaceName: string, binder: 
     return exportedVariables(declaration, namespaceName, binder);
   const name =
     declaration.type === 'import_alias' ? declaration.namedChildren[0] : declaration.childForFieldName('name');
-  const statements = [view(declaration, binder)];
+  const exportedName = name ? nameOf(name) : undefined;
+  const statements: ViewNode[] = [];
+  if (declaration.type === 'enum_declaration' && exportedName) {
+    statements.push(
+      unstepped(
+        varDeclaration(
+          declaration,
+          exportedName,
+          orEmptyObject(declaration, `${namespaceName}.${exportedName}`, () =>
+            memberReference(declaration, namespaceName, exportedName)
+          )
+        )
+      )
+    );
+  }
+  const viewed = view(declaration, binder);
+  statements.push(viewed);
   // An import alias of a type only declares no value, so there is nothing to export.
-  if (name && statements[0].type !== 'empty_statement')
-    statements.push(unstepped(exportAssignment(declaration, namespaceName, nameOf(name))));
+  if (exportedName && viewed.type !== 'empty_statement')
+    statements.push(unstepped(exportAssignment(declaration, namespaceName, exportedName)));
   return statements;
 }
 

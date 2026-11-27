@@ -218,9 +218,10 @@ export class Binder {
     let outer = scope;
     let namespace: Sym | undefined;
     for (const part of namespacePath(name)) {
-      // `namespace A.B` declared again adds to the `B` that an earlier declaration's `A` exports.
+      // `namespace A.B` declared again adds to the `B` (or class/function/enum `B`) that an earlier `A` exports.
       const exported = outer.namespace?.namespaceExports?.values.get(part.text);
-      if (exported?.valueKind === 'namespace' && !outer.values.has(part.text)) outer.values.set(part.text, exported);
+      if (exported && (outer !== scope || isAmbient || isExportedNamespaceRoot(node)) && !outer.values.has(part.text))
+        outer.values.set(part.text, exported);
       namespace = outer.declareValue(part.text, 'namespace', node, part);
       // The path's first name is exported only by an `export` or an ambient body, which `exportDeclared` handles.
       if (outer !== scope) this.exportFrom(outer, namespace, 'value');
@@ -576,6 +577,12 @@ function namespacePath(name: TreeNode): TreeNode[] {
   const object = name.childForFieldName('object');
   const property = name.childForFieldName('property');
   return [...(object ? namespacePath(object) : []), ...(property ? [property] : [])];
+}
+
+function isExportedNamespaceRoot(node: TreeNode): boolean {
+  const outer =
+    node.parent?.type === 'expression_statement' || node.parent?.type === 'ambient_declaration' ? node.parent : node;
+  return outer.parent?.type === 'export_statement';
 }
 
 /**

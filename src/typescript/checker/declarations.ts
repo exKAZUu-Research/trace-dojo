@@ -11,15 +11,27 @@ import { isAnyLike, isIntrinsic, type Property, type Type, undefinedType, unionO
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
 export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
   checkBuiltinUndefinedDeclaration(c);
+  for (const symbol of uniqueSymbols(scopes, (scope) => scope.values.values())) {
+    if (symbol.valueEntries.some((entry) => !c.isLibrary(entry.name))) checkValueDuplicates(c, symbol);
+  }
+  for (const symbol of uniqueSymbols(scopes, (scope) => scope.types.values())) {
+    if (!symbol.typeEntries.some((entry) => !c.isLibrary(entry.name))) continue;
+    checkTypeDuplicates(c, symbol);
+    checkReservedTypeName(c, symbol);
+  }
+}
+
+function uniqueSymbols(scopes: Scope[], select: (scope: Scope) => Iterable<Sym>): Sym[] {
+  const seen = new Set<number>();
+  const symbols: Sym[] = [];
   for (const scope of scopes) {
-    for (const symbol of scope.values.values())
-      if (symbol.valueEntries.some((entry) => !c.isLibrary(entry.name))) checkValueDuplicates(c, symbol);
-    for (const symbol of scope.types.values()) {
-      if (!symbol.typeEntries.some((entry) => !c.isLibrary(entry.name))) continue;
-      checkTypeDuplicates(c, symbol);
-      checkReservedTypeName(c, symbol);
+    for (const symbol of select(scope)) {
+      if (seen.has(symbol.id)) continue;
+      seen.add(symbol.id);
+      symbols.push(symbol);
     }
   }
+  return symbols;
 }
 
 function checkBuiltinUndefinedDeclaration(c: Checker): void {

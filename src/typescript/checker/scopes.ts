@@ -125,7 +125,7 @@ export class Scope {
       this.augmentedNames.add(name);
       return this.augments.declareValue(name, kind, declaration, nameNode);
     }
-    let symbol = this.values.get(name);
+    let symbol = this.values.get(name) ?? this.exportedNamespaceSymbol(name, declaration, 'value');
     if (!symbol) {
       symbol = new Sym(name, this);
       this.values.set(name, symbol);
@@ -143,7 +143,7 @@ export class Scope {
       this.augmentedNames.add(name);
       return this.augments.declareType(name, kind, declaration, nameNode);
     }
-    let symbol = this.types.get(name) ?? this.exportedInterface(name, kind, declaration);
+    let symbol = this.types.get(name) ?? this.exportedNamespaceSymbol(name, declaration, 'type');
     if (!symbol) {
       // A class or an enum is a value and a type of the same name.
       symbol =
@@ -158,14 +158,21 @@ export class Scope {
     return symbol;
   }
 
-  /** The interface another body of this namespace exports, which an interface of the name in this body merges into. */
-  private exportedInterface(name: string, kind: TypeKind, declaration: TreeNode): Sym | undefined {
-    // A local interface of the name stays apart from the exported one, as in tsc.
-    const statement = declaration.parent?.type === 'ambient_declaration' ? declaration.parent : declaration;
-    const isExported = this.isAmbient || statement.parent?.type === 'export_statement';
-    const exported = kind === 'interface' && isExported ? this.namespace?.namespaceExports?.types.get(name) : undefined;
-    if (exported?.typeKind !== 'interface') return undefined;
-    this.types.set(name, exported);
+  /** The symbol another body of this namespace already exported under `name`, when `declaration` is exported too. */
+  private exportedNamespaceSymbol(name: string, declaration: TreeNode, meaning: 'value' | 'type'): Sym | undefined {
+    if (!this.namespace || !isExportedFromNamespace(this.isAmbient, declaration)) return undefined;
+    const exports = this.namespace.namespaceExports;
+    const exported = meaning === 'value' ? exports?.values.get(name) : exports?.types.get(name);
+    if (!exported) return undefined;
+    (meaning === 'value' ? this.values : this.types).set(name, exported);
     return exported;
   }
+}
+
+function isExportedFromNamespace(isAmbientScope: boolean, declaration: TreeNode): boolean {
+  if (isAmbientScope) return true;
+  let current: TreeNode | null = declaration;
+  if (current.type === 'variable_declarator') current = current.parent;
+  if (current?.type === 'expression_statement' || current?.type === 'ambient_declaration') current = current.parent;
+  return current?.parent?.type === 'export_statement';
 }

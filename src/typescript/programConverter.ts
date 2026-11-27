@@ -113,6 +113,21 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     if (!isBlockScoped) this.declareVariable(nameNode, name, 'var');
     else if (isFirstInBlock) this.declareVariable(nameNode, name, 'let');
     const enumObject = (): Expression => ({ kind: 'identifier', name, row });
+    const folded = currentScope ? this.foldedMapFor(currentScope, name) : new Map<string, FoldedValue>();
+    const assignments = this.enumMemberAssignments(node, name, folded, row);
+    const created: Expression = {
+      kind: 'assign',
+      operator: '=',
+      target: { kind: 'identifier', name, row },
+      value: { kind: 'logical', operator: '||', left: enumObject(), right: { kind: 'object', members: [], row }, row },
+      row,
+    };
+    const init: Expression = { kind: 'sequence', expressions: [created, ...assignments, enumObject()], row };
+    return enumStatementOf(name, init, this.stepRowOf(node), row, isBlockScoped, isFirstInBlock);
+  }
+
+  private enumMemberAssignments(node: Node, name: string, folded: Map<string, FoldedValue>, row: number): Expression[] {
+    const enumObject = (): Expression => ({ kind: 'identifier', name, row });
     const memberOf = (key: Expression): MemberExpression => ({
       kind: 'member',
       object: enumObject(),
@@ -121,10 +136,9 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       row,
     });
     const text = (value: string): Expression => ({ kind: 'literal', value, row });
-    const assignments: Expression[] = [];
-    const folded = currentScope ? this.foldedMapFor(currentScope, name) : new Map<string, FoldedValue>();
     const enumsInScope: EnumsInScope = (enumName) =>
       enumName === name ? folded : this.lookupFoldedEnum(node, enumName);
+    const assignments: Expression[] = [];
     let previous: FoldedValue;
     let isFirst = true;
     for (const member of node.childForFieldName('body')?.namedChildren ?? []) {
@@ -149,15 +163,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       previous = known;
       isFirst = false;
     }
-    const created: Expression = {
-      kind: 'assign',
-      operator: '=',
-      target: { kind: 'identifier', name, row },
-      value: { kind: 'logical', operator: '||', left: enumObject(), right: { kind: 'object', members: [], row }, row },
-      row,
-    };
-    const init: Expression = { kind: 'sequence', expressions: [created, ...assignments, enumObject()], row };
-    return enumStatementOf(name, init, this.stepRowOf(node), row, isBlockScoped, isFirstInBlock);
+    return assignments;
   }
 
   private isFirstEnumInScope(scope: Node, name: string, node: Node): boolean {
@@ -183,7 +189,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     this.recordOwnScopeBindings(node, fnScope);
     for (const child of node.namedChildren) {
       this.recordScopeDeclaration(child, blockScope, fnScope);
-      const next = childScopesOf(child, blockScope, fnScope);
+      const next = childScopesOf(node, child, blockScope, fnScope);
       if (next.block !== blockScope && !this.scopeParent.has(next.block)) this.scopeParent.set(next.block, blockScope);
       this.indexEnumScopes(child, next.block, next.fn);
     }
@@ -372,8 +378,14 @@ function enumMemberName(member: Node): string {
   return name.type === 'string' ? decodeStringLiteral(name.text) : nameOf(name);
 }
 
-function childScopesOf(child: Node, blockScope: Node, fnScope: Node): { block: Node; fn: Node } {
+function childScopesOf(parent: Node, child: Node, blockScope: Node, fnScope: Node): { block: Node; fn: Node } {
   if (functionScopeTypes.has(child.type)) return { block: child, fn: child };
+  if (
+    child.type === 'statement_block' &&
+    functionScopeTypes.has(parent.type) &&
+    parent.childForFieldName('body') === child
+  )
+    return { block: fnScope, fn: fnScope };
   if (blockScopeTypes.has(child.type)) return { block: child, fn: fnScope };
   return { block: blockScope, fn: fnScope };
 }
