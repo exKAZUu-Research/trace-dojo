@@ -1501,7 +1501,7 @@ function literalTargetRelated(s: Type, t: LiteralType, relation: Relation): bool
  */
 export function enumDeclarationsRelated(source: EnumMemberInfo, target: EnumMemberInfo): boolean {
   if (source.enumId === target.enumId) return true;
-  if (source.enumName !== target.enumName) return false;
+  if (source.isConst || target.isConst || source.enumName !== target.enumName) return false;
   const [sourceMembers, targetMembers] = [source.members(), target.members()];
   for (const [name, member] of sourceMembers) {
     const other = targetMembers.get(name);

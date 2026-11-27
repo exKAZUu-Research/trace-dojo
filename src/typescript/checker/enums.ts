@@ -170,12 +170,14 @@ export class Enums {
     const summary = new Map(
       [...members].map(([name, member]) => [name, { value: member.value, computed: member.value === undefined }])
     );
+    const isConst = isConstEnum(symbol);
     const types = [...members.values()].map((member) => {
       member.type = enumLiteralType(member.value, {
         enumId: symbol.id,
         enumName: symbol.name,
         name: member.name,
         computed: member.value === undefined,
+        isConst,
         members: () => summary,
         base: () => info.type,
       });
