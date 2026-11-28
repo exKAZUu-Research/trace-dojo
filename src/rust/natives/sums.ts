@@ -4,7 +4,7 @@ import { wrap } from '../ops';
 import { shallow, type Type } from '../types';
 import { DONE, DurationValue, type IterValue, MAX_DURATION, type Value } from '../values';
 import { foldingView, nextOf, sumOfOutcomes } from './iterators';
-import { deref, libraryPanic, type NativeContext } from './support';
+import { deref, libraryPanic, type NativeContext, unsupportedAtRun } from './support';
 
 /** `Iterator::sum` or `product` of numbers, `Duration`s, or `Result`s and `Option`s of them. */
 export function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' | '*'): Value {
@@ -39,10 +39,10 @@ function stepOf(ctx: NativeContext, t: Type, op: '+' | '*'): (total: Value, item
   return (total, item) => intStep(ctx, t, op, total as bigint, deref(item) as bigint);
 }
 
-/** One step of a sum of `Duration`s, which panics inside std's `Sum` impl past the longest `Duration`. */
+/** One step of a sum of `Duration`s; one past the longest `Duration`, where std panics inside its `Sum` impl, is unsupported. */
 function durationStep(ctx: NativeContext, total: Value, item: Value): DurationValue {
   const sum = (total as DurationValue).nanos + (deref(item) as DurationValue).nanos;
-  if (sum > MAX_DURATION) libraryPanic(ctx, 'overflow in iter::sum over durations', 'core/src/time.rs:1379:9');
+  if (sum > MAX_DURATION) unsupportedAtRun(ctx, 'Duration の範囲を超える計算');
   return new DurationValue(sum);
 }
 

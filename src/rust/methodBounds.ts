@@ -1,7 +1,8 @@
+import { normalize } from './infer';
 import type { Program } from './items';
 import { arrayAsSlice, autoderefSteps } from './methods';
 import type { TraitSolver } from './traits';
-import { type ImplDef, resolve, substituteTraitRef, type TraitRef, type Type } from './types';
+import { type ImplDef, resolve, shallow, substituteTraitRef, type TraitRef, type Type } from './types';
 
 /**
  * The bound that an inherent impl declaring a method fails for a receiver (`Vec<T>::sort` of a `T` without `Ord`), to
@@ -43,8 +44,11 @@ function failedImplBound(
       for (const bound of param.bounds) {
         const ref = substituteTraitRef(bound, subst);
         if (solver.implements(type, ref) !== 'no') continue;
-        // A std impl for one kind of number (`impl<N: Integer> N`) is not a method of another kind (`2.0f64.pow(2)`).
-        if (NUMBER_KINDS.has(bound.trait.name) && (impl.module as { isStd?: boolean }).isStd) return 'otherNumber';
+        // A std impl for one kind of number (`impl<N: Integer> N`) is not a method of another kind (`2.0f64.pow(2)`),
+        // nor of a type that is no number.
+        if (NUMBER_KINDS.has(bound.trait.name) && (impl.module as { isStd?: boolean }).isStd) {
+          return ['int', 'float'].includes(normalize(shallow(type)).kind) ? 'otherNumber' : undefined;
+        }
         return { type: resolve(type), ref: { ...ref, args: ref.args.map((arg) => resolve(arg)) } };
       }
     }

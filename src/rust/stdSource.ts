@@ -1673,13 +1673,6 @@ pub mod time {
         pub fn as_secs_f64(&self) -> f64;
         pub const fn subsec_millis(&self) -> u32;
         pub const fn subsec_nanos(&self) -> u32;
-        pub fn checked_add(self, rhs: Duration) -> Option<Duration>;
-        pub fn checked_sub(self, rhs: Duration) -> Option<Duration>;
-        pub fn checked_mul(self, rhs: u32) -> Option<Duration>;
-        pub fn checked_div(self, rhs: u32) -> Option<Duration>;
-        pub fn saturating_add(self, rhs: Duration) -> Duration;
-        pub fn saturating_sub(self, rhs: Duration) -> Duration;
-        pub fn saturating_mul(self, rhs: u32) -> Duration;
         pub fn abs_diff(self, other: Duration) -> Duration;
         pub fn mul_f64(self, rhs: f64) -> Duration;
     }

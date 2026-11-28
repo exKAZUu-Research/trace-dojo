@@ -17,7 +17,19 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { call, define, deref, err, libraryPanic, type NativeContext, none, ok, panic, placeOf, some } from './support';
+import {
+  call,
+  define,
+  deref,
+  err,
+  type NativeContext,
+  none,
+  ok,
+  panic,
+  placeOf,
+  some,
+  unsupportedAtRun,
+} from './support';
 
 /**
  * The threads of a run, which run one at a time by a fixed rule, since the interpreter runs one thread of JavaScript:
@@ -470,8 +482,7 @@ define({
   'Receiver<_>::try_iter': ([receiver], ctx) => receiverIter(ctx, receiver, false),
   'Duration::new': ([secs, nanos], ctx) => {
     const total = (secs as bigint) * NANOS + (nanos as bigint);
-    if (total > MAX_DURATION) libraryPanic(ctx, 'overflow in Duration::new', 'core/src/time.rs:201:18');
-    return new DurationValue(total);
+    return bounded(ctx, total);
   },
   'Duration::from_secs': ([secs]) => new DurationValue((secs as bigint) * NANOS),
   'Duration::from_millis': ([millis]) => new DurationValue((millis as bigint) * 1_000_000n),
@@ -485,72 +496,41 @@ define({
   'Duration::as_secs_f64': ([d]) => Number(duration(d)) / 1e9,
   'Duration::subsec_millis': ([d]) => (duration(d) % NANOS) / 1_000_000n,
   'Duration::subsec_nanos': ([d]) => duration(d) % NANOS,
-  'Duration::checked_add': ([a, b], ctx) => {
-    const sum = duration(a) + duration(b);
-    return sum > MAX_DURATION ? none(ctx) : some(ctx, new DurationValue(sum));
-  },
-  'Duration::checked_sub': ([a, b], ctx) =>
-    duration(a) >= duration(b) ? some(ctx, new DurationValue(duration(a) - duration(b))) : none(ctx),
   'Duration::mul_f64': ([d, factor], ctx) => fromSecsF64(ctx, (Number(duration(d)) / 1e9) * (factor as number)),
   'const:ZERO': () => new DurationValue(0n),
-  'Duration::checked_mul': ([d, factor], ctx) => {
-    const product = duration(d) * (factor as bigint);
-    return product > MAX_DURATION ? none(ctx) : some(ctx, new DurationValue(product));
-  },
-  'Duration::checked_div': ([d, divisor], ctx) =>
-    divisor === 0n ? none(ctx) : some(ctx, new DurationValue(duration(d) / (divisor as bigint))),
-  'Duration::saturating_add': ([a, b]) => new DurationValue(min(duration(a) + duration(b), MAX_DURATION)),
-  'Duration::saturating_sub': ([a, b]) => new DurationValue(duration(a) > duration(b) ? duration(a) - duration(b) : 0n),
-  'Duration::saturating_mul': ([d, factor]) => new DurationValue(min(duration(d) * (factor as bigint), MAX_DURATION)),
   'Duration::abs_diff': ([a, b]) => {
     const difference = duration(a) - duration(b);
     return new DurationValue(difference < 0n ? -difference : difference);
   },
-  'Duration::add': ([a, b], ctx) => bounded(ctx, duration(a) + duration(b), 'overflow when adding durations'),
-  'Duration::sub': ([a, b], ctx) => {
-    if (duration(a) < duration(b)) libraryPanic(ctx, 'overflow when subtracting durations', 'core/src/time.rs:1277:31');
-    return new DurationValue(duration(a) - duration(b));
-  },
-  'Duration::mul': ([d, factor], ctx) => bounded(ctx, duration(d) * (factor as bigint), MUL_OVERFLOW),
+  'Duration::add': ([a, b], ctx) => bounded(ctx, duration(a) + duration(b)),
+  'Duration::sub': ([a, b], ctx) => bounded(ctx, duration(a) - duration(b)),
+  'Duration::mul': ([d, factor], ctx) => bounded(ctx, duration(d) * (factor as bigint)),
   'Duration::div': ([d, divisor], ctx) => divided(ctx, d, divisor),
   // `u32 * Duration`, the one operator impl std gives `u32` with a right operand that is not a number.
-  'u32::mul': ([factor, d], ctx) => bounded(ctx, (factor as bigint) * duration(d), MUL_OVERFLOW),
-  'Duration::add_assign': ([d, other], ctx) =>
-    assigned(d, bounded(ctx, duration(d) + duration(other), 'overflow when adding durations')),
-  'Duration::sub_assign': ([d, other], ctx) => {
-    if (duration(d) < duration(other))
-      libraryPanic(ctx, 'overflow when subtracting durations', 'core/src/time.rs:1277:31');
-    return assigned(d, new DurationValue(duration(d) - duration(other)));
-  },
-  'Duration::mul_assign': ([d, factor], ctx) =>
-    assigned(d, bounded(ctx, duration(d) * (factor as bigint), MUL_OVERFLOW)),
+  'u32::mul': ([factor, d], ctx) => bounded(ctx, (factor as bigint) * duration(d)),
+  'Duration::add_assign': ([d, other], ctx) => assigned(d, bounded(ctx, duration(d) + duration(other))),
+  'Duration::sub_assign': ([d, other], ctx) => assigned(d, bounded(ctx, duration(d) - duration(other))),
+  'Duration::mul_assign': ([d, factor], ctx) => assigned(d, bounded(ctx, duration(d) * (factor as bigint))),
   'Duration::div_assign': ([d, divisor], ctx) => assigned(d, divided(ctx, d, divisor)),
 });
 
-function min(a: bigint, b: bigint): bigint {
-  return a < b ? a : b;
-}
-
-const MUL_OVERFLOW = 'overflow when multiplying duration by scalar';
-
-/** `Duration::from_secs_f64`, which panics where std does for a negative, a too large, or a NaN number of seconds. */
+/** `Duration::from_secs_f64` of seconds that a `Duration` holds; a negative, too large or NaN number is unsupported. */
 function fromSecsF64(ctx: NativeContext, secs: number): DurationValue {
-  const location = 'core/src/time.rs:962:23';
-  if (secs < 0) libraryPanic(ctx, 'cannot convert float seconds to Duration: value is negative', location);
-  if (!(secs < 2 ** 64))
-    libraryPanic(ctx, 'cannot convert float seconds to Duration: value is either too big or NaN', location);
+  if (!(secs >= 0 && secs < 2 ** 64)) unsupportedAtRun(ctx, '負の秒数、大きすぎる秒数、NaN から Duration を作ること');
   return new DurationValue(BigInt(Math.round(secs * 1e9)));
 }
 
-/** A `Duration` of `nanos`, panicking as std does when it is longer than the longest one. */
-function bounded(ctx: NativeContext, nanos: bigint, message: string): DurationValue {
-  if (nanos > MAX_DURATION)
-    libraryPanic(ctx, message, message === MUL_OVERFLOW ? 'core/src/time.rs:1297:31' : 'core/src/time.rs:1257:31');
+/**
+ * A `Duration` of `nanos`. One out of its range (an overflow or a negative result), where std panics inside its
+ * library, is unsupported here, as is dividing by zero.
+ */
+function bounded(ctx: NativeContext, nanos: bigint): DurationValue {
+  if (nanos < 0n || nanos > MAX_DURATION) unsupportedAtRun(ctx, 'Duration の範囲を超える計算');
   return new DurationValue(nanos);
 }
 
 function divided(ctx: NativeContext, d: Value, divisor: Value): DurationValue {
-  if (divisor === 0n) panic(ctx, 'divide by zero error when dividing duration by scalar');
+  if (divisor === 0n) unsupportedAtRun(ctx, 'Duration の 0 での割り算');
   return new DurationValue(duration(d) / (divisor as bigint));
 }
 
