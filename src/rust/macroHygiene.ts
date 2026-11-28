@@ -156,20 +156,20 @@ function addPatternBinders(tokens: Token[], binders: Set<string>): void {
   }
 }
 
-/** The macros whose first string literal (after the target, for `write!`) is a format string. */
-const FORMAT_MACROS = new Set([
-  'format',
-  'print',
-  'println',
-  'eprint',
-  'eprintln',
-  'write',
-  'writeln',
-  'panic',
-  'assert',
-  'assert_eq',
-  'assert_ne',
-  'format_args',
+/** The macros with a format string, by the argument it is: after `write!`'s target and `assert!`'s condition. */
+const FORMAT_MACROS = new Map([
+  ['format', 0],
+  ['print', 0],
+  ['println', 0],
+  ['eprint', 0],
+  ['eprintln', 0],
+  ['panic', 0],
+  ['format_args', 0],
+  ['write', 1],
+  ['writeln', 1],
+  ['assert', 1],
+  ['assert_eq', 2],
+  ['assert_ne', 2],
 ]);
 
 /**
@@ -177,32 +177,51 @@ const FORMAT_MACROS = new Set([
  * macros, not as a struct expression's field name (whose shorthand `S { x }` becomes `S { x: x__2 }`), and in a
  * string literal only where it is a format string, whose inline arguments (`{x}`) name variables.
  */
-// code-gauge-allow functionCognitiveComplexity -- One walk renames groups, leaves, and format strings in source order.
 function renamed(tokens: Token[], outer: Visible, suffix: string, context?: GroupContext): Token[] {
   const visible = new Map(outer);
   const { bindings, matchBodies } = bindingsIn(tokens);
   if (context === 'match') bindings.push(...armBindings(tokens));
-  // Only a format macro's first string literal is its format string.
-  let formatString = context === 'format';
+  const isFormatString = formatStringFinder(typeof context === 'number' ? context : -1);
   const out: Token[] = [];
   for (const [index, token] of tokens.entries()) {
-    for (const { names, from, to } of bindings) {
-      if (from === index) for (const name of names) visible.set(name, (visible.get(name) ?? 0) + 1);
-      if (to === index) for (const name of names) visible.set(name, (visible.get(name) ?? 0) - 1);
-    }
+    enterScopes(bindings, index, visible);
+    const formatString = isFormatString(token);
     if (token.kind === 'group') {
       const inner = matchBodies.has(index) ? 'match' : groupContext(tokens, index);
       out.push({ ...token, tokens: renamed(token.tokens, visible, suffix, inner) });
     } else if (!token.fromRule) out.push(token);
-    else if (isStringLiteral(token.type)) {
-      out.push(formatString ? { ...token, text: renamedFormat(token.text, visible, suffix) } : token);
-      formatString = false;
-    } else out.push(...renamedLeaf(tokens, index, visible, suffix, context === 'struct'));
+    else if (formatString) out.push({ ...token, text: renamedFormat(token.text, visible, suffix) });
+    else if (isStringLiteral(token.type)) out.push(token);
+    else out.push(...renamedLeaf(tokens, index, visible, suffix, context === 'struct'));
   }
   return out;
 }
 
-type GroupContext = 'struct' | 'format' | 'match';
+/** Shows the names whose scopes begin at a token of a list, and hides those whose scopes end there. */
+function enterScopes(bindings: Binding[], index: number, visible: Visible): void {
+  for (const { names, from, to } of bindings) {
+    if (from === index) for (const name of names) visible.set(name, (visible.get(name) ?? 0) + 1);
+    if (to === index) for (const name of names) visible.set(name, (visible.get(name) ?? 0) - 1);
+  }
+}
+
+/**
+ * Tells, token by token, the format string of a format macro's arguments: the first string literal of the argument at
+ * `position` (after `write!`'s target and `assert!`'s condition), or none for a position of -1.
+ */
+function formatStringFinder(position: number): (token: Token) => boolean {
+  let argument = 0;
+  let found = false;
+  return (token) => {
+    if (token.kind === 'leaf' && token.text === ',') argument++;
+    const formatString = !found && argument === position && token.kind === 'leaf' && isStringLiteral(token.type);
+    if (formatString) found = true;
+    return formatString;
+  };
+}
+
+/** What a group is: a struct's fields, a `match`'s arms, or a format macro's arguments, by its format string's place. */
+type GroupContext = 'struct' | 'match' | number;
 
 /** A format string with its inline arguments (`{t}`, `{t:>3}`) renamed where they name the rule's variables. */
 function renamedFormat(text: string, visible: Visible, suffix: string): string {
@@ -234,7 +253,7 @@ function groupContext(tokens: Token[], index: number): GroupContext | undefined 
   const before = leafText(tokens[index - 1]);
   const name = leafText(tokens[before === '>' ? turbofishStart(tokens, index - 1) - 1 : index - 1]);
   if (group.open === '{' && name !== undefined && /^[\p{Lu}]/u.test(name)) return 'struct';
-  if (before === '!' && FORMAT_MACROS.has(leafText(tokens[index - 2]) ?? '')) return 'format';
+  if (before === '!') return FORMAT_MACROS.get(leafText(tokens[index - 2]) ?? '');
   return undefined;
 }
 
