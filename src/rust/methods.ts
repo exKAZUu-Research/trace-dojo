@@ -12,7 +12,6 @@ import {
   type ImplDef,
   isBuiltin,
   ref,
-  resolve,
   type SelfWrapper,
   shallow,
   substitute,
@@ -50,6 +49,8 @@ export function autoderefSteps(program: Program, type: Type): DerefStep[] {
 export function derefOnce(program: Program, type: Type): { type: Type; kind: DerefKind } | undefined {
   const t = shallow(type);
   if (t.kind === 'ref') return { type: t.target, kind: t.mutable ? 'mutRef' : 'ref' };
+  // A type parameter derefs through its `Deref` bound (`T: Deref<Target = String>`).
+  if (t.kind === 'param') return userDeref(program, t);
   if (t.kind !== 'adt') return undefined;
   switch (t.def.builtin) {
     case 'Box': {
@@ -381,46 +382,6 @@ function ownParams(fn: FnDef): Type[] {
   return fn.params.slice(fn.parentParamCount).map(() => freshVar());
 }
 
-export function failedInherentBound(
-  program: Program,
-  solver: TraitSolver,
-  receiver: Type,
-  name: string
-): { type: Type; ref: TraitRef } | undefined {
-  for (const { type } of autoderefSteps(program, receiver)) {
-    for (const impl of program.impls) {
-      const fn = impl.methods.get(name);
-      if (impl.trait || !fn?.selfMode) continue;
-      const missing = failedImplBound(solver, impl, arrayAsSlice(fn, type));
-      if (missing) return missing;
-    }
-  }
-  return undefined;
-}
-
-function failedImplBound(
-  solver: TraitSolver,
-  impl: ImplDef,
-  receiver: Type
-): { type: Type; ref: TraitRef } | undefined {
-  const snapshot = solver.unifier.snapshot();
-  try {
-    const subst = solver.matchImplSelf(impl, receiver);
-    if (!subst) return undefined;
-    for (const param of impl.params) {
-      const type = subst.get(param)!;
-      for (const bound of param.bounds) {
-        const ref = substituteTraitRef(bound, subst);
-        if (solver.implements(type, ref) === 'no')
-          return { type: resolve(type), ref: { ...ref, args: ref.args.map((arg) => resolve(arg)) } };
-      }
-    }
-    return undefined;
-  } finally {
-    solver.unifier.rollback(snapshot);
-  }
-}
-
 function matchSelf(
   solver: TraitSolver,
   impl: ImplDef,
@@ -436,7 +397,7 @@ function matchSelf(
 }
 
 /** Standard declarations use slice stand-ins for arrays without const length parameters. */
-function arrayAsSlice(fn: FnDef, selfType: Type): Type {
+export function arrayAsSlice(fn: FnDef, selfType: Type): Type {
   if (fn.selfMode !== 'value' || !(fn.module as { isStd?: boolean }).isStd) return selfType;
   const t = normalize(shallow(selfType));
   const declared = fn.impl && normalize(shallow(fn.impl.selfType));

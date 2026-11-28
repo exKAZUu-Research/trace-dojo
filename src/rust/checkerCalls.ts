@@ -17,7 +17,8 @@ import { requireMutablePlace } from './checkerPlaces';
 import { normalize } from './infer';
 import type { Module, Program } from './items';
 import { compileError } from './items';
-import { autoderefSteps, boundsOf, failedInherentBound, lookupMethod } from './methods';
+import { failedInherentBound } from './methodBounds';
+import { autoderefSteps, boundsOf, lookupMethod } from './methods';
 import { reborrowsIterator } from './receiverReborrow';
 import { typeAfter } from './regions';
 import {
@@ -407,8 +408,9 @@ function noMethod(c: Checker, expr: Extract<Expr, { kind: 'methodCall' }>, recei
     );
   }
   const missing = failedInherentBound(c.program, c.solver, receiverType, expr.method);
-  if (missing) c.require(missing.type, missing.ref, expr.methodSpan);
   const t = typeToString(resolve(receiverType));
+  if (missing === 'otherNumber') compileError(expr.methodSpan, `${t} にメソッド ${expr.method} がありません。`);
+  if (missing) c.require(missing.type, missing.ref, expr.methodSpan);
   const fieldType = fieldTypeOf(c, receiverType, expr.method);
   if (fieldType) {
     compileError(
