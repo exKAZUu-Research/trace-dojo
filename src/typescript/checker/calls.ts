@@ -85,6 +85,7 @@ export class Calls {
   /** The signature each call resolved to, for the type predicates that narrow its arguments. */
   private readonly resolved = new Map<number, Signature>();
   private stringRawMutated: boolean | undefined;
+  private testingNonGenericOverload = false;
 
   private readonly arity: CallArity;
   private readonly typeArguments: CallTypeArguments;
@@ -772,7 +773,7 @@ export class Calls {
         continue;
       }
       viable.push(candidate);
-      if (this.tryOverloadCandidate(candidate, args, attempt)) {
+      if (this.tryOverloadCandidate(candidate, args, attempt, candidates.length > 1)) {
         return this.finishOverload(node, candidate, args, options, attempt);
       }
     }
@@ -785,19 +786,25 @@ export class Calls {
     return this.reportUnresolved(node, callee, viable.length > 0 ? viable : candidates, args, attempt);
   }
 
-  private tryOverloadCandidate(candidate: Signature, args: ExpressionListFlow, attempt: CallAttempt): boolean {
+  private tryOverloadCandidate(
+    candidate: Signature,
+    args: ExpressionListFlow,
+    attempt: CallAttempt,
+    overloaded: boolean
+  ): boolean {
     return this.c.functions.withoutCommittedCallInference(() => {
       const instantiated = this.c.silently(() => attempt.instantiate(candidate));
       if (!this.arity.instanceArityMatches(instantiated, candidate, args) || !attempt.checkThis(instantiated)) {
         return false;
       }
-      const verifyCandidate = (): boolean => {
+      const saved = this.testingNonGenericOverload;
+      this.testingNonGenericOverload = overloaded && candidate.typeParameters.length === 0;
+      try {
         attempt.previewCallbacks(instantiated);
         return this.c.flow.probe(() => this.c.silently(() => this.checkArguments(instantiated, args.nodes, false)));
-      };
-      return candidate.typeParameters.length > 0
-        ? this.c.functions.withoutLatentYieldPropagation(verifyCandidate)
-        : verifyCandidate();
+      } finally {
+        this.testingNonGenericOverload = saved;
+      }
     });
   }
 
@@ -815,13 +822,7 @@ export class Calls {
     const final = this.c.flow.probe(() =>
       this.instantiateFor(candidate, args, typeArguments, deferred ?? contextual, receiver)
     );
-    const runArgumentChecks = (): boolean =>
-      this.checkArguments(final, args.nodes, attempt.checkThis(final, true), node);
-    if (this.c.silent > 0 && candidate.typeParameters.length > 0) {
-      this.c.functions.withoutLatentYieldPropagation(runArgumentChecks);
-    } else {
-      runArgumentChecks();
-    }
+    this.checkArguments(final, args.nodes, attempt.checkThis(final, true), node);
     this.checkImmediateBody(node, final);
     return { signature: final, returnType: final.returnType() };
   }
@@ -1031,6 +1032,17 @@ export class Calls {
     reportMismatch: boolean
   ): boolean {
     if (!parameterType) return true;
+    const verify = (): boolean => this.verifyPassedArgument(arg, argType, parameterType, report, reportMismatch);
+    return this.testingNonGenericOverload ? verify() : this.c.functions.withoutLatentYieldPropagation(verify);
+  }
+
+  private verifyPassedArgument(
+    arg: TreeNode,
+    argType: Type,
+    parameterType: Type,
+    report: boolean,
+    reportMismatch: boolean
+  ): boolean {
     const writtenWithin = arg.type === 'spread_element' ? arg : undefined;
     if (this.c.relations.isAssignable(argType, parameterType))
       return this.c.expressions.checkExcessProperties(arg, argType, parameterType, { report, writtenWithin });
@@ -1061,9 +1073,14 @@ export class Calls {
       args.length === 1 && args[0].type === 'spread_element'
         ? mapType(this.c.expressions.check(named(args[0])[0]), (type) => this.spreadArgumentType(type, restType))
         : this.argumentTuple(args, contexts);
-    if (this.c.relations.isAssignable(tuple, restType)) return !at || this.restExcessFits(at, tuple, restType, report);
-    if (report && at) this.c.error(at, this.c.expressions.elaboration.typeRelationMessage(tuple, restType, 'argument'));
-    return false;
+    const verify = (): boolean => {
+      if (this.c.relations.isAssignable(tuple, restType))
+        return !at || this.restExcessFits(at, tuple, restType, report);
+      if (report && at)
+        this.c.error(at, this.c.expressions.elaboration.typeRelationMessage(tuple, restType, 'argument'));
+      return false;
+    };
+    return this.testingNonGenericOverload ? verify() : this.c.functions.withoutLatentYieldPropagation(verify);
   }
 
   private restExcessFits(node: TreeNode, source: Type, target: Type, report: boolean): boolean {

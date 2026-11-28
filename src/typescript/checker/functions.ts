@@ -364,7 +364,7 @@ export class FunctionChecker {
     if (!contextualSignature) return undefined;
     return this.c.silent === 0
       ? this.withCommittedCallInference(() => contextualSignature.returnType())
-      : contextualSignature.returnType();
+      : this.withoutLatentYieldPropagation(() => contextualSignature.returnType());
   }
 
   private inferAndCommitReturnType(

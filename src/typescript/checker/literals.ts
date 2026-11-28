@@ -1218,6 +1218,12 @@ export class LiteralChecker {
 
   /** The type the contextual type gives a property of an object literal. */
   contextualPropertyType(contextual: Type, name: string, key: Type = literalType(name)): Type | undefined {
+    return this.c.functions.withoutLatentYieldPropagation(() =>
+      this.resolveContextualPropertyType(contextual, name, key)
+    );
+  }
+
+  private resolveContextualPropertyType(contextual: Type, name: string, key: Type): Type | undefined {
     const members = (contextual.kind === 'union' ? contextual.types : [contextual]).filter(
       (member) => member.kind === 'object' || member.kind === 'intersection' || member.kind === 'typeParameter'
     );
