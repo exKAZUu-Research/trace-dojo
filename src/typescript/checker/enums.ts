@@ -129,6 +129,7 @@ export class Enums {
   private checkMember(member: TreeNode, symbol: Sym | undefined, info: EnumInfo | undefined): void {
     const value = member.childForFieldName('value');
     const type = value && this.c.expressions.check(value);
+    if (value && symbol && info) this.checkShiftSimplification(member, value, symbol, info);
     const name = memberNameOf(member);
     // An ambient enum's computed member is reported as not constant instead.
     const isComputed = name !== undefined && info?.members.get(name)?.value === undefined && !isAmbient(member);
@@ -140,6 +141,38 @@ export class Enums {
     if (symbol) this.checkMergedNamespaceClash(member, symbol);
     const nameNode = member.type === 'enum_assignment' ? member.childForFieldName('name') : member;
     if (nameNode && isNumericName(nameNode)) this.c.error(nameNode, 'enum のメンバーには数値の名前を付けられません。');
+  }
+
+  private checkShiftSimplification(member: TreeNode, value: TreeNode, symbol: Sym, info: EnumInfo): void {
+    const expression = skipParentheses(value);
+    if (expression.type !== 'binary_expression') return;
+    const operator = expression.childForFieldName('operator')?.text;
+    if (operator !== '<<' && operator !== '>>' && operator !== '>>>') return;
+    const left = expression.childForFieldName('left');
+    const right = expression.childForFieldName('right');
+    if (!left || !right) return;
+    const priorMembers = new Map<string, EnumMember>();
+    for (const [key, entry] of info.members) {
+      if (entry.node.startIndex >= member.startIndex) break;
+      priorMembers.set(key, entry);
+    }
+    const count = this.shiftCountValue(right, { symbol, members: priorMembers, errors: [] });
+    if (count === undefined || !(Math.abs(count) >= 32)) return;
+    const remainder = count % 32;
+    const simplified = Object.is(remainder, -0) ? 0 : remainder;
+    this.c.error(
+      expression,
+      `この操作は簡略化できます。このシフトは '${left.text} ${operator} ${simplified}' と同じです。`
+    );
+  }
+
+  private shiftCountValue(right: TreeNode, evaluation: Evaluation): number | undefined {
+    const evaluated = this.evaluate(right, evaluation);
+    if (typeof evaluated === 'number') return evaluated;
+    const rightType = this.c.silently(() => this.c.expressions.check(right));
+    return rightType.kind === 'literal' && typeof rightType.value === 'number' && !rightType.enumMember?.computed
+      ? rightType.value
+      : undefined;
   }
 
   /** Reports a member that a namespace merged with its enum also exports, at both declarations, as tsc does. */
@@ -340,6 +373,10 @@ export class Enums {
   private identifierConstantValue(name: TreeNode, evaluation: Evaluation): EnumValue | undefined {
     const symbol = this.unaliasedValue(this.c.scopeOf(name).lookupValue(name.text));
     if (symbol?.valueKind === 'enumMember') return this.resolvedEnumMemberValue(name, symbol, evaluation);
+    if (symbol?.valueDeclaration && this.c.isLibrary(symbol.valueDeclaration)) {
+      if (name.text === 'Infinity') return Number.POSITIVE_INFINITY;
+      if (name.text === 'NaN') return Number.NaN;
+    }
     return symbol ? this.constantSymbolValue(name, symbol, evaluation) : undefined;
   }
 
