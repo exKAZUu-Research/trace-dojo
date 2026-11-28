@@ -458,8 +458,11 @@ function transcribeRepetition(part: Part & { kind: 'rep' }, bindings: Map<string
   }
   const out: Token[] = [];
   for (let round = 0; round < counts[0]; round++) {
-    if (round > 0 && part.separator !== undefined)
-      out.push({ kind: 'leaf', text: part.separator, type: part.separator });
+    // rustc prints a space before a separator other than `,` and `;` (`1 || 2`, `1, 2`).
+    if (round > 0 && part.separator !== undefined) {
+      const spaced = part.separator !== ',' && part.separator !== ';';
+      out.push({ kind: 'leaf', text: part.separator, type: part.separator, spaced });
+    }
     const scope = new Map(bindings);
     for (const name of names) {
       for (const [inner, binding] of (bindings.get(name) as Binding & { kind: 'rep' }).rounds[round]) {
