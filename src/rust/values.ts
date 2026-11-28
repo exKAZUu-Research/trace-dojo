@@ -254,6 +254,8 @@ export class IterValue {
    */
   fork: (() => IterValue) | undefined;
   ownedItemType?: Type;
+  /** An adapter's own state, whose iterators (`chain`'s second, `zip`'s other) go when the adapter does. */
+  adapterState?: object;
   peekedType?: Type;
 }
 

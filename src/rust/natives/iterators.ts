@@ -245,15 +245,18 @@ function nthBack(ctx: NativeContext, iter: IterValue, n: bigint): Next {
   return iter.nthBack ? iter.nthBack(n) : nthItem(ctx, n, () => iter.nextBack!());
 }
 
+/** The `n`th element of an iterator, of the item type `ctx.typeArgs[0]`; those it passes go at once, as std's do. */
 function nth(ctx: NativeContext, iter: IterValue, n: bigint): Next {
   if (iter.nth && !iter.peeked?.length) return iter.nth(n);
-  return nthItem(ctx, n, () => nextOf(iter));
+  return nthItem(ctx, n, () => nextOf(iter), ctx.typeArgs[0]);
 }
 
-function nthItem(ctx: NativeContext, n: bigint, next: () => Next): Next {
+function nthItem(ctx: NativeContext, n: bigint, next: () => Next, itemType?: Type): Next {
   for (let index = 0n; index < n; index++) {
     ctx.runtime.spend();
-    if (next() === DONE) return DONE;
+    const item = next();
+    if (item === DONE) return DONE;
+    if (itemType) ctx.interp.dropper.drop(item, itemType);
   }
   return next();
 }
@@ -387,6 +390,14 @@ function adapter<S extends object>(
   // An adapter whose `fold` folds its source (`Map`, `Filter`, ...) takes its source's elements as it folds.
   if (folds && source.foldNext) iter.foldNext = parts(foldingView(source), state).next;
   iter.fork = () => adapter(cloneIterator(source), forkState(state), parts, forkState, folds);
+  iter.adapterState = state;
+  // The elements its source owns and has not given it yet go with the adapter (`into_iter().map(..)` dropped early).
+  if (source.rest && source.ownedItemType) {
+    const rest = source.rest;
+    // A `Peekable` drops its source before the element it peeked, as its fields stand.
+    iter.rest = () => [...rest(), ...(source.peeked ?? []).filter((item) => item !== DONE)];
+    iter.ownedItemType = source.ownedItemType;
+  }
   return iter;
 }
 
@@ -581,9 +592,12 @@ define({
   'IterImpl<_, _>::map': ([self, f], ctx) =>
     mapped(iterOf(self), (item, callback) => call(ctx, callback, [item]), new IteratorCallback(f, ctx.typeArgs[3])),
   'IterImpl<_, _>::filter': ([self, f], ctx) =>
-    picked(ctx, iterOf(self), new IteratorCallback(f, ctx.typeArgs[2]), (item, callback) =>
-      truthy(call(ctx, callback, [item])) ? item : DONE
-    ),
+    picked(ctx, iterOf(self), new IteratorCallback(f, ctx.typeArgs[2]), (item, callback) => {
+      if (truthy(call(ctx, callback, [item]))) return item;
+      // The element `filter` rejects goes at once.
+      ctx.interp.dropper.drop(item, ctx.typeArgs[0]);
+      return DONE;
+    }),
   'IterImpl<_, _>::filter_map': ([self, f], ctx) =>
     adapterDebug(
       ctx,
@@ -1181,8 +1195,13 @@ define({
       collectIterator(ctx, iter, target, item, intoIterShape(ctx.interp.program, from))
     );
   },
-  'IterImpl<_, _>::collect': ([self], ctx) =>
-    collectIterator(ctx, iterOf(self), ctx.typeArgs[2], ctx.typeArgs[0], ctx.typeArgs[1]),
+  'IterImpl<_, _>::collect': ([self], ctx) => {
+    const iter = iterOf(self);
+    const collected = collectIterator(ctx, iter, ctx.typeArgs[2], ctx.typeArgs[0], ctx.typeArgs[1]);
+    // `collect` takes the iterator, so what it has left (`take(1)`) goes when it returns.
+    ctx.interp.dropper.dropRest(iter);
+    return collected;
+  },
   'IterImpl<_, _>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '+'),
   'IterImpl<_, _>::product': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '*'),
   'IterImpl<_, _>::count': ([self], ctx) => {

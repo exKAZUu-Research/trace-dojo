@@ -13,7 +13,7 @@ import {
   EnumValue,
   FnValue,
   isPlace,
-  type IterValue,
+  IterValue,
   type MapValue,
   type SetValue,
   type SharedBox,
@@ -142,6 +142,7 @@ export class Dropper {
   /** Drops the elements an iterator that owns them has not yielded. */
   dropRest(iter: IterValue): void {
     if (iter.rest && iter.ownedItemType) for (const item of iter.rest()) this.drop(item, iter.ownedItemType);
+    for (const part of Object.values(iter.adapterState ?? {})) if (part instanceof IterValue) this.dropRest(part);
     iter.release();
   }
 
