@@ -468,8 +468,8 @@ test('a trace records a model program that reads standard input', () => {
 test.each([
   [
     'reads standard input',
-    String.raw`const fs = require('fs'); const [n, ...rest] = fs.readFileSync(0, 'utf8').trim().split('\n').map(Number); console.log(n, rest.reduce((a, b) => a + b, 0)); console.log(fs.readFileSync('/dev/stdin', 'utf8') === '');`,
-    { stdout: '2 30\ntrue\n', stderr: '', finalFiles: { 'in.txt': 'abc' } },
+    String.raw`const fs = require('fs'); const [n, ...rest] = fs.readFileSync(0, 'utf8').trim().split('\n').map(Number); console.log(n, rest.reduce((a, b) => a + b, 0)); console.log(fs.readFileSync('/dev/stdin', 'utf8') === '', fs.readFileSync('/dev/fd/0', 'utf8') === '');`,
+    { stdout: '2 30\ntrue true\n', stderr: '', finalFiles: { 'in.txt': 'abc' } },
   ],
   [
     'writes files',
@@ -540,5 +540,18 @@ test('standard output and standard error share one limit', () => {
   expect(executeProgram('javascript', "console.log('x'.repeat(60000)); console.error('y'.repeat(60000));")).toEqual({
     kind: 'limitExceeded',
     limit: 'output',
+  });
+});
+
+test('successive update and append writes preserve underlying UTF-8 bytes', () => {
+  const source = `const fs = require('fs');
+fs.writeFileSync('x', 'A', { flag: 'r+' });
+fs.appendFileSync('x', 'Z');
+fs.writeFileSync('x', 'é', { flag: 'rs+' });
+console.log(fs.readFileSync('x', 'utf8'));`;
+  expect(executeProgram('typescript', source, { files: { x: 'éX' } })).toMatchObject({
+    kind: 'executed',
+    stdout: 'éXZ\n',
+    finalFiles: { x: 'éXZ' },
   });
 });

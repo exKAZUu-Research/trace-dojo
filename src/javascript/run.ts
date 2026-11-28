@@ -7,7 +7,7 @@ import { inspect, uncaughtErrorHeadline } from './inspect';
 import { parseJavaScript } from './parse';
 import { Runtime } from './runtime';
 import { unavailableMemberCheck } from './unavailableMembers';
-import { JsObject, JsThrow, Scope } from './values';
+import { JsObject, JsThrow, ProgramExit, Scope } from './values';
 
 export function executeJavaScriptProgram(source: string, input?: ProgramInput): ProgramExecution {
   return executeParsedProgram(() => parseJavaScript(source), input);
@@ -42,9 +42,8 @@ export function executeParsedProgram(parse: () => Program, input?: ProgramInput)
 // code-gauge-allow duplicateLines -- Each language's runner wraps its own runtime and collects the same output contract.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: Scope) => void): ProgramRun {
   runtime.rejectsFunctionText = program.rejectsFunctionText ?? false;
-  runtime.allowsOnlyStringRawTag = program.allowsOnlyStringRawTag ?? false;
   if (program.rejectsUnavailableMembers) runtime.unavailableMember = unavailableMemberCheck(runtime);
-  const hasReceiver = program.hasCommonJsReceiver || !program.isStrict;
+  const hasReceiver = program.hasCommonJsReceiver ?? !program.isStrict;
   const scope = new Scope(runtime.realm.globals, {
     thisValue: hasReceiver ? runtime.newObject() : undefined,
     homeObject: undefined,
@@ -59,7 +58,7 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: S
     try {
       runtime.evaluator.runProgram(program);
     } catch (error) {
-      uncaughtException = describeUncaught(runtime, error);
+      if (!(error instanceof ProgramExit)) uncaughtException = describeUncaught(runtime, error);
     }
     onEnd?.(scope);
     runtime.collectGarbage();

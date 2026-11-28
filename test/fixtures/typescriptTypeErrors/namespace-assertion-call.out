@@ -1,0 +1,1 @@
+(4,26): error TS2775: Assertions require every name in the call target to be declared with an explicit type annotation.

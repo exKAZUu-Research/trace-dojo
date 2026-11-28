@@ -1,6 +1,5 @@
 import type {
   Block,
-  CatchClause,
   ClassMember,
   ClassNode,
   DeclarationKind,
@@ -20,6 +19,7 @@ import {
   calleeText,
   fail,
   field,
+  firstUndecoratedChild,
   hasChild,
   hasUseStrictDirective,
   isOptionalChain,
@@ -375,18 +375,17 @@ export class ProgramConverter extends ExpressionConverter {
     const handlerNode = node.childForFieldName('handler');
     const finalizerNode = node.childForFieldName('finalizer');
     const block = this.block(field(node, 'body'));
-    let handler: CatchClause | undefined;
-    if (handlerNode) {
-      handler = this.withScope((scope) => {
-        const parameterNode = handlerNode.childForFieldName('parameter');
-        const param = parameterNode
-          ? this.bindingPattern(parameterNode, (identifier, name) => this.declareLexical(identifier, name))
-          : undefined;
-        // V8 takes apart an object from its hidden variable `.catch`, and an iterable by its value.
-        if (param?.kind === 'objectPattern') nameDestructuring(param, { source: { text: '.catch' } });
-        return { param, body: this.block(field(handlerNode, 'body')), scope };
-      });
-    }
+    const handler = handlerNode
+      ? this.withScope((scope) => {
+          const parameterNode = handlerNode.childForFieldName('parameter');
+          const param = parameterNode
+            ? this.bindingPattern(parameterNode, (identifier, name) => this.declareLexical(identifier, name))
+            : undefined;
+          // V8 takes apart an object from its hidden variable `.catch`, and an iterable by its value.
+          if (param?.kind === 'objectPattern') nameDestructuring(param, { source: { text: '.catch' } });
+          return { param, body: this.block(field(handlerNode, 'body')), scope };
+        })
+      : undefined;
     const finalizer = finalizerNode ? this.block(field(finalizerNode, 'body')) : undefined;
     return { kind: 'try', block, handler, finalizer, row: rowOf(node) };
   }
@@ -477,8 +476,18 @@ export class ProgramConverter extends ExpressionConverter {
     }
   }
 
+  /** The decorators of a class or a class member, which JavaScript as Node.js runs it does not have. */
+  protected decoratorsOf(node: Node): Expression[] | undefined {
+    return namedChildren(node).some((child) => child.type === 'decorator')
+      ? unsupported(node, 'デコレータ')
+      : undefined;
+  }
+
+  /** Whether `accessor x` declares an auto-accessor, which TypeScript has and JavaScript as Node.js runs it does not. */
+  protected readonly hasAutoAccessors: boolean = false;
+
   private strictClassNode(node: Node, name: string): ClassNode {
-    if (namedChildren(node).some((child) => child.type === 'decorator')) unsupported(node, 'デコレータ');
+    const decorators = this.decoratorsOf(node);
     const heritage = namedChildren(node).find((child) => child.type === 'class_heritage');
     const superClass = heritage ? this.expression(namedChildren(heritage)[0]) : undefined;
     const members: ClassMember[] = [];
@@ -496,13 +505,15 @@ export class ProgramConverter extends ExpressionConverter {
         }
         if (accessorOf(member)) fail(member, 'constructor を getter や setter にはできません。');
         if (ctor) fail(member, 'constructor は1つしか書けません。');
+        // A constructor's decorators are rejected as any member's are; TypeScript's checker reports them misplaced.
+        this.decoratorsOf(member);
         ctor = this.functionNode(member, 'classConstructor', name);
       }
     } finally {
       this.derivedConstructor = outerDerived;
       this.privateNames.pop();
     }
-    return { name, superClass, ctor, members, source: this.sourceOf(node), row: rowOf(node) };
+    return { name, superClass, ctor, members, source: this.sourceOf(node), row: rowOf(node), decorators };
   }
 
   private classMember(member: Node): ClassMember {
@@ -511,28 +522,40 @@ export class ProgramConverter extends ExpressionConverter {
       const key = this.propertyName(field(member, 'name'));
       checkMemberName(member, key, isStatic, false);
       const kind = accessorOf(member) ?? 'method';
-      return { kind, isStatic, key, fn: this.functionNode(member, kind, keyName(key)) };
-    }
-    if (member.type === 'field_definition') {
-      const key = this.propertyName(field(member, 'name'));
-      checkMemberName(member, key, isStatic, true);
-      const valueNode = member.childForFieldName('value');
-      // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
-      const value = valueNode ? this.withContext(initializerContext(), () => this.expression(valueNode)) : undefined;
-      const constant = value !== undefined && isStatic && isConstantExpression(value);
-      const fieldMember: ClassMember = {
-        kind: 'field',
+      return {
+        kind,
         isStatic,
-        isTraceConstant: constant && hasChild(member, 'readonly') ? true : undefined,
         key,
-        value,
-        row: rowOf(member),
+        fn: this.functionNode(member, kind, keyName(key)),
+        decorators: this.decoratorsOf(member),
       };
-      const recordsStep = value !== undefined && !constant;
-      return recordsStep ? this.steppable(member, fieldMember) : fieldMember;
     }
+    if (member.type === 'field_definition') return this.fieldMember(member, isStatic);
     if (member.type === 'class_static_block') return this.staticBlock(member);
     return unsupported(member, `クラスの中の「${member.type}」`);
+  }
+
+  private fieldMember(member: Node, isStatic: boolean): ClassMember {
+    const nameNode = field(member, 'name');
+    const key = this.propertyName(nameNode);
+    checkMemberName(member, key, isStatic, true);
+    const valueNode = member.childForFieldName('value');
+    // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
+    const value = valueNode ? this.withContext(initializerContext(), () => this.expression(valueNode)) : undefined;
+    const constant = value !== undefined && isStatic && isConstantExpression(value);
+    const fieldMember: ClassMember = {
+      kind: 'field',
+      isStatic,
+      isTraceConstant: constant && hasChild(member, 'readonly') ? true : undefined,
+      key,
+      value,
+      // The name's row, since the member node starts at its decorators, which may be on earlier rows.
+      row: rowOf(nameNode),
+      decorators: this.decoratorsOf(member),
+      isAutoAccessor: this.hasAutoAccessors && hasChild(member, 'accessor') ? true : undefined,
+    };
+    const stepNode = firstUndecoratedChild(member) ?? nameNode;
+    return value !== undefined && !constant ? this.steppable(stepNode, fieldMember) : fieldMember;
   }
 
   /** Converts a static block, whose body runs like a method's with the class as `this` and keeps its `var`s. */
@@ -540,8 +563,12 @@ export class ProgramConverter extends ExpressionConverter {
     return this.withContext(initializerContext(), () => {
       const scope = this.pushScope(true);
       try {
-        const body = this.statementList(namedChildren(field(member, 'body')));
-        return { kind: 'staticBlock', body, scope, row: rowOf(member) };
+        return {
+          kind: 'staticBlock',
+          body: this.statementList(namedChildren(field(member, 'body'))),
+          scope,
+          row: rowOf(member),
+        };
       } finally {
         this.popScope();
       }

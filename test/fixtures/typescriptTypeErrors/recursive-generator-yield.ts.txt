@@ -1,0 +1,6 @@
+function* g(n: number) { if (n > 0) yield* g(n - 1); yield n; }
+console.log([...g(2)]);
+function* h(n: number): Generator<number> { if (n > 0) yield* h(n - 1); yield n; }
+console.log([...h(2)]);
+function* k() { yield 1; yield 2; }
+console.log([...k()]);

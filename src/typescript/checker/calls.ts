@@ -14,6 +14,7 @@ import { isContextSensitiveFunction, parameterNodes } from './signatures';
 import { argumentParameters, isThisParameter, named, skipParentheses, stringValue, withoutAssertions } from './syntax';
 import type { TypeArgumentMismatch } from './typeNodes';
 import {
+  anonymousObject,
   anyType,
   errorType,
   functionType,
@@ -64,12 +65,27 @@ interface CallableShape {
   blocked: boolean;
 }
 
-const functionExpressionTypes = new Set(['arrow_function', 'function_expression']);
+const functionExpressionTypes = new Set(['arrow_function', 'function_expression', 'generator_function']);
+
+/** The kinds of names whose type tsc takes as declared explicitly, which an assertion call may go through. */
+const explicitlyTypedKinds = new Set(['class', 'function', 'namespace', 'enum']);
+/** The declarations of a namespace's exports whose type tsc takes as declared explicitly. */
+const explicitlyTypedDeclarations = new Set([
+  'function_declaration',
+  'function_signature',
+  'generator_function_declaration',
+  'class_declaration',
+  'abstract_class_declaration',
+  'internal_module',
+  'enum_declaration',
+]);
 
 /** Resolves calls and `new` expressions: overloads, type argument inference, and argument checks. */
 export class Calls {
   /** The signature each call resolved to, for the type predicates that narrow its arguments. */
   private readonly resolved = new Map<number, Signature>();
+  private stringRawMutated: boolean | undefined;
+  private testingNonGenericOverload = false;
 
   private readonly arity: CallArity;
   private readonly typeArguments: CallTypeArguments;
@@ -81,16 +97,108 @@ export class Calls {
     this.unionSignatures = new UnionSignatures(c);
   }
 
+  /**
+   * `f<T>` without a call: the signatures of `f` that take that many type arguments, instantiated with them, as
+   * TypeScript's `getInstantiatedTypePart` makes them.
+   */
+  instantiationExpression(node: TreeNode): Type {
+    const expression = node.childForFieldName('function') ?? named(node)[0];
+    return this.instantiateType(node, this.c.expressions.check(expression));
+  }
+
+  instantiateType(node: TreeNode, type: Type): Type {
+    const typeArguments = this.typeArguments.written(node) ?? [];
+    if (isAnyLike(type) || type === errorType) return type;
+    const members = this.instantiationMembers(type);
+    if (members.length === 1 && isAnyLike(members[0])) return members[0];
+    let hasCallableMember = false;
+    const instantiated = members.map((member) => {
+      const result = this.instantiateTargetMember(node, member, members.length === 1 ? type : member, typeArguments);
+      if (result.callable) hasCallableMember = true;
+      return result.type;
+    });
+    if (!hasCallableMember) {
+      this.reportNoApplicableSignature(node, type);
+      return errorType;
+    }
+    return instantiated.includes(errorType) ? errorType : unionOf(instantiated);
+  }
+
+  private instantiateTargetMember(
+    node: TreeNode,
+    member: Type,
+    diagnosticTarget: Type,
+    typeArguments: Type[]
+  ): { type: Type; callable: boolean } {
+    if (isAnyLike(member)) return { type: member, callable: true };
+    const structure = this.c.structureOf(member);
+    if (structure.callSignatures.length === 0 && structure.constructSignatures.length === 0)
+      return { type: member, callable: false };
+    const callSignatures = this.applicableInstantiationSignatures(node, structure.callSignatures, typeArguments);
+    const constructSignatures = this.applicableInstantiationSignatures(
+      node,
+      structure.constructSignatures,
+      typeArguments
+    );
+    if (callSignatures.length === 0 && constructSignatures.length === 0) {
+      this.reportNoApplicableSignature(node, diagnosticTarget);
+      return { type: errorType, callable: true };
+    }
+    return { type: anonymousObject(() => ({ ...structure, callSignatures, constructSignatures })), callable: true };
+  }
+
+  private instantiationMembers(type: Type, seen = new Set<number>()): Type[] {
+    if (type.kind === 'union') return type.types.flatMap((member) => this.instantiationMembers(member, seen));
+    if (type.kind !== 'typeParameter' && type.kind !== 'indexedAccess' && type.kind !== 'conditional') return [type];
+    if (seen.has(type.id)) return [unknownType];
+    seen.add(type.id);
+    try {
+      if (type.kind === 'typeParameter') {
+        const constraint = this.c.constraintOf(type);
+        return constraint ? this.instantiationMembers(constraint, seen) : [unknownType];
+      }
+      return this.instantiationMembers(this.c.apparentType(type), seen);
+    } finally {
+      seen.delete(type.id);
+    }
+  }
+
+  private applicableInstantiationSignatures(
+    node: TreeNode,
+    signatures: Signature[],
+    typeArguments: Type[]
+  ): Signature[] {
+    return signatures
+      .filter(
+        ({ typeParameters }) =>
+          typeParameters.length >= typeArguments.length &&
+          typeParameters.filter((parameter) => !parameter.default).length <= typeArguments.length
+      )
+      .map((signature) => {
+        const mismatch = this.typeArguments.firstMismatch(signature, typeArguments);
+        if (mismatch) this.typeArguments.reportMismatch(node, mismatch);
+        return this.typeArguments.instantiate(signature, typeArguments);
+      });
+  }
+
+  private reportNoApplicableSignature(node: TreeNode, target: Type): void {
+    this.c.error(
+      named(node).at(-1) ?? node,
+      `型 '${this.c.print(target)}' には、この型引数の並びを使えるシグネチャがありません。`
+    );
+  }
+
   // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   // code-gauge-allow functionNcss -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   call(node: TreeNode, contextual?: Type): Type {
     const callee = node.childForFieldName('function') as TreeNode;
     const argumentsNode = node.childForFieldName('arguments');
-    if (argumentsNode?.type === 'template_string') return this.taggedTemplate(node, callee, argumentsNode);
+    if (argumentsNode?.type === 'template_string') return this.taggedTemplate(node, callee, argumentsNode, contextual);
     const args = argumentsNode ? named(argumentsNode) : [];
     const typeArguments = this.typeArguments.written(node);
     if (callee.type === 'super') return this.c.classes.superCall(node, args);
     if (callee.type === 'import') return this.checkArgumentsOnly(args, anyType);
+    const beforeDiagnostics = this.c.diagnostics.length;
     const optional = node.childForFieldName('optional_chain') !== null;
     if (this.isEvolvingPush(callee)) {
       if (typeArguments) this.c.error(node, '型引数は 0 個にしてください。');
@@ -108,7 +216,9 @@ export class Calls {
     if (checkedCallee === errorType) return this.checkArgumentsOnly(args, errorType);
     const calleeType = this.nonNullableCallee(callee, checkedCallee, optional);
     const shortCircuits = chained !== undefined || (optional && calleeType !== checkedCallee);
-    if (isAnyLike(calleeType)) return this.untypedCall(node, args, typeArguments);
+    if (isAnyLike(calleeType)) {
+      return this.finishRequireCall(callee, args, this.untypedCall(node, args, typeArguments), beforeDiagnostics);
+    }
     if (isIntrinsic(calleeType, 'unknown')) {
       this.c.error(
         callee,
@@ -120,7 +230,10 @@ export class Calls {
     const { signatures } = callable;
     if (signatures.length === 0) {
       for (const arg of args) this.c.expressions.check(arg);
-      return callable.untyped ? this.untypedCall(node, [], typeArguments) : this.uncallableType(callee, calleeType);
+      const fallback = callable.untyped
+        ? this.untypedCall(node, [], typeArguments)
+        : this.uncallableType(callee, calleeType);
+      return this.finishRequireCall(callee, args, fallback, beforeDiagnostics);
     }
     const receiver = access?.receiver;
     const resolution = this.resolveWithTextConversions(node, callee, signatures, args, {
@@ -130,8 +243,8 @@ export class Calls {
     });
     if (!resolution) return errorType;
     this.resolved.set(node.id, resolution.signature);
-    const result = resolution.returnType;
-    return shortCircuits ? this.c.members.chainResult(node, result) : result;
+    const result = shortCircuits ? this.c.members.chainResult(node, resolution.returnType) : resolution.returnType;
+    return this.finishRequireCall(callee, args, result, beforeDiagnostics);
   }
 
   private resolveWithTextConversions(
@@ -230,11 +343,12 @@ export class Calls {
     const object = callee.childForFieldName('object') as TreeNode;
     for (const arg of args) {
       // A spread adds the elements of what it spreads.
-      const element =
+      const { result: element, yields } = this.c.functions.collectImplicitYields(() =>
         arg.type === 'spread_element'
           ? this.c.patterns.iteratedType(arg, this.c.expressions.check(named(arg)[0]))
-          : this.c.expressions.check(arg);
-      this.c.assignments.evolve(object, element);
+          : this.c.expressions.check(arg)
+      );
+      this.c.assignments.evolve(object, element, yields);
     }
     // `push` and `unshift` return the new length.
     return numberType;
@@ -369,32 +483,69 @@ export class Calls {
     return receiver ?? voidType;
   }
 
-  /** A tagged template, `String.raw\`...\``, which calls the tag with the template's strings and substitutions. */
-  private taggedTemplate(node: TreeNode, callee: TreeNode, template: TreeNode): Type {
-    if (!this.isStringRawTag(callee)) {
-      this.c.error(callee, unsupportedMessage('タグ付きテンプレート'));
-      return errorType;
-    }
-    const calleeType = this.c.expressions.check(callee);
+  /**
+   * `` tag`a${x}b` ``, a call of `tag` with a `TemplateStringsArray` of the strings and then the substitutions, which
+   * `String.raw` turns into text.
+   */
+  private taggedTemplate(node: TreeNode, callee: TreeNode, template: TreeNode, contextual?: Type): Type {
+    const substitutions = named(template)
+      .filter((part) => part.type === 'template_substitution')
+      .map((part) => named(part)[0]);
+    const isStringRaw = this.isStringRawTag(callee);
+    // A tag read from an object is called with it as `this`, as a method call is.
+    const reference = withoutAssertions(callee);
+    const access =
+      reference.type === 'member_expression' || reference.type === 'subscript_expression'
+        ? this.c.expressions.checkMemberCallee(callee, reference)
+        : undefined;
+    const calleeType = access?.type ?? this.c.expressions.check(callee);
     const typeArguments = this.typeArguments.written(node);
-    for (const part of named(template)) {
-      if (part.type !== 'template_substitution') continue;
-      const substitution = named(part)[0];
-      this.c.expressions.checkFunctionText(substitution, this.c.expressions.check(substitution));
-    }
-    if (calleeType === errorType) return errorType;
-    if (isAnyLike(calleeType)) return this.untypedCall(node, [], typeArguments);
+    if (calleeType === errorType) return this.checkArgumentsOnly(substitutions, errorType);
+    if (isAnyLike(calleeType)) return this.untypedCall(node, substitutions, typeArguments);
     const signatures = this.c.signaturesOf(calleeType, 'call');
-    if (signatures.length === 0) return this.uncallableType(callee, calleeType);
-    if (!typeArguments) return signatures[0].returnType();
-    const eligible = this.typeArguments.candidates(node, signatures, typeArguments);
-    let mismatch: TypeArgumentMismatch | undefined;
-    for (const signature of eligible) {
-      mismatch = this.typeArguments.firstMismatch(signature, typeArguments);
-      if (!mismatch) return this.typeArguments.instantiate(signature, typeArguments).returnType();
+    if (signatures.length === 0) {
+      this.checkArgumentsOnly(substitutions, errorType);
+      return this.uncallableType(callee, calleeType);
     }
-    if (mismatch) this.typeArguments.reportMismatch(node, mismatch);
+    const args = [template, ...substitutions];
+    const resolution = isStringRaw
+      ? this.resolveWithTextConversions(node, callee, signatures, args, {
+          typeArguments,
+          contextual,
+          receiver: access?.receiver,
+        })
+      : this.resolve(node, callee, signatures, args, typeArguments, contextual, access?.receiver);
+    if (isStringRaw)
+      for (const substitution of substitutions)
+        this.c.expressions.checkFunctionText(
+          substitution,
+          this.c.silently(() => this.c.expressions.check(substitution))
+        );
+    return resolution?.returnType ?? errorType;
+  }
+
+  /**
+   * Enforces that calls to Node.js's `require` load only a constant module this interpreter provides while preserving
+   * normal call signature and type-argument resolution on direct or wrapped `require` callees.
+   */
+  private finishRequireCall(callee: TreeNode, args: TreeNode[], result: Type, beforeDiagnostics: number): Type {
+    if (!this.isLibraryRequireCallee(callee)) return result;
+    const name = args.length === 1 ? this.c.flow.constantIndexName(withoutAssertions(args[0])) : undefined;
+    if (name !== undefined && this.c.namespaces.moduleObjectType(name)) return result;
+    if (this.c.diagnostics.length === beforeDiagnostics) {
+      this.c.error(
+        callee,
+        unsupportedMessage(name === undefined ? '名前が定数で決まらない require' : `モジュール '${name}' の require`)
+      );
+    }
     return errorType;
+  }
+
+  private isLibraryRequireCallee(callee: TreeNode): boolean {
+    const target = withoutAssertions(callee);
+    if (target.type !== 'identifier' || target.text !== 'require') return false;
+    const library = this.c.libraryBinder.moduleScope.lookupValue('require');
+    return Boolean(library) && this.c.scopeOf(target).lookupValue('require') === library;
   }
 
   private isStringRawTag(callee: TreeNode): boolean {
@@ -403,10 +554,44 @@ export class Calls {
     const object = receiver && withoutAssertions(receiver);
     if (object?.type !== 'identifier') return false;
     const symbol = this.c.scopeOf(object).lookupValue(object.text);
-    if (symbol !== this.c.libraryBinder.moduleScope.lookupValue('String')) return false;
-    if (expression.type === 'member_expression') return expression.childForFieldName('property')?.text === 'raw';
-    const index = expression.type === 'subscript_expression' ? expression.childForFieldName('index') : undefined;
-    return index !== undefined && index !== null && this.c.flow.constantIndexName(index) === 'raw';
+    if (!symbol || symbol !== this.c.libraryBinder.moduleScope.lookupValue('String')) return false;
+    const isRawMember =
+      expression.type === 'member_expression'
+        ? expression.childForFieldName('property')?.text === 'raw'
+        : expression.type === 'subscript_expression' &&
+          Boolean(expression.childForFieldName('index')) &&
+          this.c.flow.constantIndexName(expression.childForFieldName('index') as TreeNode) === 'raw';
+    return isRawMember && !this.mayMutateStringRaw(symbol);
+  }
+
+  private mayMutateStringRaw(stringSymbol: unknown): boolean {
+    if (this.stringRawMutated !== undefined) return this.stringRawMutated;
+    const stack: TreeNode[] = [this.c.root];
+    for (let node = stack.pop(); node; node = stack.pop()) {
+      this.c.budget.spend();
+      if (this.targetsStringOrRaw(node, stringSymbol)) {
+        this.stringRawMutated = true;
+        return true;
+      }
+      for (const child of node.namedChildren) if (child) stack.push(child);
+    }
+    this.stringRawMutated = false;
+    return false;
+  }
+
+  private targetsStringOrRaw(node: TreeNode, stringSymbol: unknown): boolean {
+    const writeTarget = mutatedWriteTarget(node);
+    if (writeTarget) {
+      const receiver = withoutAssertions(writeTarget).childForFieldName('object');
+      if (receiver && this.isSymbolIdentifier(withoutAssertions(receiver), stringSymbol)) return true;
+    }
+    if (node.type !== 'call_expression') return false;
+    const firstArg = named(node.childForFieldName('arguments') ?? node)[0];
+    return Boolean(firstArg && this.isSymbolIdentifier(withoutAssertions(firstArg), stringSymbol));
+  }
+
+  private isSymbolIdentifier(node: TreeNode, symbol: unknown): boolean {
+    return node.type === 'identifier' && this.c.scopeOf(node).lookupValue(node.text) === symbol;
   }
 
   /** Resolves a call to one of `signatures`, as `super(...)` does with its base class's constructors. */
@@ -472,10 +657,14 @@ export class Calls {
     const expression = skipParentheses(node);
     switch (expression.type) {
       case 'identifier': {
-        const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
+        const raw = this.c.scopeOf(expression).lookupValue(expression.text);
+        const symbol =
+          raw && (raw.valueKind === 'import' || raw.valueKind === 'importAlias')
+            ? this.c.namespaces.imported(raw, 'value')
+            : raw;
         if (!symbol) return undefined;
         const declaration = symbol.valueDeclaration;
-        if (symbol.valueKind === 'class' || symbol.valueKind === 'function' || declaration?.childForFieldName('type'))
+        if (explicitlyTypedKinds.has(symbol.valueKind ?? '') || declaration?.childForFieldName('type'))
           return this.c.expressions.valueTypeOf(symbol);
         return undefined;
       }
@@ -494,7 +683,12 @@ export class Calls {
           this.c.relations.removeNullish(receiver),
           this.c.classes.propertyKey(expression, property)
         );
-        return member?.isMethod || member?.declaration?.childForFieldName('type') ? member.type() : undefined;
+        const declaration = member?.declaration;
+        const isExplicit =
+          member?.isMethod ||
+          explicitlyTypedDeclarations.has(declaration?.type ?? '') ||
+          declaration?.childForFieldName('type');
+        return isExplicit ? member?.type() : undefined;
       }
       default: {
         return undefined;
@@ -503,18 +697,27 @@ export class Calls {
   }
 
   /** The type predicate a call's resolved signature has, with the expression it narrows. */
-  predicateOf(node: TreeNode): { target: TreeNode; type: Type } | undefined {
+  predicateOf(
+    node: TreeNode
+  ): { target: TreeNode; type: Type; asserts?: NonNullable<Signature['predicate']>['asserts'] } | undefined {
     const signature = this.resolved.get(node.id);
     const predicate = signature?.predicate;
     if (!predicate) return undefined;
+    const { type, asserts } = predicate;
     if (predicate.index === -1) {
       const callee = skipParentheses(node.childForFieldName('function') as TreeNode);
       const object = callee.type === 'member_expression' ? callee.childForFieldName('object') : undefined;
-      return object ? { target: object, type: predicate.type } : undefined;
+      return object ? { target: object, type, asserts } : undefined;
     }
     const argumentsNode = node.childForFieldName('arguments');
     const target = argumentsNode ? named(argumentsNode)[predicate.index] : undefined;
-    return target ? { target, type: predicate.type } : undefined;
+    return target ? { target, type, asserts } : undefined;
+  }
+
+  /** Whether every name of a callee has a declared type, which a call to an assertion function needs. */
+  hasExplicitCalleeType(node: TreeNode): boolean {
+    const callee = node.childForFieldName('function');
+    return callee !== null && this.c.silently(() => this.explicitPathType(callee)) !== undefined;
   }
 
   // Resolution ---------------------------------------------------------------------------------------------------
@@ -570,11 +773,9 @@ export class Calls {
         continue;
       }
       viable.push(candidate);
-      const instantiated = this.c.silently(() => attempt.instantiate(candidate));
-      if (!this.arity.instanceArityMatches(instantiated, candidate, args) || !attempt.checkThis(instantiated)) continue;
-      attempt.previewCallbacks(instantiated);
-      if (this.c.flow.probe(() => this.c.silently(() => this.checkArguments(instantiated, args.nodes, false))))
+      if (this.tryOverloadCandidate(candidate, args, attempt, candidates.length > 1)) {
         return this.finishOverload(node, candidate, args, options, attempt);
+      }
     }
     if (viable.length === 0 && failed) {
       this.typeArguments.reportMismatch(node, failed.mismatch);
@@ -583,6 +784,28 @@ export class Calls {
       return { signature, returnType: signature.returnType() };
     }
     return this.reportUnresolved(node, callee, viable.length > 0 ? viable : candidates, args, attempt);
+  }
+
+  private tryOverloadCandidate(
+    candidate: Signature,
+    args: ExpressionListFlow,
+    attempt: CallAttempt,
+    overloaded: boolean
+  ): boolean {
+    return this.c.functions.withoutCommittedCallInference(() => {
+      const instantiated = this.c.silently(() => attempt.instantiate(candidate));
+      if (!this.arity.instanceArityMatches(instantiated, candidate, args) || !attempt.checkThis(instantiated)) {
+        return false;
+      }
+      const saved = this.testingNonGenericOverload;
+      this.testingNonGenericOverload = overloaded && candidate.typeParameters.length === 0;
+      try {
+        attempt.previewCallbacks(instantiated);
+        return this.c.flow.probe(() => this.c.silently(() => this.checkArguments(instantiated, args.nodes, false)));
+      } finally {
+        this.testingNonGenericOverload = saved;
+      }
+    });
   }
 
   private finishOverload(
@@ -617,10 +840,13 @@ export class Calls {
   private checkExpandedArguments(signature: Signature, args: ExpressionListFlow): boolean {
     const expanded = this.expandedArguments(args);
     const parameterTypes = this.argumentParameterTypes(signature, expanded);
+    const contextualTypes = signature.contextualSignature
+      ? this.argumentParameterTypes(signature.contextualSignature, expanded)
+      : parameterTypes;
     return expanded.every(({ node, before, spread }, index) => {
       const target = parameterTypes[index];
       if (spread) return !target || this.c.relations.isAssignable(this.spreadValueType(spread), target);
-      return this.c.flow.probe(() => this.checkArgument(node, target, false, false), before);
+      return this.c.flow.probe(() => this.checkArgument(node, target, false, false, contextualTypes[index]), before);
     });
   }
 
@@ -639,11 +865,12 @@ export class Calls {
       this.checkArgumentsOnly(args.nodes);
       const minimum = Math.min(...candidates.map((candidate) => minimumArguments(candidate)));
       const maximum = Math.max(...candidates.map((candidate) => this.arity.maximumArguments(candidate)));
+      const count = args.nodes.length;
       this.c.error(
-        args.nodes.length > maximum ? args.nodes[maximum] : node,
+        count > maximum ? args.nodes[maximum] : node,
         maximum === Number.POSITIVE_INFINITY || minimum === maximum
-          ? `引数は ${minimum} 個必要ですが、${args.nodes.length} 個渡されています。`
-          : `引数は ${minimum} 個から ${maximum} 個必要ですが、${args.nodes.length} 個渡されています。`
+          ? `引数は ${minimum} 個必要ですが、${count} 個渡されています。`
+          : `引数は ${minimum} 個から ${maximum} 個必要ですが、${count} 個渡されています。`
       );
       return { signature: candidates[0], returnType: candidates[0].returnType() };
     }
@@ -731,11 +958,26 @@ export class Calls {
         ),
         args,
         report,
-        args[0] ?? call
+        args[0] ?? call,
+        signature.contextualSignature &&
+          this.c.tupleType(
+            signature.contextualSignature.parameters.map((parameter) => ({
+              type: parameter.type,
+              optional: parameter.optional,
+              rest: parameter.rest,
+            }))
+          )
       );
     if ((isTrailingRestTuple(signature) || structuredRest) && !leadingSpread) {
       const fixedFit = this.checkArguments(
-        { ...signature, parameters: signature.parameters.slice(0, -1) },
+        {
+          ...signature,
+          parameters: signature.parameters.slice(0, -1),
+          contextualSignature: signature.contextualSignature && {
+            ...signature.contextualSignature,
+            parameters: signature.contextualSignature.parameters.slice(0, -1),
+          },
+        },
         args.slice(0, restIndex),
         report
       );
@@ -743,7 +985,8 @@ export class Calls {
         signature.parameters[restIndex].type,
         args.slice(restIndex),
         report,
-        fixedFit ? (args[restIndex] ?? call) : undefined
+        fixedFit ? (args[restIndex] ?? call) : undefined,
+        signature.contextualSignature?.parameters[restIndex]?.type
       );
       return fixedFit && restFits;
     }
@@ -753,6 +996,7 @@ export class Calls {
   private checkAlignedArguments(signature: Signature, args: TreeNode[], report: boolean): boolean {
     let ok = true;
     let index = 0;
+    const contextualSignature = signature.contextualSignature;
     for (const arg of args) {
       if (arg.type === 'spread_element') {
         const { count, fits } = this.checkSpreadArgument(signature, arg, index, report && ok);
@@ -761,7 +1005,9 @@ export class Calls {
         continue;
       }
       // TypeScript reports the first argument that does not fit.
-      ok = this.checkArgument(arg, this.parameterTypeAt(signature, index), report, report && ok) && ok;
+      const parameterType = this.parameterTypeAt(signature, index);
+      const contextualType = contextualSignature ? this.parameterTypeAt(contextualSignature, index) : parameterType;
+      ok = this.checkArgument(arg, parameterType, report, report && ok, contextualType) && ok;
       index++;
     }
     return ok;
@@ -771,9 +1017,10 @@ export class Calls {
     arg: TreeNode,
     parameterType: Type | undefined,
     report: boolean,
-    reportMismatch: boolean
+    reportMismatch: boolean,
+    contextualType: Type | undefined = parameterType
   ): boolean {
-    const argType = this.c.expressions.check(arg, parameterType);
+    const argType = this.c.expressions.check(arg, contextualType);
     return this.checkPassedArgument(arg, argType, parameterType, report, reportMismatch);
   }
 
@@ -785,6 +1032,17 @@ export class Calls {
     reportMismatch: boolean
   ): boolean {
     if (!parameterType) return true;
+    const verify = (): boolean => this.verifyPassedArgument(arg, argType, parameterType, report, reportMismatch);
+    return this.testingNonGenericOverload ? verify() : this.c.functions.withoutLatentYieldPropagation(verify);
+  }
+
+  private verifyPassedArgument(
+    arg: TreeNode,
+    argType: Type,
+    parameterType: Type,
+    report: boolean,
+    reportMismatch: boolean
+  ): boolean {
     const writtenWithin = arg.type === 'spread_element' ? arg : undefined;
     if (this.c.relations.isAssignable(argType, parameterType))
       return this.c.expressions.checkExcessProperties(arg, argType, parameterType, { report, writtenWithin });
@@ -806,17 +1064,23 @@ export class Calls {
     restType: Type,
     args: TreeNode[],
     report: boolean,
-    at: TreeNode | undefined
+    at: TreeNode | undefined,
+    contextualRestType: Type = restType
   ): boolean {
     const argumentFlow = new ExpressionListFlow(this.c, args);
-    const contexts = restTupleContexts(this.c, restType, argumentFlow);
+    const contexts = restTupleContexts(this.c, contextualRestType, argumentFlow);
     const tuple =
       args.length === 1 && args[0].type === 'spread_element'
         ? mapType(this.c.expressions.check(named(args[0])[0]), (type) => this.spreadArgumentType(type, restType))
         : this.argumentTuple(args, contexts);
-    if (this.c.relations.isAssignable(tuple, restType)) return !at || this.restExcessFits(at, tuple, restType, report);
-    if (report && at) this.c.error(at, this.c.expressions.elaboration.typeRelationMessage(tuple, restType, 'argument'));
-    return false;
+    const verify = (): boolean => {
+      if (this.c.relations.isAssignable(tuple, restType))
+        return !at || this.restExcessFits(at, tuple, restType, report);
+      if (report && at)
+        this.c.error(at, this.c.expressions.elaboration.typeRelationMessage(tuple, restType, 'argument'));
+      return false;
+    };
+    return this.testingNonGenericOverload ? verify() : this.c.functions.withoutLatentYieldPropagation(verify);
   }
 
   private restExcessFits(node: TreeNode, source: Type, target: Type, report: boolean): boolean {
@@ -883,9 +1147,6 @@ export class Calls {
 
   // Inference ----------------------------------------------------------------------------------------------------
 
-  /** A signature with its type parameters replaced by the given or inferred type arguments. */
-  // code-gauge-allow functionNcss -- Keeps the contextual return, receiver, ordinary arguments, and callbacks in inference order.
-  // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
   private instantiateFor(
     signature: Signature,
     args: ExpressionListFlow,
@@ -895,6 +1156,24 @@ export class Calls {
   ): Signature {
     if (signature.typeParameters.length === 0) return signature;
     if (typeArguments) return this.typeArguments.instantiate(signature, typeArguments);
+    if (this.c.silent === 0) {
+      return this.c.functions.withCommittedCallInference(() =>
+        this.instantiateSignatureFor(signature, args, typeArguments, contextual, receiver)
+      );
+    }
+    return this.instantiateSignatureFor(signature, args, typeArguments, contextual, receiver);
+  }
+
+  /** A signature with its type parameters replaced by the inferred type arguments. */
+  // code-gauge-allow functionNcss -- Keeps the contextual return, receiver, ordinary arguments, and callbacks in inference order.
+  // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
+  private instantiateSignatureFor(
+    signature: Signature,
+    args: ExpressionListFlow,
+    typeArguments: Type[] | undefined,
+    contextual: Type | undefined,
+    receiver: Type | undefined
+  ): Signature {
     const parameters = signature.typeParameters;
     const run = newInferenceRun(parameters, true);
     run.higherOrder = { outer: signature, parameters: [] };
@@ -905,11 +1184,10 @@ export class Calls {
     if (contextual)
       this.c.inference.inferTypes(
         { ...run, priority: InferencePriority.ReturnType },
-        contextual,
+        this.c.inference.expandNestedReturnContext(contextual),
         signature.returnType(),
         true
       );
-    const returnContext = this.c.inference.partialMapper(parameters, run.inferences);
     // A `this` parameter infers from the object the method is called on.
     if (receiver && signature.thisType)
       this.c.inference.inferTypes({ ...run, contextualSignatures: false }, receiver, signature.thisType, true);
@@ -919,7 +1197,10 @@ export class Calls {
     );
     for (const [index, arg] of arguments_.entries()) {
       if (restIndex !== undefined && index >= restIndex) continue;
-      if (!sensitive[index]) this.inferFromArgument(run, arg, parameterTypes[index], returnContext);
+      if (!sensitive[index]) {
+        const argContext = this.c.inference.contextualMapper(parameters, run.inferences);
+        this.inferFromArgument(run, arg, parameterTypes[index], argContext);
+      }
     }
     // `...args: T` infers `T` as the tuple of the arguments it takes.
     if (restIndex !== undefined)
@@ -928,7 +1209,7 @@ export class Calls {
         this.inferenceTuple(
           arguments_.slice(restIndex),
           parameterTypes.slice(restIndex),
-          this.c.inference.partialMapper(parameters, run.inferences),
+          this.c.inference.contextualMapper(parameters, run.inferences),
           signature.parameters.at(-1)?.type
         ),
         (signature.parameters.at(-1) as Parameter).type,
@@ -947,11 +1228,18 @@ export class Calls {
         run,
         arg,
         parameterType,
-        this.c.inference.partialMapper(parameters, run.inferences, fixes, typesCallbackParameter)
+        this.c.inference.contextualMapper(parameters, run.inferences, fixes, typesCallbackParameter)
       );
     }
-    const mapper = this.c.inference.finalMapper(signature, parameters, run.inferences);
-    const instantiated = { ...this.c.instantiateSignature(signature, mapper), typeParameters: [] };
+    const { mapper, contextualMapper } = this.c.inference.finalMappers(signature, parameters, run.inferences);
+    const contextualSignature = contextualMapper
+      ? { ...this.c.instantiateSignature(signature, contextualMapper), typeParameters: [] }
+      : undefined;
+    const instantiated = {
+      ...this.c.instantiateSignature(signature, mapper),
+      typeParameters: [],
+      contextualSignature,
+    };
     return this.c.inference.withInferredCallbackParameters(run, instantiated);
   }
 
@@ -1071,14 +1359,19 @@ export class Calls {
     mapper: Mapper | undefined
   ): void {
     if (!parameterType) return;
-    const argType = arg.spread ? this.spreadValueType(arg.spread) : this.probeArgumentType(arg, parameterType, mapper);
-    if (arg.spread) this.c.inference.inferTypes(run, argType, parameterType, true);
-    else this.c.inference.inferArgument(run, argType, parameterType);
+    if (arg.spread) {
+      this.c.inference.inferTypes(run, this.spreadValueType(arg.spread), parameterType, true);
+      return;
+    }
+    const argType = this.probeArgumentType(arg, parameterType, mapper);
+    this.c.silently(() => this.c.inference.inferArgument(run, argType, parameterType));
   }
 
   private probeArgumentType(arg: ExpandedArgument, contextual: Type | undefined, mapper?: Mapper): Type {
     const context = contextual && mapper ? this.c.instantiateContextual(contextual, mapper) : contextual;
-    return this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, context)), arg.before);
+    return this.c.overloadContexts.withoutPreview(() =>
+      this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, context)), arg.before)
+    );
   }
 
   private spreadElements(arg: TreeNode, type: Type): TupleElement[] {
@@ -1096,10 +1389,11 @@ export class Calls {
 
   private isGenericCallback(arg: TreeNode): boolean {
     const expression = skipParentheses(arg);
-    if (expression.type === 'arrow_function' || expression.type === 'function_expression')
-      return expression.childForFieldName('type_parameters') !== null;
+    if (functionExpressionTypes.has(expression.type)) return expression.childForFieldName('type_parameters') !== null;
     if (!['identifier', 'member_expression', 'subscript_expression'].includes(expression.type)) return false;
-    const type = this.c.silently(() => this.c.expressions.check(expression));
+    const type = this.c.overloadContexts.withoutPreview(() =>
+      this.c.silently(() => this.c.expressions.check(expression))
+    );
     return this.c.signaturesOf(type, 'call').some((signature) => signature.typeParameters.length > 0);
   }
 
@@ -1141,4 +1435,17 @@ function restTupleContexts(c: Checker, restType: Type, args: ExpressionListFlow)
     args.nodes.map((node) => args.length(node))
   );
   return contexts.map((context, index) => (args.nodes[index].type === 'spread_element' ? undefined : context));
+}
+
+function mutatedWriteTarget(node: TreeNode): TreeNode | null | undefined {
+  if (node.type === 'assignment_expression' || node.type === 'augmented_assignment_expression') {
+    return node.childForFieldName('left');
+  }
+  if (
+    node.type === 'update_expression' ||
+    (node.type === 'unary_expression' && node.children.some((child) => child?.type === 'delete'))
+  ) {
+    return node.childForFieldName('argument');
+  }
+  return undefined;
 }

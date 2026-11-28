@@ -1,0 +1,8 @@
+class A {}
+class B extends A {
+  override constructor() { super(); }
+}
+class C {
+  override constructor() {}
+}
+console.log(new B(), new C());

@@ -1,4 +1,4 @@
-import { Language, type Node, Parser } from '@willbooster/web-tree-sitter';
+import { Language, type Node, Parser, type Tree } from '@willbooster/web-tree-sitter';
 
 import { readWasm } from '#interpreterWasm';
 
@@ -40,28 +40,7 @@ export function parseSource<T>(
     progress?: (cost?: number) => void;
   } = {}
 ): T {
-  let parsingFailure: { error: unknown } | undefined;
-  const tree = parser.parse(
-    source,
-    progress
-      ? {
-          progressCallback: () => {
-            try {
-              progress();
-            } catch (error) {
-              parsingFailure = { error };
-              return true;
-            }
-          },
-        }
-      : undefined
-  );
-  if (!tree) {
-    // A cancelled parse retains resumable state, which must not be reused for another program.
-    parser.reset();
-    if (parsingFailure) throw parsingFailure.error;
-    throw new Error('The parser returned no tree');
-  }
+  const tree = parseTree(parser, source, progress);
   try {
     assertNestingDepth(tree.rootNode, maxNestingDepth, tooDeepMessage, progress);
     const syntaxErrors = locateErrors(
@@ -77,6 +56,33 @@ export function parseSource<T>(
   } finally {
     tree.delete();
   }
+}
+
+export function parseTree(parser: Parser, source: string, progress?: (cost?: number) => void): Tree {
+  let parsingFailure: { error: unknown } | undefined;
+  const tree = parser.parse(
+    source,
+    progress
+      ? {
+          progressCallback: () => {
+            try {
+              progress();
+              return false;
+            } catch (error) {
+              parsingFailure = { error };
+              return true;
+            }
+          },
+        }
+      : undefined
+  );
+  if (!tree) {
+    // A cancelled parse retains resumable state, which must not be reused for another program.
+    parser.reset();
+    if (parsingFailure) throw parsingFailure.error;
+    throw new Error('The parser returned no tree');
+  }
+  return tree;
 }
 
 /**

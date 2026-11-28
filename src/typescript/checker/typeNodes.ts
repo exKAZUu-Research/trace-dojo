@@ -9,6 +9,7 @@ import { isGenericObjectOrIndexType } from './genericTypes';
 import { narrowIndexedOperands, narrowKeyConstraints } from './indexedAccessKeys';
 import { addIndexInfo, isPatternKey } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
+import { isImportTypeCall } from './namespaces';
 import { RecursiveAliases } from './recursiveAliases';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
@@ -82,6 +83,9 @@ export interface TypeArgumentMismatch {
   constraint: Type;
 }
 
+/** The clauses whose names a class implements or an interface extends. */
+const heritageClauses = new Set(['implements_clause', 'extends_type_clause']);
+
 /** Resolves the types the program writes: annotations, type references, and type declarations. */
 export class TypeNodes {
   private readonly typeNodeCache = new Map<number, Type>();
@@ -91,9 +95,26 @@ export class TypeNodes {
   private readonly pendingArgumentChecks: (() => void)[] = [];
   /** The type each kind of type syntax denotes; the others are `any`. */
   private readonly typeSyntaxes = new Map<string, (node: TreeNode) => Type>([
-    ['predefined_type', (node) => predefinedTypes[node.text] ?? anyType],
+    [
+      'predefined_type',
+      (node) =>
+        hasToken(node, 'unique symbol')
+          ? this.c.expressions.uniqueSymbols.typeOfAnnotation(node)
+          : (predefinedTypes[node.text] ?? anyType),
+    ],
     ['type_identifier', (node) => this.typeReference(node, node, [])],
-    ['nested_type_identifier', (node) => this.qualifiedType(node)],
+    [
+      'nested_type_identifier',
+      // The name of `N.Box<number>` is typed with its arguments by the generic type around it.
+      (node) =>
+        node.parent?.type === 'generic_type' ? this.qualifiedType(node) : this.qualifiedReference(node, node, []),
+    ],
+    [
+      'member_expression',
+      (node) =>
+        node.parent?.type === 'generic_type' ? this.importMemberType(node) : this.importMemberReference(node, node, []),
+    ],
+    ['call_expression', (node) => (isImportTypeCall(node) ? this.bareImportType(node) : anyType)],
     ['identifier', (node) => this.typeReference(node, node, [])],
     ['generic_type', (node) => this.genericType(node)],
     ['parenthesized_type', (node) => this.typeFromNode(named(node)[0])],
@@ -115,6 +136,15 @@ export class TypeNodes {
     ['this_type', (node) => this.c.classes.thisTypeAt(node)],
     ['type_predicate', () => booleanType],
     ['type_annotation', (node) => this.annotationType(node) ?? anyType],
+    ['non_nullable_type', (node) => this.jsDocNullabilityType(node, '!')],
+    ['flow_maybe_type', (node) => this.jsDocNullabilityType(node, '?')],
+    [
+      'existential_type',
+      (node) => {
+        this.c.error(node, 'JSDoc の型は、ドキュメントコメントの中でしか使えません。');
+        return anyType;
+      },
+    ],
   ]);
 
   readonly interfaceBases: InterfaceBases;
@@ -159,6 +189,23 @@ export class TypeNodes {
     }
   }
 
+  /**
+   * JSDoc's `!T`, `T!`, `?T`, and `T?`, which tsc reads as the type they mean and rejects, suggesting how TypeScript
+   * spells it.
+   */
+  private jsDocNullabilityType(node: TreeNode, mark: '!' | '?'): Type {
+    const inner = named(node)[0];
+    const isPrefix = node.firstChild?.type === mark;
+    const operand = inner ? this.typeFromNode(inner) : anyType;
+    const type =
+      mark === '!' ? operand : unionOf(isPrefix ? [operand, nullType, undefinedType] : [operand, undefinedType]);
+    this.c.error(
+      node,
+      `'${mark}' が型の${isPrefix ? '先頭' : '末尾'}にある書き方は、TypeScript では使えません。'${this.c.print(type)}' と書くつもりでしたか？`
+    );
+    return type;
+  }
+
   private intersectionType(node: TreeNode): Type {
     const members: Type[] = [];
     const visit = (part: TreeNode): void => {
@@ -186,6 +233,7 @@ export class TypeNodes {
       return inner ? this.typeFromNode(inner) : undefined;
     }
     if (node.type === 'type_predicate_annotation') return booleanType;
+    if (node.type === 'asserts_annotation' || node.type === 'asserts') return voidType;
     return this.typeFromNode(node);
   }
 
@@ -196,9 +244,74 @@ export class TypeNodes {
   private genericType(node: TreeNode): Type {
     const name = node.childForFieldName('name') as TreeNode;
     const argumentsNode = node.childForFieldName('type_arguments');
-    return name.type === 'nested_type_identifier'
-      ? this.qualifiedType(name)
-      : this.typeReference(node, name, argumentsNode ? named(argumentsNode) : []);
+    const argumentNodes = argumentsNode ? named(argumentsNode) : [];
+    if (name.type === 'nested_type_identifier') return this.qualifiedReference(node, name, argumentNodes);
+    if (name.type === 'member_expression') return this.importMemberReference(node, name, argumentNodes);
+    return this.typeReference(node, name, argumentNodes);
+  }
+
+  private bareImportType(callNode: TreeNode): Type {
+    const module = this.c.namespaces.resolveImportTypeModule(callNode);
+    if (!module) return errorType;
+    const symbol = this.c.namespaces.exportEqualsSymbol(module, 'type');
+    if (!symbol) {
+      this.c.error(
+        callNode,
+        `モジュール '${module.name}' は型を参照していませんが、ここでは型として使用されています。'typeof import('${module.name}')' を意図していましたか?`
+      );
+      return errorType;
+    }
+    if (this.reportUnusableSymbol(callNode, callNode, symbol)) return errorType;
+    const argumentsNode = callNode.childForFieldName('type_arguments');
+    const argumentNodes = argumentsNode ? named(argumentsNode) : [];
+    const parameters = this.c.signatures.typeParametersOfSymbol(symbol);
+    if (parameters.length === 0) {
+      if (argumentNodes.length > 0) this.c.error(callNode, `型 import("${module.name}") は型引数をとりません。`);
+      return this.declaredTypeOf(symbol);
+    }
+    if (!this.checkTypeArgumentCount(callNode, `import("${module.name}")`, parameters, argumentNodes.length))
+      return errorType;
+    return this.referenceWithArguments(callNode, symbol, parameters, argumentNodes);
+  }
+
+  private importMemberType(node: TreeNode): Type {
+    const resolved = this.c.namespaces.resolveImportTypeMember(node);
+    if (resolved.symbol) {
+      const property = node.childForFieldName('property') ?? node;
+      return this.reportUnusableSymbol(node, property, resolved.symbol)
+        ? errorType
+        : this.declaredTypeOf(resolved.symbol);
+    }
+    if (resolved.error) this.c.error(resolved.site ?? node, resolved.error);
+    return errorType;
+  }
+
+  private importMemberReference(node: TreeNode, name: TreeNode, argumentNodes: TreeNode[]): Type {
+    const type = this.importMemberType(name);
+    if (type === errorType) return errorType;
+    const symbol = this.c.namespaces.resolveImportTypeMember(name).symbol;
+    if (!symbol) return type;
+    const parameters = this.c.signatures.typeParametersOfSymbol(symbol);
+    if (parameters.length === 0) {
+      if (argumentNodes.length > 0) this.c.error(node, `型 ${name.text} は型引数をとりません。`);
+      return type;
+    }
+    if (!this.checkTypeArgumentCount(node, name.text, parameters, argumentNodes.length)) return errorType;
+    return this.referenceWithArguments(node, symbol, parameters, argumentNodes);
+  }
+
+  /** `N.Box<number>` or `N.Box`: the generic a namespace exports, applied to its type arguments or its defaults. */
+  private qualifiedReference(node: TreeNode, name: TreeNode, argumentNodes: TreeNode[]): Type {
+    const type = this.qualifiedType(name);
+    const symbol = type === errorType ? undefined : this.c.namespaces.qualifiedTypeSymbol(name).symbol;
+    const parameters = symbol ? this.c.signatures.typeParametersOfSymbol(symbol) : [];
+    if (!symbol) return type;
+    if (parameters.length === 0) {
+      if (argumentNodes.length > 0) this.c.error(node, `型 ${name.text} は型引数をとりません。`);
+      return type;
+    }
+    if (!this.checkTypeArgumentCount(node, name.text, parameters, argumentNodes.length)) return errorType;
+    return this.referenceWithArguments(node, symbol, parameters, argumentNodes);
   }
 
   /** Eager class or interface arguments may carry a pending alias, as an array element can. */
@@ -251,7 +364,7 @@ export class TypeNodes {
     const reference = list?.parent;
     if (list?.type !== 'type_arguments' || reference?.type !== 'generic_type') return undefined;
     const name = reference.childForFieldName('name');
-    if (!name || name.type === 'nested_type_identifier') return undefined;
+    if (!name || name.type === 'nested_type_identifier' || name.type === 'member_expression') return undefined;
     const arguments_ = named(list);
     const target = this.resolveTypeName(reference, name, arguments_.length);
     if (target === 'stringMapping') return stringType;
@@ -446,7 +559,7 @@ export class TypeNodes {
       else if (node.type === 'generic_type') {
         const name = node.childForFieldName('name');
         const argumentsNode = node.childForFieldName('type_arguments');
-        if (name && name.type !== 'nested_type_identifier')
+        if (name && name.type !== 'nested_type_identifier' && name.type !== 'member_expression')
           this.resolveTypeName(node, name, argumentsNode ? named(argumentsNode).length : 0);
       } else if (isStandaloneTypeReference(node)) this.resolveTypeName(node, node, 0);
     }
@@ -462,7 +575,16 @@ export class TypeNodes {
         this.typeFromNode(argumentNodes[0])
       );
     if ('local' in reference) return reference.local;
-    const { symbol, parameters } = reference;
+    return this.referenceWithArguments(node, reference.symbol, reference.parameters, argumentNodes);
+  }
+
+  /** A declared class, interface, or alias applied to the written type arguments, filled with its defaults. */
+  private referenceWithArguments(
+    node: TreeNode,
+    symbol: Sym,
+    parameters: TypeParameter[],
+    argumentNodes: TreeNode[]
+  ): Type {
     const defers = symbol.typeKind === 'interface' || symbol.typeKind === 'class';
     const declared = this.declaredTypeOf(symbol);
     if (parameters.length === 0) return declared;
@@ -539,7 +661,6 @@ export class TypeNodes {
     return eagerAliasContainers.has(node.type) && named(node).some((child) => this.mayResolveAlias(child, depth + 1));
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Checks local bindings, intrinsic types, unavailable symbols, and argument counts.
   private resolveTypeName(node: TreeNode, nameNode: TreeNode, argumentCount: number): ResolvedTypeName | undefined {
     const name = nameNode.text;
     const scope = this.c.scopeOf(nameNode);
@@ -551,31 +672,70 @@ export class TypeNodes {
     }
     if (stringMappings.has(name) && argumentCount === 1 && !symbol?.typeDeclarations.length) return 'stringMapping';
     if (!symbol) {
-      this.c.error(
-        nameNode,
-        scope.lookupValue(name)
-          ? `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。`
-          : `型 ${name} が見つかりません。${nameSuggestionHint(scope, name, 'type', this.c.budget)}`
-      );
+      this.reportMissingOrValueTypeName(nameNode, scope, name);
       return undefined;
     }
-    if (this.reportUnusableSymbol(node, nameNode, symbol)) return undefined;
-    const parameters = this.c.signatures.typeParametersOfSymbol(symbol);
+    const target = this.resolveImportedTypeSymbol(node, nameNode, symbol);
+    if (!target) return undefined;
+    const parameters = this.c.signatures.typeParametersOfSymbol(target);
     if (parameters.length === 0) {
       if (argumentCount > 0) this.c.error(node, `型 ${name} は型引数をとりません。`);
-      return { symbol, parameters };
+      return { symbol: target, parameters };
     }
-    const required = parameters.filter((parameter) => !parameter.default).length;
-    if (argumentCount < required || argumentCount > parameters.length) {
+    return this.checkTypeArgumentCount(node, name, parameters, argumentCount)
+      ? { symbol: target, parameters }
+      : undefined;
+  }
+
+  private reportMissingOrValueTypeName(nameNode: TreeNode, scope: Sym['scope'], name: string): void {
+    const value = scope.lookupValue(name);
+    const namespace = scope.lookupNamespace(name);
+    const unaliased =
+      value && (value.valueKind === 'import' || value.valueKind === 'importAlias')
+        ? this.c.namespaces.imported(value, 'value')
+        : value;
+    const unaliasedNamespace =
+      namespace && (namespace.namespaceKind === 'import' || namespace.namespaceKind === 'importAlias')
+        ? this.c.namespaces.imported(namespace, 'namespace')
+        : namespace;
+    this.c.error(
+      nameNode,
+      unaliased?.valueKind === 'namespace' || (!value && unaliasedNamespace?.namespaceExports)
+        ? `名前空間 '${name}' を型として使用することはできません。`
+        : value
+          ? `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。`
+          : `型 ${name} が見つかりません。${nameSuggestionHint(scope, name, 'type', this.c.budget)}`
+    );
+  }
+
+  private resolveImportedTypeSymbol(node: TreeNode, nameNode: TreeNode, symbol: Sym): Sym | undefined {
+    if (this.reportUnusableSymbol(node, nameNode, symbol)) return undefined;
+    if (symbol.typeKind !== 'import' && symbol.typeKind !== 'importAlias') return symbol;
+    const target = this.c.namespaces.imported(symbol, 'type');
+    if (target) return this.reportUnusableSymbol(node, nameNode, target) ? undefined : target;
+    const valueTarget = this.c.namespaces.imported(symbol, 'value');
+    const namespaceTarget = this.c.namespaces.imported(symbol, 'namespace');
+    if (valueTarget?.valueKind === 'namespace' || (!valueTarget && namespaceTarget?.namespaceExports))
+      this.c.error(nameNode, `名前空間 '${nameNode.text}' を型として使用することはできません。`);
+    else if (valueTarget)
       this.c.error(
-        node,
-        required === parameters.length
-          ? `ジェネリック型 ${name} には型引数が ${required} 個必要です。`
-          : `ジェネリック型 ${name} には型引数が ${required} 個から ${parameters.length} 個必要です。`
+        nameNode,
+        `${nameNode.text} は値であり、型としては使えません。型を表すには typeof ${nameNode.text} と書いてください。`
       );
-      return undefined;
-    }
-    return { symbol, parameters };
+    return undefined;
+  }
+
+  /** Whether a generic gets as many type arguments as it requires and allows, reporting it when not. */
+  private checkTypeArgumentCount(node: TreeNode, name: string, parameters: TypeParameter[], count: number): boolean {
+    const required = parameters.filter((parameter) => !parameter.default).length;
+    if (count >= required && count <= parameters.length) return true;
+    this.c.error(
+      node,
+      required === parameters.length
+        ? `ジェネリック型 ${name} には型引数が ${required} 個必要です。`
+        : `ジェネリック型 ${name} には型引数が ${required} 個から ${parameters.length} 個必要です。`
+    );
+    return false;
   }
 
   /** Reports a type the name cannot refer to here: an unsupported library type, or a class type parameter in a static member. */
@@ -599,19 +759,55 @@ export class TypeNodes {
   }
 
   private qualifiedType(node: TreeNode): Type {
-    if (this.c.isLibrary(node)) {
-      const name = node.text.startsWith('Intl.') ? node.text.slice('Intl.'.length) : undefined;
-      const symbol = name ? this.c.localeOptionsBinder.moduleScope.types.get(name) : undefined;
-      return symbol ? this.declaredTypeOf(symbol) : anyType;
-    }
+    if (this.c.isLibrary(node) && node.text.startsWith('Intl.')) return this.libraryQualifiedType(node);
     let root = node;
     while (root.childForFieldName('module') ?? root.childForFieldName('object'))
       root = (root.childForFieldName('module') ?? root.childForFieldName('object')) as TreeNode;
     const symbol = this.c.scopeOf(root).lookupType(root.text) ?? this.c.scopeOf(root).lookupValue(root.text);
+    const value = this.c.scopeOf(root).lookupValue(root.text);
+    const namespace = this.c.scopeOf(root).lookupNamespace(root.text, this.c.budget);
+    if (value && root.id === node.childForFieldName('module')?.id && namesEnumMember(this.c, node, value))
+      return this.enumMemberTypeNamed(node, value, root.text);
+    if (namespace || value?.namespaceExports || value?.valueKind === 'importAlias' || value?.valueKind === 'import')
+      return this.namespaceMemberType(node, root);
     this.c.error(
       node,
       symbol?.unsupported ? unsupportedMessage(symbol.unsupported) : `名前空間 ${root.text} が見つかりません。`
     );
+    return errorType;
+  }
+
+  /** `N.T` or `A.B.T`, a type a namespace exports, or `N.E.A`, a member of an enum a namespace exports. */
+  private namespaceMemberType(node: TreeNode, root: TreeNode): Type {
+    const container = node.childForFieldName('module');
+    const enumSymbol = container && container.id !== root.id && this.c.namespaces.qualifiedValueSymbol(container);
+    if (enumSymbol && namesEnumMember(this.c, node, enumSymbol))
+      return this.enumMemberTypeNamed(node, enumSymbol, container.text);
+    const resolved = this.c.namespaces.qualifiedTypeSymbol(node);
+    if (resolved.symbol) return this.declaredTypeOf(resolved.symbol);
+    // As tsc does, a type reference names a value export it reaches, and a heritage clause reports it missing.
+    const isHeritage =
+      heritageClauses.has(node.parent?.type ?? '') || heritageClauses.has(node.parent?.parent?.type ?? '');
+    if (resolved.error && !isHeritage && this.c.namespaces.qualifiedValueSymbol(node))
+      this.c.error(
+        node,
+        `${node.text} は値であり、型としては使えません。型を表すには typeof ${node.text} と書いてください。`
+      );
+    else if (resolved.error) this.c.error(node, resolved.error);
+    return errorType;
+  }
+
+  private libraryQualifiedType(node: TreeNode): Type {
+    const symbol = this.c.localeOptionsBinder.moduleScope.types.get(node.text.slice('Intl.'.length));
+    return symbol ? this.declaredTypeOf(symbol) : anyType;
+  }
+
+  /** `E.A`, the type of the member `A` of the enum `E`. */
+  private enumMemberTypeNamed(node: TreeNode, symbol: Sym, enumName: string): Type {
+    const memberName = node.childForFieldName('name')?.text ?? '';
+    const member = this.c.enums.memberTypeNamed(symbol, memberName);
+    if (member) return member;
+    this.c.error(node, `名前空間 '${enumName}' には、エクスポートされたメンバー '${memberName}' がありません。`);
     return errorType;
   }
 
@@ -911,16 +1107,33 @@ export class TypeNodes {
         symbol.declaredType = this.c.classes.classInfoOf(symbol).instanceType;
         break;
       }
+      case 'enum': {
+        symbol.declaredType = this.c.enums.declaredType(symbol);
+        break;
+      }
+      case 'importAlias':
+      case 'import': {
+        const target = this.c.namespaces.imported(symbol, 'type');
+        symbol.declaredType = target ? this.declaredTypeOf(target) : errorType;
+        break;
+      }
       case 'alias': {
         if (symbol.resolving) return this.aliasSelfReference(symbol);
         symbol.declaredType ??= this.aliasType(symbol);
         break;
       }
       default: {
-        symbol.declaredType = anyType;
+        symbol.declaredType = symbol.valueKind === 'enumMember' ? this.enumMemberSymbolType(symbol) : anyType;
       }
     }
     return symbol.declaredType;
+  }
+
+  private enumMemberSymbolType(symbol: Sym): Type {
+    const declaration = symbol.valueDeclaration?.parent?.parent;
+    const name = declaration?.childForFieldName('name');
+    const enumSymbol = name ? this.c.scopeOf(declaration as TreeNode).lookupValue(name.text) : undefined;
+    return (enumSymbol && this.c.enums.memberTypeNamed(enumSymbol, symbol.name)) ?? errorType;
   }
 
   /** What a reference to an alias inside its own declaration stands for. */
@@ -959,12 +1172,9 @@ export class TypeNodes {
       type = errorType;
     }
     if (pending) pending.types = type.kind === 'union' ? type.types : [type];
-    const declared = aliasedDeclaredType(
-      type,
-      symbol.name,
-      this.c.signatures.typeParametersOfSymbol(symbol),
-      symbol.id
-    );
+    const typeParameters = this.c.signatures.typeParametersOfSymbol(symbol);
+    this.c.aliasTypeParameters.set(symbol.id, typeParameters);
+    const declared = aliasedDeclaredType(type, symbol.name, typeParameters, symbol.id);
     return this.recursiveAliases.complete(symbol, declared);
   }
 
@@ -1114,4 +1324,14 @@ function isOutsideGenericDeclarations(node: TreeNode): boolean {
 
 function unionAlias(symbol: Sym): UnionAlias {
   return { id: symbol.id, type: () => symbol.declaredType };
+}
+
+/**
+ * Whether `E.X` names a member of the enum `E`, which it does when `E` has the member `X`, or else when no namespace
+ * merged with the enum exports a type named `X`.
+ */
+function namesEnumMember(c: Checker, node: TreeNode, symbol: Sym): boolean {
+  const name = node.childForFieldName('name')?.text ?? '';
+  if (symbol.valueKind !== 'enum') return false;
+  return c.enums.memberTypeNamed(symbol, name) !== undefined || !symbol.namespaceExports?.types.has(name);
 }

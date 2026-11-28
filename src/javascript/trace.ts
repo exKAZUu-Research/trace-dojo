@@ -36,11 +36,13 @@ export function traceJavaScriptProgram(program: string, trace: TraceOptions, inp
  *
  * @param showsStatics Shows the static fields of the program's classes after a step's variables, as Java does.
  */
+// code-gauge-allow duplicateLines -- Each language's trace entry point wires its own runtime and snapshotter into TraceRecorder.
 export function recordProgram(parsed: Program, input?: ProgramInput, showsStatics = false): ProgramRecording {
   const runtime = new Runtime(input);
-  const snapshotter = new Snapshotter(runtime, showsStatics);
+  const snapshotter = new Snapshotter(runtime, showsStatics, parsed.hiddenNames);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
+    hidesCallRow: (frame) => frame.callee?.behavior.kind === 'user' && frame.callee.behavior.node.hidesCallRow === true,
     variablesOf: (frame) => snapshotter.variablesOf(frame.scope, true),
   });
   runtime.steps.recorder = recorder;
@@ -55,7 +57,8 @@ export function recordProgram(parsed: Program, input?: ProgramInput, showsStatic
 class Snapshotter {
   constructor(
     private readonly runtime: Runtime,
-    private readonly showsStatics: boolean
+    private readonly showsStatics: boolean,
+    private readonly hiddenNames?: ReadonlySet<string>
   ) {}
 
   /** The variables visible from `scope`, followed by static fields and the fields of `this` when `withThis`. */
@@ -75,9 +78,8 @@ class Snapshotter {
     let top: Scope | undefined = scope;
     while (top?.parent && top.parent !== this.runtime.realm.globals) top = top.parent;
     if (!top) return;
-    for (const [className, cls] of classBindings(top)) {
-      if (cls.behavior.kind !== 'class') continue;
-      for (const [key, property] of displayedProperties(cls, this.runtime)) {
+    for (const { name: className, live, declared } of classBindings(top)) {
+      for (const [key, property] of effectiveStaticProperties(live, declared, this.runtime)) {
         const name = `${className}.${key}`;
         if (isAccessor(property)) variables.referenceVars[name] = accessorNode(property);
         else addVariable(variables, name, property.value, this.runtime);
@@ -96,8 +98,14 @@ class Snapshotter {
     ) {
       const entries: [string, Value][] = [];
       for (const [name, binding] of current.bindings) {
-        // `arguments` and private names are bindings the program never declared.
-        if (!seen.has(name) && !name.startsWith('#') && name !== 'arguments' && isVariable(binding))
+        // `arguments`, private names, and generated helper receivers are bindings the program never declared.
+        if (
+          !seen.has(name) &&
+          !name.startsWith('#') &&
+          name !== 'arguments' &&
+          !this.hiddenNames?.has(name) &&
+          isVariable(binding)
+        )
           entries.push([name, binding.value as Value]);
         seen.add(name);
       }
@@ -108,15 +116,47 @@ class Snapshotter {
   }
 }
 
-function classBindings(scope: Scope): [string, JsFunction][] {
-  const classes = new Map<JsFunction, string>();
+interface TracedClass {
+  name: string;
+  live: JsFunction;
+  declared: JsFunction;
+}
+
+function classBindings(scope: Scope): TracedClass[] {
+  const classes = new Map<JsFunction, TracedClass>();
   for (const [name, binding] of scope.bindings) {
-    const value = binding.initializingClass ?? binding.value;
-    if (!(value instanceof JsFunction) || value.behavior.kind !== 'class') continue;
-    if (binding === value.behavior.traceBinding) classes.delete(value);
-    if (!classes.has(value)) classes.set(value, name);
+    const live = binding.initializingClass ?? binding.value;
+    if (!(live instanceof JsFunction)) continue;
+    const declared = binding.initializingClass ?? binding.declaredClass ?? live.declaredClass ?? live;
+    if (declared.behavior.kind !== 'class' && live.behavior.kind !== 'class') continue;
+    const owner = declared.behavior.kind === 'class' ? declared.behavior.traceBinding : undefined;
+    if (binding === owner) classes.delete(live);
+    if (!classes.has(live)) classes.set(live, { name, live, declared });
   }
-  return [...classes].map(([value, name]) => [name, value]);
+  return [...classes.values()];
+}
+
+function effectiveStaticProperties(live: JsFunction, declared: JsFunction, runtime: Runtime): [string, Property][] {
+  if (live === declared || !hasPrototypeAncestor(live, declared)) return displayedProperties(live, runtime);
+  const entries: [string, Property][] = [];
+  const shadowed = new Set<string>();
+  for (let current: JsObject | null = live; current; current = current.proto) {
+    for (const [key, property] of displayedProperties(current, runtime)) {
+      if (!shadowed.has(key)) entries.push([key, property]);
+    }
+    for (const key of current.properties.keys()) {
+      if (typeof key === 'string') shadowed.add(key);
+    }
+    if (current === declared) break;
+  }
+  return entries;
+}
+
+function hasPrototypeAncestor(object: JsObject, target: JsObject): boolean {
+  for (let current: JsObject | null = object; current; current = current.proto) {
+    if (current === target) return true;
+  }
+  return false;
 }
 
 /** Functions and classes are not variables to learners, and neither is a `var` whose declaration has not run. */

@@ -1,0 +1,18 @@
+interface Numbers extends IterableIterator<number> {}
+function* count(): Numbers {
+  yield 1;
+}
+interface CustomIter {
+  next(input: string): { done?: false; value: number } | { done: true; value: boolean };
+}
+function* custom(): CustomIter {
+  const s: string = yield 42;
+  return s.length > 0;
+}
+const k = function* () {
+  yield 2;
+};
+k.tag = 5;
+k['label'] = 'g';
+const it = custom();
+console.log(k.tag, k.label, [...k()], [...count()], it.next('ignored').value, it.next('ok').value);

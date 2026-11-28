@@ -1,0 +1,11 @@
+declare const s: string;
+const n = Math.random() > 2 ? 1 : 2;
+enum E { A = 1n }
+enum F { A = "x" + 1n }
+enum G { A = 1n, B = 2 }
+enum H { A = "s", B = `t` }
+enum I { A = n, B = s.length }
+enum J { A = s }
+const k: any = 3;
+enum K { A = k }
+console.log(E.A, F.A, G.B, H.A, I.B, J.A, K.A);

@@ -53,3 +53,8 @@ interface FullPoint { x: number; y: number }
 function defaultedPoint<T extends FullPoint | undefined = { x: 1 } | { y: 2 }>() {}
 type Constrained<T extends string | undefined> = { item: T };
 function instantiatedUnion(value: Constrained<string | number>) {}
+type Figure = "circle" | "square" | "triangle";
+function area(s: Figure) { if (s === "circle") return; const bad: never = s; }
+enum Color { Red, Green, Blue }
+function paint(c: Color) { if (c === Color.Red) return; const left: never = c; }
+const neverString: never = "q";

@@ -10,6 +10,8 @@ import { ClassDeclarationChecker } from './classDeclarations';
 import { ClassChecker } from './classes';
 import { ConditionChecker } from './conditions';
 import { checkDuplicateDeclarations, checkParameterRedeclarations } from './declarations';
+import { checkDecoratorPlacements } from './decoratorChecks';
+import { Enums } from './enums';
 import { ExpressionChecker } from './expressions';
 import { Flow } from './flow';
 import { FunctionChecker } from './functions';
@@ -20,8 +22,10 @@ import { libraryScope, libraryTree, localeOptionsTree, markUnsupported } from '.
 import { LiteralChecker } from './literals';
 import { MemberChecker } from './members';
 import { intersectConstructSignatures } from './mixinConstructors';
+import { Namespaces } from './namespaces';
 import { OperatorChecker } from './operators';
 import { OverloadContexts } from './overloadContexts';
+import { checkTypeMemberModifiers } from './overrideModifiers';
 import { BindingPatterns } from './patterns';
 import { Printer } from './print';
 import { ReducedTypes } from './reducedTypes';
@@ -30,7 +34,7 @@ import type { Scope } from './scopes';
 import { Signatures } from './signatures';
 import { SourceMethodUses } from './sourceMethodUses';
 import { StatementChecker } from './statements';
-import { bigIntPropertyNames } from './syntax';
+import { bigIntPropertyNames, isModule } from './syntax';
 import { tupleSliceReadType } from './tupleIndexes';
 import { tupleType } from './tupleTypes';
 import { TypeNodes } from './typeNodes';
@@ -74,6 +78,7 @@ import {
   unionOf,
   type UnionType,
   unknownType,
+  widenedLiteralType,
   withAlias,
 } from './types';
 import { couldContainTypeVariables } from './typeVariables';
@@ -98,6 +103,8 @@ export class Checker {
   /** While positive, speculative errors are suppressed, as when inferring a function's return type. */
   silent = 0;
   readonly binder: Binder;
+  /** Whether the program has an `import` or an `export`, which makes it a module. */
+  readonly isModule: boolean;
   readonly libraryBinder: Binder;
   readonly localeOptionsBinder: Binder;
   readonly reducedTypes = new ReducedTypes(this);
@@ -121,7 +128,11 @@ export class Checker {
   readonly typeNodes = new TypeNodes(this);
   readonly signatures = new Signatures(this);
   readonly inference = new TypeInference(this);
+  readonly enums = new Enums(this);
+  readonly namespaces = new Namespaces(this);
   private readonly referenceCache = new Map<string, ObjectType>();
+  /** The type parameters of each generic alias, by its id, which relating its instantiations by variance needs. */
+  readonly aliasTypeParameters = new Map<number, TypeParameter[]>();
   private readonly instantiationCache = new Map<string, Type>();
   /** The unions that stand for a union alias, with the mapper that instantiates the alias's type into them. */
   private readonly aliasUnions = new Map<UnionType, { alias: UnionAlias; mapper: Mapper }>();
@@ -142,16 +153,26 @@ export class Checker {
     this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope(), { deferLibraryTypes: true });
     this.localeOptionsBinder = new Binder(localeOptionsTree.rootNode, this.libraryBinder.moduleScope);
     markUnsupported(this.libraryBinder.moduleScope);
-    this.binder = new Binder(root, this.libraryBinder.globalScope, {
-      rootScope: this.libraryBinder.moduleScope,
-      budget,
-    });
+    // A program with an import or an export is a module, whose declarations shadow the globals rather than merge with them.
+    this.isModule = isModule(root);
+    const existingModules = this.libraryBinder.ambientModules;
+    this.binder = this.isModule
+      ? new Binder(root, this.libraryBinder.moduleScope, { budget, existingModules })
+      : new Binder(root, this.libraryBinder.globalScope, {
+          rootScope: this.libraryBinder.moduleScope,
+          budget,
+          existingModules,
+        });
   }
 
   check(): SourceDiagnostic[] {
     for (const name of bigIntPropertyNames(this.root))
       this.error(name, 'bigint リテラルはプロパティ名として使えません。');
     this.classes.checkThisTypePlacements(this.root);
+    checkDecoratorPlacements(this, this.root);
+    checkTypeMemberModifiers(this, this.root);
+    this.namespaces.pruneImportAliasMeanings(this.binder.allScopes);
+    this.namespaces.checkCircularAliases(this.binder.allScopes);
     checkDuplicateDeclarations(this, this.binder.allScopes);
     this.signatures.checkTypeParameterDeclarations(this.binder.allScopes);
     this.signatures.checkImplicitReturnTypes(this.root);
@@ -273,6 +294,16 @@ export class Checker {
     return this.reference(declared, typeArguments);
   }
 
+  globalTypeAlias(name: string, typeArguments: Type[] = []): Type {
+    const symbol = this.libraryBinder.moduleScope.lookupType(name);
+    if (!symbol) throw new Error(`The library declares no type ${name}`);
+    const declared = this.typeNodes.declaredTypeOf(symbol);
+    const parameters = this.signatures.typeParametersOfSymbol(symbol);
+    if (parameters.length === 0) return declared;
+    const filled = this.fillTypeArguments(parameters, typeArguments);
+    return this.instantiate(declared, new Map(parameters.map((parameter, index) => [parameter.id, filled[index]])));
+  }
+
   globalValue(name: string): Type {
     const symbol = this.libraryBinder.moduleScope.lookupValue(name);
     if (!symbol) throw new Error(`The library declares no value ${name}`);
@@ -392,7 +423,9 @@ export class Checker {
   fillTypeArguments(parameters: TypeParameter[], typeArguments: Type[]): Type[] {
     const mapper: Mapper = new Map();
     return parameters.map((parameter, index) => {
-      const argument = typeArguments[index] ?? this.instantiate(parameter.default?.() ?? unknownType, mapper);
+      // A copy, as the instantiated default keeps its mapper, which must not come to map the default to itself.
+      const argument =
+        typeArguments[index] ?? this.instantiate(parameter.default?.() ?? unknownType, createMapper(mapper));
       mapper.set(parameter.id, argument);
       return argument;
     });
@@ -527,25 +560,26 @@ export class Checker {
    * deeper instantiations of itself.
    */
   deferredAliasUnion(alias: UnionAlias, mapper: Mapper): UnionType {
-    const key = `${alias.id}[${typeMapperCacheKey(mapper)}]`;
+    const snapshot = createMapper(mapper, mapper.preserveLiterals);
+    const key = `${alias.id}[${typeMapperCacheKey(snapshot)}]`;
     const cached = this.deferredAliasUnionCache.get(key);
     if (cached) return cached;
     let types: Type[] | undefined;
     const instantiate = (): Type[] | undefined => {
       const declared = alias.type();
       if (!declared) return undefined;
-      const instantiated = this.instantiate(declared, mapper);
+      const instantiated = this.instantiate(declared, snapshot);
       return instantiated.kind === 'union' ? instantiated.types : [instantiated];
     };
     const union: UnionType = {
       kind: 'union',
       id: newTypeId(),
-      aliasMapper: mapper,
+      aliasMapper: snapshot,
       get types() {
         return (types ??= instantiate()) ?? [];
       },
     };
-    this.aliasUnions.set(union, { alias, mapper });
+    this.aliasUnions.set(union, { alias, mapper: snapshot });
     this.deferredAliasUnionCache.set(key, union);
     return union;
   }
@@ -592,10 +626,11 @@ export class Checker {
         break;
       }
     }
-    const key = `${type.id}[${typeMapperCacheKey(mapper)}]`;
+    const snapshot = createMapper(mapper, mapper.preserveLiterals);
+    const key = `${type.id}[${typeMapperCacheKey(snapshot)}]`;
     const cached = this.instantiationCache.get(key);
     if (cached) return cached;
-    const instantiated = anonymousObject(() => this.instantiateStructure(type.resolve(), mapper), {
+    const instantiated = anonymousObject(() => this.instantiateStructure(type.resolve(), snapshot), {
       isFunction: type.isFunction,
       isLiteral: type.isLiteral,
       classInfo: type.classInfo,
@@ -606,9 +641,9 @@ export class Checker {
       name: type.name,
       aliasName: type.aliasName,
       aliasId: type.aliasId,
-      aliasArguments: type.aliasArguments?.map((argument) => this.instantiate(argument, mapper)),
+      aliasArguments: type.aliasArguments?.map((argument) => this.instantiate(argument, snapshot)),
       origin: type.origin ?? type,
-      mapper: type.mapper ? this.composeMappers(type.mapper, mapper) : mapper,
+      mapper: type.mapper ? this.composeMappers(type.mapper, snapshot) : snapshot,
     });
     this.instantiationCache.set(key, instantiated);
     return instantiated;
@@ -650,7 +685,8 @@ export class Checker {
     return reference;
   }
 
-  private instantiateMapped(type: ObjectType, mapper: Mapper): Type {
+  private instantiateMapped(type: ObjectType, rawMapper: Mapper): Type {
+    const mapper = createMapper(rawMapper, rawMapper.preserveLiterals);
     const mapped = type.mapped as MappedInfo;
     let constraint: Type | undefined;
     const getConstraint = (): Type => (constraint ??= this.instantiate(mapped.constraint, mapper));
@@ -741,6 +777,7 @@ export class Checker {
           property.writeType &&
           (() => (writeType ??= this.instantiate(property.writeType?.() ?? property.type(), mapper))),
         type: () => {
+          if (type && this.functions.isTrackingReturnYields()) property.type();
           type ??= this.instantiate(property.type(), mapper);
           return type;
         },
@@ -811,6 +848,7 @@ export class Checker {
       ),
       thisType: signature.thisType && this.instantiate(signature.thisType, mapper),
       returnType: () => {
+        if (returnType && this.functions.isTrackingReturnYields()) signature.returnType();
         returnType ??= this.instantiate(signature.returnType(), mapper);
         return returnType;
       },
@@ -1115,6 +1153,7 @@ export class Checker {
       exactOptionalType: true,
       readonly: existing.readonly && property.readonly,
       getterOnly: existing.getterOnly === true && property.getterOnly === true,
+      enumSymbol: existing.enumSymbol ?? property.enumSymbol,
       type: () => intersectionOf([propertyAccessType(existing), propertyAccessType(property)], this),
       writeType: hasWriteType
         ? () => intersectionOf([propertyAccessType(existing, 'write'), propertyAccessType(property, 'write')], this)
@@ -1197,7 +1236,7 @@ export class Checker {
 
   /** The type a literal has once a mutable location widens it. */
   widenLiteral(type: Type): Type {
-    if (type.kind === 'literal' && type.fresh) return primitiveOfLiteral(type);
+    if (type.kind === 'literal' && type.fresh) return widenedLiteralType(type);
     if (type.kind === 'union' && type.types.some((member) => member.kind === 'literal' && member.fresh)) {
       return unionOf(type.types.map((member) => this.widenLiteral(member)));
     }
@@ -1231,7 +1270,9 @@ export class Checker {
 
   widenLiteralForMessage(source: Type, target: Type): Type {
     const regular = regularOf(source);
-    if (!isLiteralType(regular) || this.couldHaveTopLevelSingletonTypes(target)) return regular;
+    // tsc shows the literals a value assigned to `never` has, as an exhaustiveness check reports the cases left.
+    if (!isLiteralType(regular) || isIntrinsic(target, 'never') || this.couldHaveTopLevelSingletonTypes(target))
+      return regular;
     return regular.kind === 'union' ? unionOf(regular.types.map(baseTypeOfLiteral)) : baseTypeOfLiteral(regular);
   }
 
@@ -1258,8 +1299,6 @@ export class Checker {
 export function checkTypeScript(root: TreeNode, budget: ExecutionBudget): SourceDiagnostic[] {
   return new Checker(root, budget).check();
 }
-
-export { regularOf };
 
 const instantiableKinds = new Set<Type['kind']>([
   'typeParameter',

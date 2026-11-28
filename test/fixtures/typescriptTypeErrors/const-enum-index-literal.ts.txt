@@ -1,0 +1,7 @@
+const enum K { P = 1, Q = 2 }
+console.log(K[1]);
+const i: number = 1;
+console.log(K[i]);
+const s = 'P' as 'P';
+console.log(K[s]);
+console.log(K['P'], K[`Q`], K[('P')]);

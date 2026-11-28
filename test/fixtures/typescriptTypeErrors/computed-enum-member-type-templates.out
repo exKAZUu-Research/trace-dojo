@@ -1,0 +1,1 @@
+(4,16): error TS18033: Type 'string' is not assignable to type 'number' as required for computed enum member values.

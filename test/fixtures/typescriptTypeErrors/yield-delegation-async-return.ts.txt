@@ -1,0 +1,7 @@
+async function* a1() { const r: number = yield* [1]; return r; }
+async function* a2() { const r: string = yield* "ab"; return r; }
+async function* a3() { const r: number = yield* new Set([1]); return r; }
+async function* a4(it: AsyncIterable<number>) { const r: number = yield* it; return r; }
+async function* inner(): AsyncGenerator<number, string> { yield 1; return "x"; }
+async function* a5() { const r: string = yield* inner(); return r; }
+console.log(a1, a2, a3, a4, a5);

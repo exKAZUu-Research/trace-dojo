@@ -1,0 +1,17 @@
+const d0 = () => {};
+const dc = () => {};
+const factory = () => (value: Function, context: ClassMethodDecoratorContext) => {};
+const field1 = (_v: undefined) => {};
+const opt = (a?: unknown) => {};
+const rest = (...a: unknown[]) => {};
+@dc class B {}
+class A {
+  @d0 m() { return 1; }
+  @d0 get g() { return 1; }
+  @d0 f = 1;
+  @factory() n() {}
+  @field1 h = 2;
+  @opt o = 3;
+  @rest r = 4;
+}
+console.log(new A().m());

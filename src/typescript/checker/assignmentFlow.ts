@@ -1,6 +1,15 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { chainObject, isInlinedInvocation, isWithin, named, skipParentheses } from './syntax';
+import {
+  chainObject,
+  isInlinedInvocation,
+  isWithin,
+  jumpLabel,
+  labeledBody,
+  loopStatementTypes,
+  named,
+  skipParentheses,
+} from './syntax';
 import { anyType, type Type, undefinedType } from './types';
 
 /** What a tracked target may hold at a point: what its assignments gave it, or what a loop's iteration began with. */
@@ -28,6 +37,7 @@ interface LoopEntry {
 
 interface JumpTarget {
   isLoop: boolean;
+  labels: string[];
   breaks: Values[];
   continues: Values[];
 }
@@ -134,6 +144,9 @@ class AssignmentFlow {
       case 'switch_statement': {
         return this.switchStatement(node, values);
       }
+      case 'labeled_statement': {
+        return this.labeledStatement(node, values);
+      }
       case 'try_statement': {
         return this.tryStatement(node, values);
       }
@@ -155,12 +168,34 @@ class AssignmentFlow {
         break;
       }
       case 'break_statement': {
-        this.targets.at(-1)?.breaks.push(values);
+        const label = jumpLabel(node);
+        this.targets
+          .findLast((target) =>
+            label === undefined ? target.isLoop || target.labels.length === 0 : target.labels.includes(label)
+          )
+          ?.breaks.push(values);
         break;
       }
       default: {
-        this.targets.findLast((target) => target.isLoop)?.continues.push(values);
+        const label = jumpLabel(node);
+        this.targets
+          .findLast((target) => target.isLoop && (label === undefined || target.labels.includes(label)))
+          ?.continues.push(values);
       }
+    }
+  }
+
+  /** A labeled loop takes its labels; any other labeled statement is a target that only `break` jumps out of. */
+  private labeledStatement(node: TreeNode, values: Values): Values {
+    const { labels, body } = labeledBody(node);
+    if (!body) return values;
+    if (loopStatementTypes.has(body.type)) return this.loop(body, values, labels);
+    const target: JumpTarget = { isLoop: false, labels, breaks: [], continues: [] };
+    this.targets.push(target);
+    try {
+      return merge([this.statement(body, values), ...target.breaks]);
+    } finally {
+      this.targets.pop();
     }
   }
 
@@ -206,14 +241,14 @@ class AssignmentFlow {
    * The values after a loop. Its body runs once from a marker for the iteration's start, which the values that reach
    * the next iteration then replace: an assignment replaces every value the field held, so this reaches the fixpoint.
    */
-  private loop(node: TreeNode, values: Values): Values {
+  private loop(node: TreeNode, values: Values, labels: string[] = []): Values {
     const header = node.childForFieldName('header') ?? node;
     const isForIn = node.type === 'for_in_statement';
     const initializer = header.childForFieldName(isForIn ? 'right' : 'initializer');
     const before = initializer ? this.statement(initializer, values) : values;
     const condition = isForIn ? undefined : loopCondition(header);
     const entry: LoopEntry = { kind: 'loopEntry' };
-    const target: JumpTarget = { isLoop: true, breaks: [], continues: [] };
+    const target: JumpTarget = { isLoop: true, labels, breaks: [], continues: [] };
     const returnCount = this.returns.length;
     const exceptions = this.exceptionTargets.at(-1);
     const exceptionCount = exceptions?.length ?? 0;
@@ -268,7 +303,7 @@ class AssignmentFlow {
     const cases = named(node.childForFieldName('body') as TreeNode).filter(
       (child) => child.type === 'switch_case' || child.type === 'switch_default'
     );
-    const target: JumpTarget = { isLoop: false, breaks: [], continues: [] };
+    const target: JumpTarget = { isLoop: false, labels: [], breaks: [], continues: [] };
     this.targets.push(target);
     let fallthrough: Values;
     try {

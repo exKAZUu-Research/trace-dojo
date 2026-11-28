@@ -38,7 +38,8 @@ export function isConstantReference(c: Checker, node: TreeNode): boolean {
 /** Whether a variable is a constant, a parameter or local `let` never reassigned, or a function expression's name. */
 function isConstantVariable(c: Checker, identifier: TreeNode): boolean {
   const symbol = c.scopeOf(identifier).lookupValue(identifier.text);
-  if (symbol?.valueEntries[0]?.kind === 'function') return symbol.valueDeclaration?.type === 'function_expression';
+  if (symbol?.valueEntries[0]?.kind === 'function')
+    return ['function_expression', 'generator_function'].includes(symbol.valueDeclaration?.type ?? '');
   return isUnchangedVariable(c, identifier);
 }
 

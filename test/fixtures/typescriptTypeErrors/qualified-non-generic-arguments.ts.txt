@@ -1,0 +1,7 @@
+namespace N { export interface Plain { p: 1 } export type Al = number; }
+const a: N.Plain<number> = { p: 1 };
+const b: N.Al<number> = 1;
+class X implements N.Plain<number> { p: 1 = 1; }
+const c: N.Plain<string, number> = { p: 1 };
+const d: N.Plain = { p: 1 };
+console.log(a, b, new X(), c, d);

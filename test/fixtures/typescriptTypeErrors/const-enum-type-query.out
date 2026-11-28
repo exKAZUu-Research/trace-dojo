@@ -1,0 +1,1 @@
+(2,15): error TS2475: 'const' enums can only be used in property or index access expressions or the right hand side of an import declaration or export assignment or type query.

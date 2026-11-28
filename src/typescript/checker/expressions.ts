@@ -1,14 +1,16 @@
-// code-gauge-allow-file fileNcss -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { assertedExpression } from '../erasedSyntax';
 import { unsupportedMessage } from '../unsupported';
+// code-gauge-allow-file fileNcss -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+import { awaitableContextualType, awaitedType, checkAwaitPlace } from './awaited';
 import { Calls } from './calls';
 import type { Checker } from './checker';
 import { DeferredContexts } from './deferredContexts';
 import { arrayTargets, Elaboration, targetElementType } from './elaboration';
+import { isConstEnum } from './enums';
 import { Expandos, laterRunningTypes } from './expandos';
-import { ExpressionTypeCache } from './expressionTypeCache';
+import { ExpressionTypeCache, type RetainFresh } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import { namedPropertyIndex } from './indexInfos';
 import { nonNullableType } from './nullishConstraints';
@@ -17,13 +19,17 @@ import { nameSuggestionHint } from './spelling';
 import {
   assignmentKind,
   hasToken,
+  isClassConstructor,
   isDirectEmptyArray,
+  isFunctionWithOwnThis,
   isImmediatelyInvoked,
+  isTaggedTemplateArgument,
   named,
   numberValue,
   skipParentheses,
   stringValue,
   templateFragmentText,
+  withoutAssertions,
 } from './syntax';
 import {
   isTemplateLiteralContext,
@@ -60,7 +66,22 @@ interface ExcessPropertyOptions {
 
 const reportExcessProperties: ExcessPropertyOptions = { report: true };
 
+/** The nodes that end the search for the function `new.target` belongs to: those with their own `this`. */
+const newTargetBoundaries = new Set([
+  'function_declaration',
+  'function_expression',
+  'generator_function',
+  'generator_function_declaration',
+  'method_definition',
+  'class_static_block',
+  'field_definition',
+  'program',
+]);
+
 export type CheckExpression = (node: TreeNode, contextual?: Type) => Type;
+
+/** The kinds of names a use before their declaration reads before they are initialized, as tsc reports. */
+const usedBeforeDeclarationKinds = new Set(['let', 'const', 'class', 'enum', 'parameter']);
 
 /** Checks expressions, computing their types and narrowing the references their conditions test. */
 export class ExpressionChecker {
@@ -69,15 +90,12 @@ export class ExpressionChecker {
   readonly expandos: Expandos;
   readonly elaboration: Elaboration;
   private readonly silentTypes: ExpressionTypeCache;
-  private readonly uniqueSymbols: UniqueSymbols;
+  readonly uniqueSymbols: UniqueSymbols;
   /** Types of variables computed from their declarations, by symbol. */
   private readonly variableTypes = new Map<number, Type>();
 
   /** The type of each kind of expression; the others check their children and are `any`. */
-  private readonly checkers = new Map<
-    string,
-    (node: TreeNode, contextual?: Type, retainFreshBoolean?: boolean) => Type
-  >([
+  private readonly checkers = new Map<string, (node: TreeNode, contextual?: Type, retainFresh?: RetainFresh) => Type>([
     ['number', (node) => freshLiteralType(numberValue(node.text))],
     ['string', (node) => freshLiteralType(stringValue(node))],
     ['template_string', (node, contextual) => this.templateString(node, contextual)],
@@ -90,12 +108,13 @@ export class ExpressionChecker {
     ['this', (node) => this.thisExpression(node)],
     [
       'parenthesized_expression',
-      (node, contextual, retainFreshBoolean) =>
-        this.checkWrapped(node, contextual, (operand, context) => this.check(operand, context, retainFreshBoolean)),
+      (node, contextual, retainFresh) =>
+        this.checkWrapped(node, contextual, (operand, context) => this.check(operand, context, retainFresh)),
     ],
     ['array', (node, contextual) => this.c.literals.arrayLiteral(node, contextual)],
     ['object', (node, contextual) => this.c.literals.objectLiteral(node, contextual)],
     ['function_expression', (node, contextual) => this.c.functions.functionExpression(node, contextual)],
+    ['generator_function', (node, contextual) => this.c.functions.functionExpression(node, contextual)],
     ['arrow_function', (node, contextual) => this.c.functions.functionExpression(node, contextual)],
     ['class', (node) => this.c.classes.classExpression(node)],
     ['member_expression', (node) => this.c.members.checkAccess(node).type],
@@ -103,24 +122,28 @@ export class ExpressionChecker {
     [
       'call_expression',
       (node, contextual) =>
-        this.c.members.chainLink(node, () => this.uniqueSymbols.typeOfCall(node, this.calls.call(node, contextual))),
+        this.c.members.chainLink(node, () =>
+          this.c.members.rejectLibraryBuffer(
+            node,
+            this.uniqueSymbols.typeOfCall(node, this.calls.call(node, contextual))
+          )
+        ),
     ],
     ['new_expression', (node, contextual) => this.calls.newExpression(node, contextual)],
     ['assignment_expression', (node) => this.c.assignments.assignment(node)],
     ['augmented_assignment_expression', (node) => this.c.assignments.compoundAssignment(node)],
     ['update_expression', (node) => this.c.assignments.update(node)],
     ['unary_expression', (node) => this.c.operators.unary(node)],
-    [
-      'binary_expression',
-      (node, contextual, retainFreshBoolean) => this.c.operators.binary(node, contextual, retainFreshBoolean),
-    ],
-    [
-      'ternary_expression',
-      (node, contextual, retainFreshBoolean) => this.c.operators.ternary(node, contextual, retainFreshBoolean),
-    ],
+    ['binary_expression', (node, contextual, retainFresh) => this.c.operators.binary(node, contextual, retainFresh)],
+    ['ternary_expression', (node, contextual, retainFresh) => this.c.operators.ternary(node, contextual, retainFresh)],
     ['as_expression', (node, contextual) => this.checkWrapped(node, contextual)],
     ['type_assertion', (node, contextual) => this.checkWrapped(node, contextual)],
-    ['satisfies_expression', (node, contextual) => this.checkWrapped(node, contextual)],
+    ['satisfies_expression', (node) => this.satisfiesExpression(node)],
+    ['meta_property', (node) => this.newTarget(node)],
+    ['sequence_expression', (node, contextual, retainFresh) => this.sequenceExpression(node, contextual, retainFresh)],
+    ['yield_expression', (node, contextual) => this.c.functions.yieldExpression(node, contextual)],
+    ['await_expression', (node, contextual) => this.awaitExpression(node, contextual)],
+    ['instantiation_expression', (node) => this.calls.instantiationExpression(node)],
     ['non_null_expression', (node, contextual) => this.checkWrapped(node, contextual)],
     ['spread_element', (node) => this.check(named(node)[0])],
   ]);
@@ -139,17 +162,15 @@ export class ExpressionChecker {
   // Entry points -------------------------------------------------------------------------------------------------
 
   checkAssignedValue(node: TreeNode, contextual?: Type): Type {
-    return this.check(node, contextual, true);
+    return this.check(node, contextual, 'boolean');
   }
 
-  check(node: TreeNode, contextual?: Type, retainFreshBoolean = false): Type {
+  check(node: TreeNode, contextual?: Type, retainFresh: RetainFresh = false): Type {
     this.c.budget.spend();
     return this.c.withTypeDemand(node, () => {
-      if (this.c.silent > 0)
-        return this.silentTypes.check(node, contextual, retainFreshBoolean, () =>
-          this.compute(node, contextual, retainFreshBoolean)
-        );
-      const type = this.compute(node, contextual, retainFreshBoolean);
+      if (this.c.silent > 0 && !this.c.functions.isTrackingReturnYields())
+        return this.silentTypes.check(node, contextual, retainFresh, () => this.compute(node, contextual, retainFresh));
+      const type = this.compute(node, contextual, retainFresh);
       if (!this.c.flow.probing && this.observedTypes?.has(node.id)) this.observedTypes.set(node.id, type);
       return type;
     });
@@ -189,6 +210,98 @@ export class ExpressionChecker {
     });
   }
 
+  /** `await value`, which gives what a promise fulfills with, only in an async function. */
+  private awaitExpression(node: TreeNode, contextual: Type | undefined): Type {
+    checkAwaitPlace(this.c, node, false);
+    const operand = named(node).find((child) => child.type !== 'comment');
+    return operand
+      ? awaitedType(this.c, this.check(operand, awaitableContextualType(this.c, contextual)), { node, kind: 'await' })
+      : anyType;
+  }
+
+  /**
+   * `a, b, c`, which TypeScript parses as `(a, b), c`: each comma whose left side has no side effects is an error, at
+   * the start of that side, unless it is the `(0, o.f)()` idiom of an indirect call.
+   */
+  private sequenceExpression(node: TreeNode, contextual: Type | undefined, retainFresh: RetainFresh = false): Type {
+    const elements = named(node).filter((child) => child.type !== 'comment');
+    let leftIsFree = true;
+    for (const [index, element] of elements.entries()) {
+      if (index === elements.length - 1) {
+        const result = this.check(element, contextual, retainFresh);
+        this.applySequenceCallFlow(element, result);
+        return result;
+      }
+      const elementType = this.check(element);
+      this.applySequenceCallFlow(element, elementType);
+      leftIsFree &&= isSideEffectFree(element);
+      if (leftIsFree && !(elements.length === 2 && isIndirectCall(node, element, elements[1])))
+        this.c.error(elements[0], 'コンマ演算子の左側は使われず、副作用もありません。');
+    }
+    return anyType;
+  }
+
+  private applySequenceCallFlow(element: TreeNode, type: Type): void {
+    const call = skipParentheses(element);
+    if (call.type !== 'call_expression') return;
+    if (this.calls.endsFlow(call, type)) this.c.flow.current = undefined;
+    else this.c.conditions.applyAssertion(call, false);
+  }
+
+  /**
+   * `new.target`: the class in a constructor, or the function in a function declaration or expression, as TypeScript's
+   * `getNewTargetContainer` finds through arrow functions; elsewhere it is an error.
+   */
+  private newTarget(node: TreeNode): Type {
+    let child = node;
+    let container = node.parent;
+    while (container && !isNewTargetBoundary(container, child)) {
+      child = container;
+      container = container.parent;
+    }
+    if (
+      container &&
+      isClassConstructor(container) &&
+      !hasToken(container, 'static') &&
+      !hasToken(container, 'get') &&
+      !hasToken(container, 'set')
+    ) {
+      const classNode = container.parent?.parent;
+      if (classNode) return this.c.classes.valueTypeOf(this.c.classes.classInfoOfNode(classNode));
+    }
+    if (
+      container &&
+      isFunctionWithOwnThis(container) &&
+      container.type !== 'method_definition' &&
+      container.type !== 'class_static_block'
+    ) {
+      const name = container.childForFieldName('name');
+      return name && container.type.endsWith('function_declaration')
+        ? this.checkReferenceSilently(name)
+        : this.c.globalType('Function');
+    }
+    this.c.error(
+      node,
+      "メタプロパティ 'new.target' は、関数宣言・関数式・コンストラクターの本体の中でしか使えません。"
+    );
+    return errorType;
+  }
+
+  /**
+   * `expression satisfies T`: the expression is checked against `T` as its contextual type and must be assignable to
+   * it, yet keeps its own type.
+   */
+  private satisfiesExpression(node: TreeNode): Type {
+    const [operand, typeNode] = named(node);
+    const target = this.c.typeNodes.typeFromNode(typeNode);
+    const type = this.check(operand, target, 'all');
+    if (target === errorType) return type;
+    if (this.c.relations.isAssignable(type, target)) this.checkExcessProperties(operand, type, target);
+    else if (!this.elaboration.report(operand, type, target))
+      this.c.error(operand, this.elaboration.typeRelationMessage(type, target, 'satisfies'));
+    return type;
+  }
+
   observeTypes<T>(types: Map<number, Type | undefined>, run: () => T): T {
     if (types.size === 0) return run();
     const outer = this.observedTypes;
@@ -200,11 +313,15 @@ export class ExpressionChecker {
     }
   }
 
-  private compute(node: TreeNode, contextual: Type | undefined, retainFreshBoolean: boolean): Type {
+  private compute(node: TreeNode, contextual: Type | undefined, retainFresh: RetainFresh): Type {
     const checkKind = this.checkers.get(node.type);
     if (checkKind) {
-      const type = checkKind(node, contextual, retainFreshBoolean);
-      if (retainFreshBoolean && type.kind === 'literal' && typeof type.value === 'boolean') return type;
+      const type = checkKind(node, contextual, retainFresh);
+      if (
+        retainFresh === 'all' ||
+        (retainFresh === 'boolean' && type.kind === 'literal' && typeof type.value === 'boolean')
+      )
+        return type;
       return contextual ? this.c.literals.preserveContextualLiterals(type, contextual) : type;
     }
     for (const child of named(node)) this.check(child);
@@ -254,17 +371,8 @@ export class ExpressionChecker {
   }
 
   private templateString(node: TreeNode, contextual: Type | undefined): Type {
-    const texts = [''];
-    const types: Type[] = [];
-    for (const child of named(node)) {
-      if (child.type !== 'template_substitution') {
-        if (child.type === 'string_fragment' || child.type === 'escape_sequence')
-          texts[texts.length - 1] += templateFragmentText(child);
-        continue;
-      }
-      types.push(this.templateSubstitution(named(child)[0]));
-      texts.push('');
-    }
+    if (isTaggedTemplateArgument(node)) return this.c.globalType('TemplateStringsArray');
+    const { texts, types } = this.readTemplateParts(node);
     // A template without substitutions is a string literal, as TypeScript's `NoSubstitutionTemplateLiteral` is.
     if (types.length === 0) return freshLiteralType(texts[0]);
     const spellsType =
@@ -278,6 +386,20 @@ export class ExpressionChecker {
     );
     const spelled = this.c.typeOperators.templateLiteral(texts, placeholders);
     return spelled.kind === 'literal' ? freshLiteralType(spelled.value as string) : spelled;
+  }
+
+  private readTemplateParts(node: TreeNode): { texts: string[]; types: Type[] } {
+    const texts = [''];
+    const types: Type[] = [];
+    for (const child of named(node)) {
+      if (child.type === 'template_substitution') {
+        types.push(this.templateSubstitution(named(child)[0]));
+        texts.push('');
+      } else if (child.type === 'string_fragment' || child.type === 'escape_sequence') {
+        texts[texts.length - 1] += templateFragmentText(child);
+      }
+    }
+    return { texts, types };
   }
 
   /** The type of a template's substitution, which a function or a symbol cannot stand in as text. */
@@ -350,9 +472,11 @@ export class ExpressionChecker {
   private queryIdentifier(node: TreeNode): Type {
     const symbol = this.c.scopeOf(node).lookupValue(node.text);
     if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, node.text);
-    return this.reportUnavailableValue(node, symbol)
-      ? errorType
-      : this.variableReferenceType(node, symbol, undefined, true);
+    const enumSymbol = this.c.enums.resolvedEnumSymbol(symbol);
+    if (enumSymbol) this.c.enums.checkConstEnumUse(node, enumSymbol);
+    if (this.reportUnavailableValue(node, symbol)) return errorType;
+    this.c.functions.noteIdentifierRead(node, symbol);
+    return this.variableReferenceType(node, symbol, undefined, true);
   }
 
   // Identifiers --------------------------------------------------------------------------------------------------
@@ -362,8 +486,35 @@ export class ExpressionChecker {
     const symbol = this.c.scopeOf(node).lookupValue(name);
     if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, name);
     if (this.reportUnavailableValue(node, symbol)) return errorType;
+    if (symbol.importTarget?.typeOnly) {
+      this.c.error(node, `'import type' を使用してインポートされたため、'${name}' は値として使用できません。`);
+      return errorType;
+    }
+    if (symbol.valueKind === 'import' && this.c.namespaces.isExportedTypeOnlyValue(symbol)) {
+      this.c.error(node, `'export type' を使用してエクスポートされたため、'${name}' は値として使用できません。`);
+      return errorType;
+    }
+    if (symbol === this.c.libraryBinder.moduleScope.lookupValue('require') && !isDirectOrWrappedRequireCallee(node))
+      return this.reportRequireValue(node);
     this.checkUsedBeforeDeclaration(node, symbol);
+    const enumSymbol = this.c.enums.resolvedEnumSymbol(symbol);
+    if (enumSymbol) this.c.enums.checkConstEnumUse(node, enumSymbol);
+    if (symbol.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, symbol)) return errorType;
+    const aliased = symbol.valueKind === 'importAlias' ? this.c.namespaces.imported(symbol, 'value') : undefined;
+    if (aliased?.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, aliased, name)) return errorType;
+    this.c.functions.noteIdentifierRead(node, symbol);
     return this.variableReferenceType(node, symbol, contextual);
+  }
+
+  /**
+   * Node.js's `require` other than called by name, which the checker accepts only for a module this interpreter
+   * provides: as a value, or through a member such as `require.resolve` or `require.call`, it could load any module.
+   */
+  private reportRequireValue(node: TreeNode): Type {
+    const parent = node.parent;
+    const property = parent?.type === 'member_expression' ? parent.childForFieldName('property') : undefined;
+    this.c.error(node, unsupportedMessage(property ? `require.${property.text}` : '呼び出し以外での require'));
+    return errorType;
   }
 
   private implicitArgumentsType(node: TreeNode): Type | undefined {
@@ -414,7 +565,9 @@ export class ExpressionChecker {
       declaration?.type === 'variable_declarator' &&
       declaration.childForFieldName('name')?.type === 'identifier' &&
       !declaration.childForFieldName('value') &&
-      !hasToken(declaration, '!')
+      !hasToken(declaration, '!') &&
+      // A namespace's exported variable is read as a property of its object, which tsc does not check.
+      declaration.parent?.parent?.type !== 'export_statement'
     );
   }
 
@@ -427,7 +580,7 @@ export class ExpressionChecker {
   /** Whether `arguments` names the arguments of an enclosing function, which an arrow function shares. */
   private hasArguments(node: TreeNode): boolean {
     for (let current = node.parent; current; current = current.parent) {
-      if (['function_declaration', 'function_expression', 'method_definition'].includes(current.type)) return true;
+      if (isFunctionWithOwnThis(current) && current.type !== 'class_static_block') return true;
       if (current.type === 'class_body' || current.type === 'field_definition') return false;
     }
     return false;
@@ -473,11 +626,17 @@ export class ExpressionChecker {
   }
 
   private reportUnknownValue(node: TreeNode, name: string): Type {
-    const typeSymbol = this.c.scopeOf(node).lookupType(name);
-    if (typeSymbol && typeSymbol.typeKind !== 'class') {
+    const scope = this.c.scopeOf(node);
+    const namespaceSymbol = scope.lookupNamespace(name, this.c.budget);
+    const typeSymbol = scope.lookupType(name);
+    if (namespaceSymbol?.importTarget?.typeOnly) {
+      this.c.error(node, `'import type' を使用してインポートされたため、'${name}' は値として使用できません。`);
+    } else if (namespaceSymbol) {
+      this.c.error(node, `名前空間 '${name}' は値として使えません。`);
+    } else if (typeSymbol && typeSymbol.typeKind !== 'class') {
       this.c.error(node, `${name} は型であり、値としては使えません。`);
     } else {
-      const hint = nodeGlobalHint(name) || nameSuggestionHint(this.c.scopeOf(node), name, 'value', this.c.budget);
+      const hint = nameSuggestionHint(scope, name, 'value', this.c.budget);
       this.c.error(node, `名前 ${name} が見つかりません。${hint}`);
     }
     return errorType;
@@ -524,7 +683,7 @@ export class ExpressionChecker {
   }
 
   /** Whether a reference reads a variable of an enclosing function, which flow analysis does not follow into it. */
-  private isOuterVariable(node: TreeNode, symbol: Sym): boolean {
+  isOuterVariable(node: TreeNode, symbol: Sym): boolean {
     if (symbol.scope.kind === 'global') return false;
     const owner = this.c.functions.flowOwner();
     if (!owner) return false;
@@ -597,19 +756,14 @@ export class ExpressionChecker {
       this.checkParameterUseOfBodyFunction(node, symbol);
       return;
     }
-    if (
-      symbol.valueKind !== 'let' &&
-      symbol.valueKind !== 'const' &&
-      symbol.valueKind !== 'class' &&
-      symbol.valueKind !== 'parameter'
-    )
-      return;
+    if (!usedBeforeDeclarationKinds.has(symbol.valueKind ?? '')) return;
     const declaration = symbol.valueDeclaration;
     if (!declaration || this.c.isLibrary(declaration)) return;
     if (!this.beforeBindingInitialized(node, symbol, declaration)) return;
-    // A use inside a function that runs later is fine.
-    for (let current: TreeNode | null = node.parent; current; current = current.parent) {
+    // A use inside a function that runs later is fine, but not in a member's decorator, which runs with the class.
+    for (let child = node, current = node.parent; current; child = current, current = current.parent) {
       if (current.id === declaration.id) break;
+      if (child.type === 'decorator') continue;
       if (
         laterRunningTypes.has(current.type) &&
         !(current.startIndex <= declaration.startIndex && declaration.endIndex <= current.endIndex) &&
@@ -619,7 +773,8 @@ export class ExpressionChecker {
       }
       if (current.type === 'field_definition' && !hasToken(current, 'static')) return;
     }
-    const kind = symbol.valueKind === 'class' ? 'クラス' : '変数';
+    if (symbol.valueKind === 'enum' && isConstEnum(symbol)) return;
+    const kind = symbol.valueKind === 'class' ? 'クラス' : symbol.valueKind === 'enum' ? '列挙型' : '変数';
     this.c.error(node, `${kind} ${symbol.name} は宣言より前で使われています。`);
   }
 
@@ -643,7 +798,9 @@ export class ExpressionChecker {
   private beforeBindingInitialized(node: TreeNode, symbol: Sym, declaration: TreeNode): boolean {
     const name = symbol.valueEntries[0]?.name ?? declaration;
     if (node.startIndex < name.startIndex) return true;
-    if (symbol.valueKind === 'class' || node.startIndex >= declaration.endIndex) return false;
+    // A member's decorator runs while the class is being defined, before its name is bound.
+    if (symbol.valueKind === 'class') return isWithinDecorator(node, declaration);
+    if (node.startIndex >= declaration.endIndex) return false;
     const value = declaration.childForFieldName('value');
     if (value && value.startIndex <= node.startIndex && node.endIndex <= value.endIndex) return true;
     for (let current = name.parent; current && current.id !== declaration.id; current = current.parent) {
@@ -657,10 +814,14 @@ export class ExpressionChecker {
 
   /** The type of a value a symbol declares. */
   valueTypeOf(symbol: Sym): Type {
+    const type = this.declaredValueTypeOf(symbol);
+    return symbol.namespaceExports ? this.c.namespaces.withExports(symbol, type) : type;
+  }
+
+  private declaredValueTypeOf(symbol: Sym): Type {
     if (symbol.valueType) return symbol.valueType;
-    if (symbol.valueKind === 'class') {
-      return (symbol.valueType = this.c.classes.valueTypeOf(this.c.classes.classInfoOf(symbol)));
-    }
+    const declared = this.typeOfDeclaredKind(symbol);
+    if (declared) return declared;
     const parameterType = this.c.functions.parameterTypes.get(symbol.id);
     if (parameterType) return parameterType;
     const variableType = this.variableTypes.get(symbol.id);
@@ -683,6 +844,32 @@ export class ExpressionChecker {
       return type;
     } finally {
       symbol.resolving = false;
+    }
+  }
+
+  /** The type of a class, an enum, a namespace, an enum member, or an import alias, which their declarations give. */
+  private typeOfDeclaredKind(symbol: Sym): Type | undefined {
+    switch (symbol.valueKind) {
+      case 'class': {
+        return (symbol.valueType = this.c.classes.valueTypeOf(this.c.classes.classInfoOf(symbol)));
+      }
+      case 'enum': {
+        return (symbol.valueType = this.c.enums.objectType(symbol));
+      }
+      case 'namespace': {
+        return (symbol.valueType = this.c.namespaces.objectType(symbol));
+      }
+      case 'enumMember': {
+        return symbol.valueDeclaration && this.c.enums.memberType(symbol.valueDeclaration);
+      }
+      case 'importAlias':
+      case 'import': {
+        const target = this.c.namespaces.imported(symbol, 'value');
+        return target ? this.valueTypeOf(target) : errorType;
+      }
+      default: {
+        return undefined;
+      }
     }
   }
 
@@ -732,9 +919,12 @@ export class ExpressionChecker {
 
   private functionSymbolType(symbol: Sym): Type {
     const expression = symbol.valueDeclaration;
-    if (expression?.type === 'function_expression') return this.c.silently(() => this.check(expression));
+    if (expression?.type === 'function_expression' || expression?.type === 'generator_function')
+      return this.c.silently(() => this.check(expression));
     const signatures = symbol.valueDeclarations.filter((node) => node.type === 'function_signature');
-    const implementation = symbol.valueDeclarations.find((node) => node.type === 'function_declaration');
+    const implementation = symbol.valueDeclarations.find(
+      (node) => node.type === 'function_declaration' || node.type === 'generator_function_declaration'
+    );
     const ownSignatures = signatures.filter((signature) => !this.c.isLibrary(signature));
     const librarySignatures = signatures.filter((signature) => this.c.isLibrary(signature));
     const declared =
@@ -1010,17 +1200,96 @@ export class ExpressionChecker {
   }
 }
 
-/** Node.js names that need its type definitions, which the reference `tsc` does not have. */
-function nodeGlobalHint(name: string): string {
-  return ['process', 'require', 'module', 'exports', '__dirname', '__filename', 'Buffer'].includes(name)
-    ? 'Node.js の機能は、この採点環境では使えません。'
-    : '';
+const sideEffectFreeTypes = new Set([
+  'identifier',
+  'undefined',
+  'string',
+  'regex',
+  'template_string',
+  'number',
+  'true',
+  'false',
+  'null',
+  'function_expression',
+  'arrow_function',
+  'class',
+  'array',
+  'object',
+  'non_null_expression',
+]);
+
+/** Whether evaluating an expression has no effect, as TypeScript's `isSideEffectFree` decides for the comma operator. */
+function isSideEffectFree(node: TreeNode): boolean {
+  const expression = skipParentheses(node);
+  if (sideEffectFreeTypes.has(expression.type)) return true;
+  switch (expression.type) {
+    case 'call_expression': {
+      return expression.childForFieldName('arguments')?.type === 'template_string';
+    }
+    case 'ternary_expression': {
+      return ['consequence', 'alternative'].every((field) =>
+        isSideEffectFree(expression.childForFieldName(field) as TreeNode)
+      );
+    }
+    case 'binary_expression': {
+      return ['left', 'right'].every((field) => isSideEffectFree(expression.childForFieldName(field) as TreeNode));
+    }
+    case 'sequence_expression': {
+      return named(expression).every((child) => isSideEffectFree(child));
+    }
+    case 'unary_expression': {
+      // tsc takes these operators as free of side effects whatever their operand, though it may call a function.
+      return ['typeof', '!', '+', '-', '~'].includes(expression.childForFieldName('operator')?.text ?? '');
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** `(0, o.f)()` or `(0, eval)()`, which calls a function without passing its object as `this`. */
+function isIndirectCall(sequence: TreeNode, left: TreeNode, right: TreeNode): boolean {
+  const parenthesized = sequence.parent;
+  const call = parenthesized?.parent;
+  return (
+    parenthesized?.type === 'parenthesized_expression' &&
+    left.type === 'number' &&
+    left.text === '0' &&
+    call?.type === 'call_expression' &&
+    call.childForFieldName('function')?.id === parenthesized.id &&
+    (right.type === 'member_expression' ||
+      right.type === 'subscript_expression' ||
+      (right.type === 'identifier' && right.text === 'eval'))
+  );
 }
 
 /** The members of a target that an object literal's excess properties are checked against. */
 function objectTargets(target: Type): Type[] {
   return (target.kind === 'union' ? target.types : [target]).filter(
     (member) => member === nonPrimitiveType || member.kind === 'object' || member.kind === 'intersection'
+  );
+}
+
+function isDirectOrWrappedRequireCallee(node: TreeNode): boolean {
+  let current = node;
+  while (
+    current.parent &&
+    [
+      'parenthesized_expression',
+      'as_expression',
+      'satisfies_expression',
+      'non_null_expression',
+      'type_assertion',
+    ].includes(current.parent.type)
+  ) {
+    current = current.parent;
+  }
+  const call = current.parent;
+  return (
+    call?.type === 'call_expression' &&
+    call.childForFieldName('function')?.id === current.id &&
+    call.childForFieldName('arguments')?.type !== 'template_string' &&
+    withoutAssertions(current).id === node.id
   );
 }
 
@@ -1031,4 +1300,18 @@ function isCallee(node: TreeNode): boolean {
   const { parent } = expression;
   const callee = parent?.childForFieldName(parent.type === 'new_expression' ? 'constructor' : 'function');
   return (parent?.type === 'call_expression' || parent?.type === 'new_expression') && callee?.id === expression.id;
+}
+
+/** Whether a node is in a decorator inside a declaration, such as one of a class's members. */
+function isWithinDecorator(node: TreeNode, declaration: TreeNode): boolean {
+  if (node.startIndex < declaration.startIndex || node.endIndex > declaration.endIndex) return false;
+  for (let current = node.parent; current && current.id !== declaration.id; current = current.parent)
+    if (current.type === 'decorator') return true;
+  return false;
+}
+
+function isNewTargetBoundary(container: TreeNode, child: TreeNode): boolean {
+  if (!newTargetBoundaries.has(container.type)) return false;
+  if (child.type === 'decorator') return false;
+  return container.childForFieldName('name')?.id !== child.id;
 }

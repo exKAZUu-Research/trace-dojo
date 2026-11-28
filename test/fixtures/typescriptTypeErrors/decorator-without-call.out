@@ -1,0 +1,4 @@
+(7,1): error TS1329: 'dc' accepts too few arguments to be used as a decorator here. Did you mean to call it first and write '@dc()'?
+(9,3): error TS1329: 'd0' accepts too few arguments to be used as a decorator here. Did you mean to call it first and write '@d0()'?
+(10,3): error TS1329: 'd0' accepts too few arguments to be used as a decorator here. Did you mean to call it first and write '@d0()'?
+(11,3): error TS1329: 'd0' accepts too few arguments to be used as a decorator here. Did you mean to call it first and write '@d0()'?

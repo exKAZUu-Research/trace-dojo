@@ -4,6 +4,7 @@ import { BROWSER_ONLY_GLOBALS, DOM_TYPE_ALIASES, SHARED_HOST_GLOBALS } from './d
 import { DOM_INTERFACES } from './domMembers';
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
 import { LOCALE_OPTIONS_LIBRARY } from './localeOptionsLibrary';
+import { NODE_LIBRARY, UNAVAILABLE_NODE_GLOBALS } from './nodeLibrary';
 import { Scope, Sym } from './scopes';
 import { undefinedType } from './types';
 
@@ -65,12 +66,12 @@ declare class Turtle {
   constructor(x: number, y: number, color: string);
 ${turtleMethods}
 }
-declare function setTimeout(handler: any, timeout?: number, ...arguments: any[]): number;
-declare function setInterval(handler: any, timeout?: number, ...arguments: any[]): number;
+declare function setTimeout(handler: TimerHandler, timeout?: number, ...arguments: any[]): number;
+declare function setInterval(handler: TimerHandler, timeout?: number, ...arguments: any[]): number;
 declare function clearTimeout(id: number | undefined): void;
 declare function clearInterval(id: number | undefined): void;
-declare function queueMicrotask(callback: () => void): void;
-declare function structuredClone<T = any>(value: T, options?: any): T;
+declare function queueMicrotask(callback: VoidFunction): void;
+declare function structuredClone<T = any>(value: T, options?: StructuredSerializeOptions): T;
 declare function fetch(input: any, init?: any): Promise<any>;
 declare function alert(message?: any): void;
 declare function prompt(message?: string, _default?: string): string | null;
@@ -102,7 +103,9 @@ const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter
 
 /** The library's declarations, parsed once; its tree lives as long as the process. */
 export const libraryTree = (() => {
-  const tree = parser.parse(`${ECMASCRIPT_LIBRARY}\n${HOST_LIBRARY}\n${BROWSER_LIBRARY}\n${DOM_INTERFACES}`);
+  const tree = parser.parse(
+    `${ECMASCRIPT_LIBRARY}\n${HOST_LIBRARY}\n${NODE_LIBRARY}\n${BROWSER_LIBRARY}\n${DOM_INTERFACES}`
+  );
   if (!tree) throw new Error('The parser returned no tree for the library');
   return tree;
 })();
@@ -124,32 +127,22 @@ export function libraryScope(): Scope {
 
 /** Library values that this interpreter does not run yet, with the names learners know them by. */
 const unsupportedValues: Record<string, string> = {
-  Promise: 'Promise',
-  setTimeout: 'setTimeout などのタイマー',
-  setInterval: 'setTimeout などのタイマー',
-  clearTimeout: 'setTimeout などのタイマー',
-  clearInterval: 'setTimeout などのタイマー',
-  queueMicrotask: 'queueMicrotask',
-  Date: 'Date（日付と時刻）',
-  WeakMap: 'WeakMap',
-  WeakSet: 'WeakSet',
   WeakRef: 'WeakRef',
   FinalizationRegistry: 'FinalizationRegistry',
   Proxy: 'Proxy',
   Reflect: 'Reflect',
   eval: 'eval',
   Function: 'Function コンストラクタ',
-  structuredClone: 'structuredClone',
   globalThis: 'globalThis',
   fetch: 'fetch などのネットワーク',
   alert: 'alert',
   prompt: 'prompt などの標準入力',
-  AggregateError: 'AggregateError',
 };
 
 export function markUnsupported(scope: Scope): void {
   for (const [name, feature] of [
     ...Object.entries(unsupportedValues),
+    ...UNAVAILABLE_NODE_GLOBALS.map((name) => [name, name]),
     ...omittedLibraryGlobals.map((name) => [name, name]),
     ...Object.keys(SHARED_HOST_GLOBALS).map((name) => [name, name]),
   ]) {

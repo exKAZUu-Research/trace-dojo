@@ -42,6 +42,14 @@ import {
   voidType,
 } from './types';
 
+/** The functions, generators included, whose own `this` is untyped unless annotated. */
+const plainFunctionTypes = new Set([
+  'function_declaration',
+  'function_expression',
+  'generator_function_declaration',
+  'generator_function',
+]);
+
 /** The kinds of global declarations that become properties of `globalThis`, unlike `let`, `const`, and classes. */
 const globalThisValueKinds = new Set<ValueKind>(['var', 'function', 'declared']);
 
@@ -147,7 +155,16 @@ export class ClassChecker {
   /** The interfaces of the class's name, which merge their members into its instances. */
   mergedInterfaces(node: TreeNode): TreeNode[] {
     const name = node.type === 'class' ? undefined : node.childForFieldName('name')?.text;
-    const declarations = name ? this.c.scopeOf(node).lookupType(name)?.typeDeclarations : undefined;
+    const outer = node.parent?.type === 'ambient_declaration' ? node.parent : node;
+    const scope = this.c.scopeOf(outer.parent ?? outer);
+    const isDefault =
+      outer.parent?.type === 'export_statement' &&
+      outer.parent.children.some((child) => !child.isNamed && child.type === 'default');
+    const declarations = isDefault
+      ? scope.defaultTypeSymbol?.typeDeclarations
+      : name
+        ? scope.lookupType(name)?.typeDeclarations
+        : undefined;
     return declarations?.filter((declaration) => declaration.type === 'interface_declaration') ?? [];
   }
 
@@ -328,7 +345,7 @@ export class ClassChecker {
 
   private resolveBaseInstance(node: TreeNode): Type | undefined {
     const staticType = this.baseStaticType(node);
-    if (!staticType || isAnyLike(staticType)) return staticType && anyType;
+    if (!staticType || isAnyLike(staticType)) return staticType;
     const instantiated = this.baseConstructSignatures(node)?.[0];
     if (instantiated) return instantiated.returnType();
     // The `extends` clause reports type arguments no base signature takes, and the base's members then read as `any`.
@@ -617,7 +634,10 @@ export class ClassChecker {
     const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
     if (annotation) return annotation;
     const cached = this.fieldTypes.get(member.id);
-    if (cached) return cached;
+    if (cached && (!this.c.functions.isTrackingReturnYields() || this.c.functions.hasLatentYields(member.id))) {
+      this.c.functions.propagateLatentYields(member.id);
+      return cached;
+    }
     const resolving = this.resolvingFields.findIndex((field) => field.member.id === member.id);
     // Fields whose initializers read one another have no type to infer, as TypeScript reports for each of them.
     if (resolving !== -1) {
@@ -636,6 +656,7 @@ export class ClassChecker {
     try {
       const type = this.inferredFieldType(member, nameNode);
       if (!this.fieldTypes.has(member.id)) this.fieldTypes.set(member.id, type);
+      this.c.functions.propagateLatentYields(member.id);
       return this.fieldTypes.get(member.id) as Type;
     } finally {
       this.resolvingFields.pop();
@@ -768,18 +789,26 @@ export class ClassChecker {
     return ownerThis?.id ?? this.thisStack.at(-1)?.id ?? 0;
   }
 
-  /** The node that decides what `this` is at `node`: a class member, a function, or the program. */
+  /** The node that decides what `this` is at `node`: a class member, a function, a namespace, or the program. */
   private thisOwner(node: TreeNode): TreeNode | undefined {
-    for (let current = node.parent; current; current = current.parent) {
+    let child = node;
+    for (let current = node.parent; current; child = current, current = current.parent) {
+      if (child.type === 'decorator') continue;
       switch (current.type) {
         case 'function_declaration':
         case 'function_expression':
-        case 'method_definition':
-        case 'class_static_block': {
+        case 'generator_function_declaration':
+        case 'generator_function':
+        case 'class_static_block':
+        case 'internal_module':
+        case 'module': {
           return current;
         }
+        case 'method_definition':
         case 'field_definition': {
-          return current;
+          if (current.childForFieldName('name')?.id !== child.id) return current;
+          if (child.type === 'computed_property_name' && current.parent?.type === 'class_body') return child;
+          break;
         }
         case 'class_heritage': {
           // The heritage is evaluated outside the class.
@@ -811,6 +840,11 @@ export class ClassChecker {
   thisTypeOfExpression(node: TreeNode): Type {
     const owner = this.thisOwner(node);
     if (!owner) return this.globalThisType(node);
+    const invalid = invalidThisOwnerMessage(owner);
+    if (invalid) {
+      this.c.error(node, invalid);
+      return errorType;
+    }
     const thisParameter = this.thisParameterType(owner);
     if (thisParameter) return thisParameter;
     const parent = owner.parent;
@@ -832,15 +866,16 @@ export class ClassChecker {
       this.checkConstructorReceiver(node, owner, classNode, 'this');
       return isStatic ? info.staticType : this.selfType(info);
     }
-    if (objectMethod || owner.type === 'function_declaration' || owner.type === 'function_expression') {
+    if (objectMethod || plainFunctionTypes.has(owner.type)) {
       this.c.error(node, "'this' の型が暗黙に any になります。型の注釈がないためです。");
       return anyType;
     }
     return anyType;
   }
 
-  /** TypeScript checks top-level `this` as `typeof globalThis`. CommonJS supplies `module.exports` at runtime. */
+  /** TypeScript checks top-level `this` as `undefined` in a module and `typeof globalThis` in a script. */
   private globalThisType(node: TreeNode): Type {
+    if (this.c.isModule) return undefinedType;
     for (let current = node.parent; current; current = current.parent) {
       if (current.type !== 'arrow_function') continue;
       this.c.error(node, "アロー関数が、グローバルの 'this' の値を取り込んでいます。");
@@ -931,9 +966,14 @@ export class ClassChecker {
 
   private blocksThisType(container: TreeNode, node: TreeNode): boolean {
     if (
-      ['function_declaration', 'function_expression', 'function_signature', 'class_static_block'].includes(
-        container.type
-      )
+      [
+        'function_declaration',
+        'function_expression',
+        'generator_function_declaration',
+        'generator_function',
+        'function_signature',
+        'class_static_block',
+      ].includes(container.type)
     )
       return true;
     if (
@@ -1266,6 +1306,13 @@ export class ClassChecker {
 }
 
 export { anonymousObject };
+
+function invalidThisOwnerMessage(owner: TreeNode): string | undefined {
+  if (owner.type === 'computed_property_name') return "'this' は、計算されたプロパティ名では参照できません。";
+  if (owner.type === 'internal_module' || owner.type === 'module')
+    return "'this' はモジュール本体内または名前空間本体内では参照できません。";
+  return undefined;
+}
 
 function isInParameterInitializer(node: TreeNode, owner: TreeNode): boolean {
   for (let parent = node.parent; parent && parent.id !== owner.id; parent = parent.parent) {

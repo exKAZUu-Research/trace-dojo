@@ -1,0 +1,3 @@
+(1,14): error TS2651: A member initializer in a enum declaration cannot reference members declared after it, including members defined in other enums.
+(2,25): error TS2651: A member initializer in a enum declaration cannot reference members declared after it, including members defined in other enums.
+(3,14): error TS2651: A member initializer in a enum declaration cannot reference members declared after it, including members defined in other enums.

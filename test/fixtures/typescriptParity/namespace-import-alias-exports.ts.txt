@@ -1,0 +1,4 @@
+namespace O { export type T = 1; export const k = 2; }
+namespace N { export import X = O.T; }
+namespace P { export import Y = O.k; }
+console.log(typeof N, P.Y);

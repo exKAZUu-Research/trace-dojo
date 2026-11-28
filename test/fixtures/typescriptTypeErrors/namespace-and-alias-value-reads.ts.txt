@@ -1,0 +1,8 @@
+enum E { A = 1, B = 2 }
+import X = E.Q;
+console.log(X);
+namespace O { export type T = 1; }
+console.log(O.T);
+namespace P { export type U = 1; }
+import Y = P.U;
+console.log(Y);

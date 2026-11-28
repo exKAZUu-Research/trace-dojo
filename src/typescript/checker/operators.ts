@@ -2,10 +2,12 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { CheckExpression } from './expressions';
+import type { RetainFresh } from './expressionTypeCache';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { isConstAssertion, named, numberValue, skipParentheses, withoutAssertions } from './syntax';
 import {
   anyType,
+  baseTypeOfLiteral,
   bigintType,
   booleanType,
   emptyObjectType,
@@ -184,7 +186,7 @@ export class OperatorChecker {
     return !isAnyLike(regular) && !isIntrinsic(regular, 'never') && this.c.relations.isAssignable(regular, stringType);
   }
 
-  binary(node: TreeNode, contextual?: Type, retainFreshBoolean = false): Type {
+  binary(node: TreeNode, contextual?: Type, retainFresh: RetainFresh = false): Type {
     const operator = node.childForFieldName('operator')?.text ?? '';
     const left = node.childForFieldName('left') as TreeNode;
     const right = node.childForFieldName('right') as TreeNode;
@@ -192,7 +194,7 @@ export class OperatorChecker {
       case '&&':
       case '||':
       case '??': {
-        return this.logical(operator, left, right, contextual, retainFreshBoolean);
+        return this.logical(operator, left, right, contextual, retainFresh);
       }
       default: {
         break;
@@ -392,7 +394,7 @@ export class OperatorChecker {
     if (isNullishIntrinsic(l) || isNullishIntrinsic(r)) return;
     if (this.c.relations.isComparable(l, r)) return;
     // As TypeScript does, the message names the operands' base types when those do not overlap either.
-    const [leftBase, rightBase] = [baseTypeOfLiteral(l), baseTypeOfLiteral(r)];
+    const [leftBase, rightBase] = [mapType(l, baseTypeOfLiteral), mapType(r, baseTypeOfLiteral)];
     const [shownLeft, shownRight] = this.c.relations.isComparable(leftBase, rightBase) ? [l, r] : [leftBase, rightBase];
     this.c.error(
       node,
@@ -405,7 +407,7 @@ export class OperatorChecker {
     left: TreeNode,
     right: TreeNode,
     contextual?: Type,
-    retainFreshBoolean = false
+    retainFresh: RetainFresh = false
   ): Type {
     if (operator === '??') {
       const nullishness = syntacticNullishness(this.c, left);
@@ -417,23 +419,27 @@ export class OperatorChecker {
       if (nullishness === 'always') this.c.error(left, 'この式は常に null か undefined です。');
       // A left optional chain that stops early is nullish, so the right operand runs there too.
       const { result: leftType, stops } = this.c.members.stoppingChain(skipParentheses(left), () =>
-        this.c.expressions.check(left, contextual, retainFreshBoolean)
+        this.c.expressions.check(left, contextual, retainFresh)
       );
       // The right operand runs only when the left one is nullish, so its effects join the path that skips it.
       const { whenTrue: skipped, whenFalse: nullish } = this.c.conditions.presence(left);
       let rightType: Type = neverType;
       const after = this.c.flow.from(this.c.flow.merge([nullish, ...stops]), () => {
-        rightType = this.c.expressions.check(right, contextual, retainFreshBoolean);
+        rightType = this.c.expressions.check(right, contextual, retainFresh);
       });
       this.c.conditions.checkLogicalOperands(left, leftType, right, rightType);
       this.c.flow.current = this.c.flow.merge([skipped, after]);
       return this.coalescingType(leftType, rightType);
     }
-    const { whenTrue, whenFalse, type: leftType } = this.c.conditions.condition(left);
+    const {
+      whenTrue,
+      whenFalse,
+      type: leftType,
+    } = this.c.conditions.condition(left, true, operator === '||' ? contextual : undefined, retainFresh);
     const rightState = operator === '&&' ? whenTrue : whenFalse;
     let rightType: Type = neverType;
     const after = this.c.flow.from(rightState, () => {
-      rightType = this.c.expressions.check(right, contextual ?? leftType, retainFreshBoolean);
+      rightType = this.c.expressions.check(right, contextual ?? leftType, retainFresh);
     });
     this.c.conditions.checkLogicalOperands(left, leftType, right, rightType);
     this.c.flow.current = this.c.flow.merge([operator === '&&' ? whenFalse : whenTrue, after]);
@@ -495,7 +501,7 @@ export class OperatorChecker {
     return this.c.relations.isAssignable(type, expected);
   }
 
-  ternary(node: TreeNode, contextual?: Type, retainFreshBoolean = false): Type {
+  ternary(node: TreeNode, contextual?: Type, retainFresh: RetainFresh = false): Type {
     const condition = node.childForFieldName('condition') as TreeNode;
     const consequence = node.childForFieldName('consequence') as TreeNode;
     const alternative = node.childForFieldName('alternative') as TreeNode;
@@ -504,10 +510,10 @@ export class OperatorChecker {
     let trueType: Type = neverType;
     let falseType: Type = neverType;
     const afterTrue = this.c.flow.from(whenTrue, () => {
-      trueType = this.c.expressions.check(consequence, contextual, retainFreshBoolean);
+      trueType = this.c.expressions.check(consequence, contextual, retainFresh);
     });
     const afterFalse = this.c.flow.from(whenFalse, () => {
-      falseType = this.c.expressions.check(alternative, contextual, retainFreshBoolean);
+      falseType = this.c.expressions.check(alternative, contextual, retainFresh);
     });
     this.c.flow.current = this.c.flow.merge([afterTrue, afterFalse]);
     return this.c.literals.subtypeReduced([trueType, falseType]);
@@ -518,7 +524,8 @@ export class OperatorChecker {
     if (!typeNode || isConstAssertion(node)) return this.constAssertion(node, expression, contextual, check);
     const target = this.c.typeNodes.typeFromNode(typeNode);
     const source = check(expression, target);
-    const widened = this.c.widen(source);
+    // tsc compares the base type of a literal, so `mode as "write"` is accepted for a `"read"` constant too.
+    const widened = this.c.widen(mapType(source, baseTypeOfLiteral));
     if (!this.c.relations.isRelated(target, widened, 'comparable')) {
       const reported = this.c.diagnostics.length;
       this.c.expressions.checkAssertedArrayLiterals(expression, source, target);
@@ -552,11 +559,16 @@ export class OperatorChecker {
       operand.type === 'unary_expression' &&
       ['+', '-'].includes(operand.childForFieldName('operator')?.text ?? '') &&
       named(operand)[0]?.type === 'number';
+    const object = ['member_expression', 'subscript_expression'].includes(operand.type)
+      ? operand.childForFieldName('object')
+      : undefined;
+    const isEnumMember = object && this.c.namespaces.qualifiedValueSymbol(object)?.valueKind === 'enum';
     if (
       !['string', 'number', 'true', 'false', 'object', 'array', 'template_string'].includes(operand.type) &&
-      !signedLiteral
+      !signedLiteral &&
+      !isEnumMember
     )
-      this.c.error(node, 'const アサーションは、リテラル式にのみ使えます。');
+      this.c.error(node, 'const アサーションは、enum のメンバーの参照か、リテラル式にのみ使えます。');
     return mapType(check(expression, contextual), (type) => (type.kind === 'literal' ? regularOf(type) : type));
   }
 }
@@ -609,14 +621,6 @@ function syntacticNullishness(c: Checker, node: TreeNode): 'always' | 'never' | 
       return 'never';
     }
   }
-}
-
-/** TypeScript's base type of a literal type: its primitive, or `string` for a template literal or string mapping. */
-function baseTypeOfLiteral(type: Type): Type {
-  return mapType(type, (member) => {
-    if (member.kind === 'literal' && typeof member.value !== 'symbol') return primitiveOfLiteral(member);
-    return member.kind === 'templateLiteral' || member.kind === 'stringMapping' ? stringType : member;
-  });
 }
 
 /** The falsy values that `&&` gives for a type: `0` for a number, `""` for a string, and `0n` for a bigint. */

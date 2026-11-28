@@ -1,0 +1,13 @@
+(6,35): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(11,12): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+(13,16): error TS2300: Duplicate identifier 'f'.
+(15,42): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(17,11): error TS2300: Duplicate identifier 'g'.
+(26,17): error TS2490: The type returned by the 'next()' method of an iterator must have a 'value' property.
+(28,28): error TS2322: Type 'number' is not assignable to type 'string'.
+(30,28): error TS2322: Type 'number' is not assignable to type 'string'.
+(32,17): error TS2490: The type returned by the 'next()' method of an iterator must have a 'value' property.
+(34,17): error TS2490: The type returned by the 'next()' method of an iterator must have a 'value' property.
+(36,8): error TS2300: Duplicate identifier 'f'.
+(37,7): error TS2300: Duplicate identifier 'g'.
+(37,7): error TS2322: Type 'number' is not assignable to type 'string'.

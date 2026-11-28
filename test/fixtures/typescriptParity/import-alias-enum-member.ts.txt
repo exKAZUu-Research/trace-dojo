@@ -1,0 +1,16 @@
+enum E { A = 1, B = 2 }
+import X = E.A;
+namespace N {
+  export namespace Inner {
+    export const value = 3;
+  }
+  export class Direct {
+    static n = 4;
+  }
+}
+namespace N {
+  import V = Inner.value;
+  import I = Inner;
+  import D = N.Direct;
+  console.log(X, V, I.value, D.n);
+}

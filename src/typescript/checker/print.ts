@@ -8,6 +8,7 @@ import {
   nullType,
   type ObjectType,
   type Property,
+  regularOf,
   type Signature,
   type Structure,
   trueType,
@@ -19,6 +20,18 @@ import {
 
 function modifierPrefix(modifier: '+' | '-'): string {
   return modifier === '-' ? '-' : '';
+}
+
+/** As TypeScript prints a union, an enum all of whose members it has appears once, by its name, where its first member is. */
+function withWholeEnums(members: Type[]): Type[] {
+  const printed: Type[] = [];
+  for (const member of members) {
+    const enumType = member.kind === 'literal' ? member.enumMember?.base() : undefined;
+    const isWhole = enumType?.kind === 'union' && enumType.types.every((enumMember) => members.includes(enumMember));
+    if (!isWhole) printed.push(member);
+    else if (!printed.includes(enumType)) printed.push(enumType);
+  }
+  return printed;
 }
 
 function isNullish(member: Type): boolean {
@@ -54,10 +67,14 @@ export class Printer {
         return type.name;
       }
       case 'literal': {
-        return printLiteral(type.value);
+        if (!type.enumMember) return printLiteral(type.value);
+        // The type of an enum of one member is that member's.
+        const { enumName, name, base } = type.enumMember;
+        return regularOf(base()) === regularOf(type) ? enumName : `${enumName}.${name}`;
       }
       case 'union': {
         if (type === booleanType) return 'boolean';
+        if (type.enumName) return type.enumName;
         // TypeScript lists `null` and `undefined` last, as in `string | undefined`.
         const members = [
           ...type.types.filter((member) => !isNullish(member)),
@@ -70,7 +87,7 @@ export class Printer {
                 .filter((member) => member !== trueType)
                 .map((member) => (member === falseType ? booleanType : member))
             : members;
-        return this.printUnion(printedMembers);
+        return this.printUnion(withWholeEnums(printedMembers));
       }
       case 'intersection': {
         return boundedJoin(type.types, ' & ', (member) => this.wrap(member));
@@ -129,7 +146,7 @@ export class Printer {
   private wrap(type: Type): string {
     const text = this.print(type);
     if (type.kind === 'object' && type.isFunction && !type.aliasName) return `(${text})`;
-    if (type.kind === 'union' && type !== booleanType) return `(${text})`;
+    if (type.kind === 'union' && type !== booleanType && !type.enumName) return `(${text})`;
     if (type.kind === 'intersection') return `(${text})`;
     return text;
   }
@@ -181,6 +198,7 @@ export class Printer {
 
   private printAnonymous(type: ObjectType): string {
     if (type.isClassStatic && type.classInfo) return `typeof ${type.classInfo.name}`;
+    if (type.valueName) return `typeof ${type.valueName}`;
     const structure = type.resolve();
     const signatureOnly = this.printSignatureOnly(structure);
     if (signatureOnly) return signatureOnly;
@@ -239,10 +257,14 @@ export class Printer {
       },
       thisParameter
     );
-    const predicate = signature.predicate
-      ? `${signature.predicate.index === -1 ? 'this' : (signature.parameters[signature.predicate.index]?.name ?? 'x')} is ${this.print(signature.predicate.type)}`
-      : undefined;
+    const predicate = signature.predicate ? this.printPredicate(signature, signature.predicate) : undefined;
     return `${typeParameters}(${parameters})${arrow}${predicate ?? this.print(signature.returnType())}`;
+  }
+
+  private printPredicate(signature: Signature, predicate: NonNullable<Signature['predicate']>): string {
+    const name = predicate.index === -1 ? 'this' : (signature.parameters[predicate.index]?.name ?? 'x');
+    if (predicate.asserts === 'truthy') return `asserts ${name}`;
+    return `${predicate.asserts ? 'asserts ' : ''}${name} is ${this.print(predicate.type)}`;
   }
 }
 

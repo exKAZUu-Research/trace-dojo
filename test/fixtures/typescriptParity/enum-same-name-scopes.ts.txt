@@ -1,0 +1,11 @@
+enum Status { Ok = 200, Created }
+namespace Ui { export enum Status { Ok = "ok", Bad = "bad" } console.log(Status.Ok); }
+enum Next { Z = Status.Ok }
+console.log(Next.Z, Next[200], Status[201]);
+function scoped() { enum Alpha { Ok = "text" } return Alpha.Ok; }
+enum Alpha { Ok = 1 }
+enum Beta { Pick = Alpha.Ok }
+enum M { A = 1 }
+enum M { B = A + 1 }
+enum N { C = M.B, D }
+console.log(Beta[1], scoped(), M[2], N[2], N[3]);

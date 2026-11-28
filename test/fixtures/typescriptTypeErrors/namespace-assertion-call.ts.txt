@@ -1,0 +1,4 @@
+namespace N { export function assertX(v: unknown): asserts v is string { if (typeof v !== 'string') throw new Error('no'); } export namespace M { export function a(v: unknown): asserts v is number {} } export const g = (v: unknown): asserts v is string => {}; }
+function f(v: unknown, w: unknown) { N.assertX(v); console.log(v.length); N.M.a(w); console.log(w.toFixed(1)); }
+f('abc', 2);
+function h(v: unknown) { N.g(v); }

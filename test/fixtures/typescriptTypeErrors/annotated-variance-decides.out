@@ -1,0 +1,5 @@
+(5,7): error TS2322: Type 'Wrapper<string>' is not assignable to type 'Wrapper<number>'.
+  Type 'string' is not assignable to type 'number'.
+(8,7): error TS2322: Type 'Box<string>' is not assignable to type 'Box<string | number>'.
+  Type 'string | number' is not assignable to type 'string'.
+    Type 'number' is not assignable to type 'string'.

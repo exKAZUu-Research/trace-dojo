@@ -1,0 +1,21 @@
+function logged(label: string) {
+  console.log('evaluate', label);
+  return <T>(value: T): T => value;
+}
+function base(label: string): new () => object {
+  console.log('extends', label);
+  return Object;
+}
+function key(): string {
+  console.log('key');
+  return 'greet';
+}
+@logged('class')
+class Greeter extends base('declaration') {
+  @logged('method')
+  [key()]() {
+    return 'hello';
+  }
+}
+const Anonymous = @logged('expression') class extends base('expression') {};
+console.log(new Greeter() instanceof Greeter, typeof Anonymous);

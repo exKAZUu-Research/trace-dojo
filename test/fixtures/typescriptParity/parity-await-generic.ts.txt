@@ -1,0 +1,5 @@
+async function g<T extends Promise<number>>(x: T) { const n: number = await x; console.log(n); }
+async function h(x: Promise<number> & { tag: 'a' }) { const n: number = await x; console.log(n); }
+async function k<U>(x: U) { const v = await x; return v; }
+async function m<V extends number>(x: V) { const n: number = await x; console.log(n); }
+g(Promise.resolve(4)).then(() => h(Object.assign(Promise.resolve(9), { tag: 'a' as const }))).then(() => m(3));

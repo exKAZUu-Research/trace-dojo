@@ -1,0 +1,2 @@
+class C { accessor #x = () => 1; accessor y = function () {}; n() { return this.#x.name; } }
+console.log(new C().n(), new C().y.name);

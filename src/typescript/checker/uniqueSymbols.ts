@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { hasToken } from './syntax';
-import { isIntrinsic, type LiteralType, type Type, uniqueSymbolType } from './types';
+import { isIntrinsic, type LiteralType, symbolType, type Type, uniqueSymbolType } from './types';
 
 /** Gives a `Symbol()` call that declares a `const` or a `static readonly` property its unique symbol type, as tsc does. */
 export class UniqueSymbols {
@@ -15,8 +15,41 @@ export class UniqueSymbols {
   typeOfCall(call: TreeNode, callType: Type): Type {
     if (!isIntrinsic(callType, 'symbol') || !this.isSymbolCall(call)) return callType;
     const declaration = uniqueSymbolDeclaration(call);
-    const name = declaration?.childForFieldName('name')?.text;
-    if (!declaration || name === undefined) return callType;
+    return declaration ? (this.typeOfDeclaration(declaration) ?? callType) : callType;
+  }
+
+  /**
+   * The type `unique symbol` stands for in the annotation of a declaration: that of the `const` or `static readonly`
+   * property it declares, which is an error anywhere else.
+   */
+  typeOfAnnotation(node: TreeNode): Type {
+    const declaration = node.parent?.type === 'type_annotation' ? node.parent.parent : undefined;
+    const statement = declaration?.parent;
+    if (declaration?.type === 'variable_declarator') {
+      const isConst =
+        statement?.type === 'lexical_declaration' && statement.childForFieldName('kind')?.text === 'const';
+      if (!isConst) this.c.error(node, "型が 'unique symbol' の変数は、'const' で宣言しなければいけません。");
+      return (isConst && this.typeOfDeclaration(declaration)) || symbolType;
+    }
+    if (declaration?.type === 'field_definition' || declaration?.type === 'property_signature') {
+      const isClassField = declaration.type === 'field_definition';
+      if ((!isClassField || hasToken(declaration, 'static')) && hasToken(declaration, 'readonly'))
+        return this.typeOfDeclaration(declaration) ?? symbolType;
+      this.c.error(
+        node,
+        isClassField
+          ? "クラスのプロパティで型が 'unique symbol' のものは、'static' かつ 'readonly' でなければいけません。"
+          : "インターフェースや型リテラルのプロパティで型が 'unique symbol' のものは、'readonly' でなければいけません。"
+      );
+      return symbolType;
+    }
+    this.c.error(node, "'unique symbol' 型は、ここでは使えません。");
+    return symbolType;
+  }
+
+  private typeOfDeclaration(declaration: TreeNode): LiteralType | undefined {
+    const name = declaration.childForFieldName('name')?.text;
+    if (name === undefined) return undefined;
     let type = this.types.get(declaration.id);
     if (!type) {
       type = uniqueSymbolType(name);

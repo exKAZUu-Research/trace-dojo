@@ -1,0 +1,9 @@
+const fs = require('fs');
+let e: NodeJS.ErrnoException | undefined = undefined;
+try {
+  fs.readFileSync('nope-file.txt', 'utf8');
+} catch (err) {
+  e = err as NodeJS.ErrnoException;
+  console.log(e.code, e.syscall, e.errno, e.path, e instanceof Error);
+}
+console.log(e?.code === 'ENOENT');

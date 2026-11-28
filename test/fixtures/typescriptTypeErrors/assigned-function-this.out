@@ -1,0 +1,4 @@
+(2,1): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ n: number; }'.
+  No index signature with a parameter of type 'string' was found on type '{ n: number; }'.
+(2,46): error TS2339: Property 'zz' does not exist on type '{ n: number; }'.
+(3,32): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.

@@ -1,0 +1,6 @@
+(6,3): error TS2540: Cannot assign to 'k' because it is a read-only property.
+(8,20): error TS2477: 'const' enum member initializer was evaluated to a non-finite value.
+(8,31): error TS2477: 'const' enum member initializer was evaluated to a non-finite value.
+(8,43): error TS2478: 'const' enum member initializer was evaluated to disallowed value 'NaN'.
+(9,12): error TS2567: Enum declarations can only merge with namespace or other enum declarations.
+(10,6): error TS2567: Enum declarations can only merge with namespace or other enum declarations.

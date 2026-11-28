@@ -1,0 +1,32 @@
+function logged(target: ClassAccessorDecoratorTarget<Counter, number>, context: ClassAccessorDecoratorContext<Counter, number>) {
+  return {
+    get(this: Counter) {
+      console.log('get', String(context.name), context.private);
+      return target.get.call(this);
+    },
+  };
+}
+function counted(target: ClassAccessorDecoratorTarget<typeof Counter, number>, context: ClassAccessorDecoratorContext<typeof Counter, number>) {
+  return {
+    get(this: typeof Counter) {
+      console.log('get', String(context.name), context.static);
+      return target.get.call(this);
+    },
+  };
+}
+class Counter {
+  accessor count = 0;
+  static accessor total = 10;
+  accessor #hidden = 7;
+  @logged accessor #logged = 3;
+  @counted static accessor #instances = 0;
+  static count() {
+    return ++Counter.#instances;
+  }
+  read() {
+    return this.#hidden + this.#logged;
+  }
+}
+const counter = new Counter();
+counter.count++;
+console.log(Counter.count(), counter.count, Counter.total, counter.read(), new Counter().read(), Object.keys(counter));

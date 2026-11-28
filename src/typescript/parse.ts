@@ -6,8 +6,10 @@ import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../
 import { commentTokens, findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from '../javascript/ast';
 import { nameOf } from '../javascript/convertNodes';
+import { unparsedAwaitMessage } from './checker/awaited';
 import { checkTypeScript } from './checker/checker';
 import { hasInvalidCharacterEscape, isRawTypeTemplateFragment } from './checker/syntax';
+import { repairDecoratedSignatures } from './decoratedSignatures';
 import { javaScriptViewOf } from './jsView';
 import { TypeScriptProgramConverter } from './programConverter';
 import { rejectUnsupportedSyntax } from './unsupported';
@@ -58,12 +60,13 @@ const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter
  * @param trace Makes the statements that record steps report their rows, for a model program.
  */
 export function parseTypeScript(source: string, trace?: TraceOptions): Program {
+  const budget = new ExecutionBudget();
+  const repaired = repairDecoratedSignatures(parser, source, budget);
   return parseSource(
     parser,
-    source,
+    repaired.source,
     MISSING_TOKEN_NAMES,
     (root) => {
-      const budget = new ExecutionBudget();
       rejectUnsupportedSyntax(root);
       let program: Program | undefined;
       let converterErrors: SourceDiagnostic[] = [];
@@ -73,7 +76,7 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
         if (!(error instanceof CompileError)) throw error;
         converterErrors = error.diagnostics;
       }
-      const diagnostics = checkWithDecodedNames(root, source, budget);
+      const diagnostics = [...repaired.diagnostics, ...checkWithDecodedNames(root, repaired.source, budget)];
       const described = new Set(diagnostics.map(diagnosticIndex).filter((index) => index !== undefined));
       const all = [
         ...diagnostics,
@@ -82,7 +85,7 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
       if (all.length > 0 || !program) throw new CompileError(all);
       return program;
     },
-    { locateErrors: (root, errors) => typeScriptSyntaxErrors(root, source, errors) }
+    { locateErrors: (root, errors) => typeScriptSyntaxErrors(root, repaired.source, errors) }
   );
 }
 
@@ -153,6 +156,10 @@ function typeScriptSyntaxErrors(root: Node, source: string, parseErrors: SourceD
   const errors = withUnterminatedStrings(root, source, parseErrors);
   const visit = (node: Node): void => {
     const message =
+      (node.type === 'jsdoc_unknown_type' ? '型が必要です。' : undefined) ??
+      // tsc reads `unique` only before `symbol`, which the grammar's `unique_type` lacks.
+      (node.type === 'unique_type' ? "'symbol' が必要です。" : undefined) ??
+      htmlCommentError(node) ??
       numericEscapeError(node, source) ??
       characterEscapeError(node) ??
       methodModifierError(node) ??
@@ -168,7 +175,46 @@ function typeScriptSyntaxErrors(root: Node, source: string, parseErrors: SourceD
     for (const child of node.children) if (child) visit(child);
   };
   visit(root);
-  return errors.toSorted((left, right) => left.row - right.row);
+  return withNamedSyntaxErrors(root, errors).toSorted((left, right) => left.row - right.row);
+}
+
+/**
+ * Replaces the syntax error the parser gives where tsc names the mistake: `let a: string?`, which the parser cannot
+ * read past the `?`, with the `?` written after a type and the union it suggests in its place; and an `await` in a
+ * function that is not async, which the parser leaves out of the tree, with where `await` is allowed.
+ */
+function withNamedSyntaxErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] {
+  const named = root.descendantsOfType('ERROR').flatMap((node): SourceDiagnostic[] => {
+    if (!node) return [];
+    if (node.text === 'await') {
+      const message = unparsedAwaitMessage(node);
+      return message ? [{ row: node.startPosition.row, message }] : [];
+    }
+    const type = node.text === '?' ? postfixMarkedType(node) : undefined;
+    if (!type) return [];
+    return [
+      {
+        row: type.startPosition.row,
+        message: `'?' が型の末尾にある書き方は、TypeScript では使えません。'${type.text} | undefined' と書くつもりでしたか？`,
+      },
+    ];
+  });
+  const rows = new Set(named.map((error) => error.row));
+  return [...errors.filter((error) => !rows.has(error.row) || error.message !== '書き方に誤りがあります。'), ...named];
+}
+
+/**
+ * The type an unread `?` follows: a variable's, a property's, or a parameter's, but not a return type's, after which
+ * tsc expects the body and reports a syntax error.
+ */
+function postfixMarkedType(mark: Node): Node | undefined {
+  const before = mark.previousSibling;
+  if (!before || mark.parent?.childForFieldName('return_type')?.id === before.id) return undefined;
+  // A parameter's annotation ends the parameter, which the `?` then follows.
+  const annotation = before.type === 'type_annotation' ? before : before.childForFieldName('type');
+  // A `?` after an initializer follows the value, not the type.
+  if (annotation?.type !== 'type_annotation' || annotation.endIndex !== before.endIndex) return undefined;
+  return annotation.namedChildren[0] ?? undefined;
 }
 
 /**
@@ -394,6 +440,12 @@ function superTypeArgumentError(node: Node): SourceDiagnostic | undefined {
   return argumentsNode
     ? { row: argumentsNode.startPosition.row, message: 'super の呼び出しに型引数は指定できません。' }
     : undefined;
+}
+
+/** tsc reads `<!--` as the start of a type assertion and `-->` as an operator, since HTML-like comments are not TypeScript. */
+function htmlCommentError(node: Node): string | undefined {
+  if (node.type !== 'html_comment') return undefined;
+  return node.text.startsWith('<!--') ? '型が必要です。' : '式が必要です。';
 }
 
 /** An unparenthesized unary, `await`, or type assertion expression as the base of `**`, which tsc's parser rejects. */

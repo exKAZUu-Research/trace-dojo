@@ -1,0 +1,15 @@
+const cv = 9;
+import Cv = cv;
+type T = number;
+import U = T;
+import R = Math;
+namespace Types {
+  export type V = number;
+}
+import X = Types;
+console.log(typeof X);
+enum En {
+  A = 4,
+}
+import XE = En;
+console.log(XE.A);

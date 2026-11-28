@@ -68,7 +68,16 @@ export class DeferredContexts {
   private returnInvocation(statement: TreeNode): TreeNode | undefined {
     for (let owner = statement.parent; owner; owner = owner.parent) {
       this.c.budget.spend();
-      if (['arrow_function', 'function_expression', 'function_declaration', 'method_definition'].includes(owner.type))
+      if (
+        [
+          'arrow_function',
+          'function_expression',
+          'function_declaration',
+          'generator_function',
+          'generator_function_declaration',
+          'method_definition',
+        ].includes(owner.type)
+      )
         return this.invocationOf(owner);
     }
     return undefined;

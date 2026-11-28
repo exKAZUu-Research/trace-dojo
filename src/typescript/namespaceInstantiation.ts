@@ -1,0 +1,94 @@
+import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
+
+import type { Sym } from './checker/scopes';
+
+const typeOnlyStatementTypes = new Set(['interface_declaration', 'type_alias_declaration', 'comment']);
+
+/**
+ * Whether a namespace has an object: a block of it declares a value or statement rather than only types, as tsc's
+ * `getModuleInstanceState` decides for both ambient and non-ambient namespaces. The checker and the JavaScript view
+ * both ask this, so a namespace has an object in the types when a non-ambient block of it compiles to one at run time.
+ */
+export function isInstantiatedNamespace(symbol: Sym): boolean {
+  const declarations =
+    symbol.namespaceDeclarations.length > 0 ? symbol.namespaceDeclarations : symbol.valueDeclarations;
+  return declarations.some((declaration) => {
+    if (declaration.type !== 'internal_module' && declaration.type !== 'module') return false;
+    const body = declaration.childForFieldName('body');
+    return body !== null && blockHasRuntimeCode(body);
+  });
+}
+
+/** Whether a namespace block's body declares values or statements, rather than only types and type-only namespaces. */
+export function blockHasRuntimeCode(body: TreeNode): boolean {
+  return body.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child, true));
+}
+
+/** Whether a non-ambient namespace block emits a runtime wrapper under esbuild (erasing unexported `declare` statements). */
+export function blockEmitsRuntimeNamespace(body: TreeNode): boolean {
+  return body.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child, false));
+}
+
+function statementHasRuntimeCode(statement: TreeNode, includeUnexportedAmbient: boolean): boolean {
+  if (typeOnlyStatementTypes.has(statement.type)) return false;
+  if (statement.type === 'ambient_declaration') return includeUnexportedAmbient && bodyHasRuntimeCode(statement);
+  const declaration = statement.type === 'export_statement' ? statement.childForFieldName('declaration') : statement;
+  if (!declaration || typeOnlyStatementTypes.has(declaration.type)) return false;
+  if (declaration.type === 'ambient_declaration') return bodyHasRuntimeCode(declaration);
+  // tsc counts an import alias only when it is exported.
+  if (declaration.type === 'import_alias') return statement.type === 'export_statement';
+  const inner = declaration.type === 'expression_statement' ? declaration.namedChildren[0] : declaration;
+  if (inner?.type !== 'internal_module' && inner?.type !== 'module') return true;
+  return nestedNamespaceHasRuntimeCode(inner, includeUnexportedAmbient);
+}
+
+function bodyHasRuntimeCode(node: TreeNode): boolean {
+  return node.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child, true));
+}
+
+function nestedNamespaceHasRuntimeCode(inner: TreeNode, includeUnexportedAmbient: boolean): boolean {
+  const innerBody = inner.childForFieldName('body');
+  if (!innerBody) return false;
+  if (includeUnexportedAmbient) return blockHasRuntimeCode(innerBody);
+  const innerName = inner.childForFieldName('name');
+  const isDotted = innerName?.type === 'nested_identifier' || innerName?.type === 'member_expression';
+  return isDotted || blockEmitsRuntimeNamespace(innerBody);
+}
+
+/** Whether a declaration is in an ambient context, as in `declare namespace`, which declares without code to run. */
+export function isAmbient(node: TreeNode): boolean {
+  for (let current: TreeNode | null = node; current; current = current.parent)
+    if (current.type === 'ambient_declaration') return true;
+  return false;
+}
+
+const checkedAmbientDeclarationTypes = new Set([
+  'ambient_declaration',
+  'internal_module',
+  'module',
+  'import_statement',
+  'import_alias',
+  'lexical_declaration',
+  'variable_declaration',
+  'enum_declaration',
+  'function_signature',
+  'function_declaration',
+  'generator_function_declaration',
+  'class_declaration',
+  'abstract_class_declaration',
+  'interface_declaration',
+  'type_alias_declaration',
+]);
+
+/**
+ * Whether the checker checks a declaration under `declare`: namespaces, variables, enums, functions, classes,
+ * interfaces, type aliases, and placement-validated module/global forms.
+ */
+export function isCheckedAmbientDeclaration(node: TreeNode): boolean {
+  if (node.type === 'export_statement') {
+    const declaration = node.childForFieldName('declaration');
+    return !declaration || checkedAmbientDeclarationTypes.has(declaration.type);
+  }
+  const declaration = node.type === 'expression_statement' ? node.namedChildren[0] : node;
+  return checkedAmbientDeclarationTypes.has(declaration?.type ?? '');
+}

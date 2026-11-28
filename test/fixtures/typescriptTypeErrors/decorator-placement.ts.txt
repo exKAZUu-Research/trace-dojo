@@ -1,0 +1,22 @@
+function logged(...args: any[]): any {}
+class Greeter {
+  greet(@logged name: string) {}
+  constructor(@logged greeting: string) {}
+  set title(@logged value: string) {}
+}
+const greeter = { greet(@logged name: string) {} };
+function greet(@logged name: string) {}
+abstract class Shape {
+  @logged declare width: number;
+  @logged abstract height: number;
+  @logged area() {}
+  @logged accessor sides = 0;
+}
+@logged class Square {}
+const Circle = @logged class {};
+class Built {
+  @logged constructor() {}
+}
+class Quoted {
+  @logged 'constructor'() {}
+}

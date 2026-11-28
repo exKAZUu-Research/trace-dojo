@@ -29,7 +29,12 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   /** The strings array of each tagged template site, which every evaluation of the site passes to its tag. */
   private readonly templateObjects = new WeakMap<Expression, JsArray>();
 
-  abstract evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding): JsFunction;
+  abstract evaluateClass(
+    cls: ClassNode,
+    inferredName?: Key,
+    binding?: Binding,
+    initializesBinding?: boolean
+  ): JsFunction;
 
   abstract superCall(args: Value[], callRow: number, skipsAfterSuper?: boolean): JsObject;
 
@@ -68,6 +73,11 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       case 'identifier': {
         return this.readVariable(expression.name);
       }
+      case 'importedModule': {
+        return expression.isNamespace
+          ? runtime.realm.importNodeModule?.(runtime, expression.specifier)
+          : runtime.realm.loadNodeModule?.(runtime, expression.specifier);
+      }
       case 'this': {
         return this.thisValue();
       }
@@ -84,7 +94,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return this.createFunction(expression.fn, runtime.frame.scope);
       }
       case 'classExpression': {
-        return this.evaluateClass(expression.cls, undefined, classBinding);
+        return this.evaluateClass(expression.cls, expression.inferredName, classBinding);
       }
       case 'member': {
         return this.member(expression);
@@ -126,9 +136,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
           : this.evaluate(expression.alternate);
       }
       case 'sequence': {
-        let value: Value;
-        for (const item of expression.expressions) value = this.evaluate(item);
-        return value;
+        return this.sequence(expression.expressions);
       }
       case 'parenthesized': {
         return this.evaluate(expression.expression, classBinding);
@@ -139,6 +147,12 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         throw new Error(`A ${expression.kind} reached the synchronous evaluator`);
       }
     }
+  }
+
+  private sequence(expressions: Expression[]): Value {
+    let value: Value;
+    for (const item of expressions) value = this.evaluate(item);
+    return value;
   }
   private update(expression: Extract<Expression, { kind: 'update' }>): Value {
     return this.updateReference(this.reference(expression.target), expression);
@@ -317,7 +331,6 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     const { fn, thisValue } = resolved;
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
-    if (expression.isTaggedTemplate) runtime.checkTag(fn);
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     temporaries.push(fn, thisValue);
@@ -337,7 +350,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     // Parentheses keep a method's receiver but end an optional chain, so `(a?.b)()` calls whatever `a?.b` gave.
     let target = callee;
     while (target.kind === 'parenthesized') target = target.expression;
-    if (target.kind !== 'member') {
+    if (target.kind !== 'member' || target.isUnboundCall) {
       const fn = this.evaluateChain(callee);
       return fn === SHORT_CIRCUIT ? SHORT_CIRCUIT : { fn, thisValue: undefined };
     }
@@ -651,7 +664,7 @@ export function bitLength(value: bigint): number {
 }
 
 // code-gauge-allow duplicateLines -- Numeric operators overlap other interpreters, while each language keeps its own coercion, division, and exception rules.
-function numberArithmetic(operator: string, left: number, right: number): number {
+export function numberArithmetic(operator: string, left: number, right: number): number {
   switch (operator) {
     case '+': {
       return left + right;

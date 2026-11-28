@@ -21,7 +21,9 @@ export class ReducedTypes {
     const previous = this.cache.get(type);
     if (previous) return previous;
     this.cache.set(type, type);
-    const reduced = type.kind === 'intersection' ? this.reduceIntersection(type) : this.reduceUnion(type);
+    const reduced = this.c.functions.withoutLatentYieldPropagation(() =>
+      type.kind === 'intersection' ? this.reduceIntersection(type) : this.reduceUnion(type)
+    );
     this.cache.set(type, reduced);
     return reduced;
   }

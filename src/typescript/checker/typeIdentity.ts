@@ -1,13 +1,16 @@
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { keyedIndexes } from './indexInfos';
+import { enumDeclarationsRelated } from './relations';
 import {
   type ConditionalType,
   errorType,
+  type LiteralType,
   type MappedInfo,
   type ObjectType,
   type Property,
   propertyAccessType,
+  regularOf,
   type Signature,
   type Type,
   undefinedType,
@@ -22,7 +25,7 @@ export function structurallyIdentical(c: Checker, source: Type, target: Type): b
       return target.kind === 'intrinsic' && source.name === target.name;
     }
     case 'literal': {
-      return target.kind === 'literal' && source.value === target.value;
+      return target.kind === 'literal' && literalsIdentical(source, target);
     }
     case 'union':
     case 'intersection': {
@@ -65,6 +68,24 @@ export function structurallyIdentical(c: Checker, source: Type, target: Type): b
       return false;
     }
   }
+}
+
+function literalsIdentical(source: LiteralType, target: LiteralType): boolean {
+  if (!source.enumMember && !target.enumMember) return source.value === target.value;
+  if (!source.enumMember || !target.enumMember) return false;
+  if (source.enumMember.empty || target.enumMember.empty) {
+    return (
+      Boolean(source.enumMember.empty && target.enumMember.empty) &&
+      enumDeclarationsRelated(source.enumMember, target.enumMember) &&
+      enumDeclarationsRelated(target.enumMember, source.enumMember)
+    );
+  }
+  if (source.enumMember.computed || target.enumMember.computed) return regularOf(source) === regularOf(target);
+  return (
+    source.value === target.value &&
+    enumDeclarationsRelated(source.enumMember, target.enumMember) &&
+    enumDeclarationsRelated(target.enumMember, source.enumMember)
+  );
 }
 
 function conditionalsIdentical(c: Checker, source: ConditionalType, target: ConditionalType): boolean {

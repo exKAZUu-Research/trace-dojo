@@ -2,13 +2,22 @@ import { CompileError } from '../interpreter/diagnostics';
 import { orderBuiltinMembers } from './builtinOrder';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
+import {
+  UNAVAILABLE_FS_MEMBERS,
+  UNAVAILABLE_PROCESS_MEMBERS,
+  UNAVAILABLE_STREAM_MEMBERS,
+} from './unavailableNodeMembers';
 import { JsObject, type Key, type NativeCall, type Value } from './values';
 
 /** Names an unavailable library member on a receiver, or gives undefined for any other. */
 export type UnavailableMemberCheck = (value: Value, key: Key | undefined) => string | undefined;
 
+/**
+ * The well-known symbols whose protocols a TypeScript program may not replace, which leaves those that the syntax of
+ * iteration relies on; `using`, which relies on `Symbol.dispose`, has no library types to check it with.
+ */
 export const unavailableWellKnownSymbols = new Set([
-  ...Object.keys(WELL_KNOWN_SYMBOLS),
+  ...Object.keys(WELL_KNOWN_SYMBOLS).filter((name) => !['iterator', 'asyncIterator'].includes(name)),
   'isConcatSpreadable',
   'match',
   'matchAll',
@@ -46,25 +55,56 @@ const unavailableSymbolNames = new Map(Object.entries(WELL_KNOWN_SYMBOLS).map(([
 const consoleTimers = new Set<Key | undefined>(['time', 'timeEnd', 'timeLog', 'timeStamp']);
 
 /**
- * Defines reflected method properties whose calls remain unavailable, and checks unavailable reads the type checker
- * cannot resolve, such as those through `any`.
+ * Defines reflected method properties whose calls remain unavailable and `Math.random`, which a TypeScript program
+ * draws random numbers with as a Java one does, from the host's generator, and checks unavailable reads the type
+ * checker cannot resolve, such as those through `any`.
  */
 export function unavailableMemberCheck(runtime: Runtime): UnavailableMemberCheck {
   const { realm } = runtime;
   const symbol = realm.globals.lookup('Symbol')?.value;
   const math = realm.globals.lookup('Math')?.value;
   const console = realm.globals.lookup('console')?.value;
-  defineUnavailableMethods(runtime, math, console);
+  defineUnavailableMethods(runtime, console);
+  if (math instanceof JsObject)
+    math.properties.set('random', {
+      value: runtime.newNativeFunction('random', 0, () => Math.random()),
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
   defineUnavailableRegExpStatics(runtime);
   orderBuiltinMembers(realm);
-  return (value, key) => unavailableSymbolFeature(value, key, symbol);
+  const process = realm.globals.lookup('process')?.value;
+  const nodeObjects = new Map<Value, { owner: string; members: ReadonlySet<string> }>();
+  if (process instanceof JsObject) {
+    nodeObjects.set(process, { owner: 'process', members: UNAVAILABLE_PROCESS_MEMBERS });
+    for (const streamName of ['stdout', 'stderr'] as const) {
+      const stream = runtime.get(process, streamName);
+      if (stream instanceof JsObject) {
+        nodeObjects.set(stream, { owner: `process.${streamName}`, members: UNAVAILABLE_STREAM_MEMBERS });
+      }
+    }
+  }
+  const fsTarget = { owner: 'fs', members: UNAVAILABLE_FS_MEMBERS };
+  if (realm.fsModule) nodeObjects.set(realm.fsModule, fsTarget);
+  return (value, key) => {
+    const target =
+      nodeObjects.get(value) ?? (value instanceof JsObject && realm.fsObjects?.has(value) ? fsTarget : undefined);
+    const isUnavailableNodeMember =
+      target !== undefined &&
+      typeof key === 'string' &&
+      value instanceof JsObject &&
+      !value.properties.has(key) &&
+      target.members.has(key);
+    return (
+      unavailableSymbolFeature(value, key, symbol) ?? (isUnavailableNodeMember ? `${target.owner}.${key}` : undefined)
+    );
+  };
 }
 
 function unavailableSymbolFeature(value: Value, key: Key | undefined, constructor: Value): string | undefined {
-  const name = typeof value === 'symbol' ? unavailableSymbolNames.get(value) : key;
-  if (typeof name !== 'string') return undefined;
-  if (typeof value !== 'symbol' && (value !== constructor || !unavailableWellKnownSymbols.has(name))) return undefined;
-  return wellKnownSymbolFeature(name);
+  const name = typeof value === 'symbol' ? unavailableSymbolNames.get(value) : value === constructor ? key : undefined;
+  return typeof name === 'string' && unavailableWellKnownSymbols.has(name) ? wellKnownSymbolFeature(name) : undefined;
 }
 
 export function wellKnownSymbolFeature(name: string): string {
@@ -77,11 +117,10 @@ export function rejectUnavailableMember(feature: string, row: number | undefined
   throw new CompileError([{ row: row ?? 0, message: `${feature}${separator}は、この採点環境では使えません。` }]);
 }
 
-function defineUnavailableMethods(runtime: Runtime, math: Value, console: Value): void {
+function defineUnavailableMethods(runtime: Runtime, console: Value): void {
   const { realm } = runtime;
   const array = realm.globals.lookup('Array')?.value;
   if (array instanceof JsObject) defineUnavailableMethod(runtime, array, 'fromAsync', 'Array.fromAsync', { length: 1 });
-  if (math instanceof JsObject) defineUnavailableMethod(runtime, math, 'random', 'Math.random');
   if (console instanceof JsObject)
     for (const name of consoleTimers)
       defineUnavailableMethod(runtime, console, String(name), `console.${String(name)}`, { enumerable: true });

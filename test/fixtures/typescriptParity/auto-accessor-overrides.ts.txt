@@ -1,0 +1,7 @@
+class A1 { accessor x = 1; }
+class B1 extends A1 { get x() { return 2; } }
+class A2 { private _x = 1; get x() { return this._x; } set x(v: number) { this._x = v; } }
+class B2 extends A2 { accessor x = 5; }
+class A3 { accessor x = 1; }
+class B3 extends A3 { accessor x = 3; }
+console.log(new B1().x, new B2().x, new B3().x);

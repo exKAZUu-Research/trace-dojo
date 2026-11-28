@@ -1,0 +1,8 @@
+const it: Iterator<number> = { next(): { value: number; done?: boolean } { return { value: 1 }; } };
+type Shape = { kind?: 'a' | 'b'; size: number };
+type Target = { kind?: 'a'; size: number } | { kind: 'b'; size: number };
+type Strict = { kind: 'a'; size: number } | { kind: 'b'; size: number };
+const s: Shape = { size: 2 };
+const t: Target = s;
+const u: Strict = s;
+console.log(it.next().value, t.size, u.size);

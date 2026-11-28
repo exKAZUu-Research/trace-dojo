@@ -1,0 +1,6 @@
+enum E { A = 1, B = 2 }
+import X = E.A;
+namespace N { export enum F { C = 3 } }
+import Y = N.F.C;
+import Z = E.Q;
+console.log(X, Y);

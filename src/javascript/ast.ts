@@ -14,10 +14,10 @@ export interface Program {
    * source a compiler printed rather than as written.
    */
   rejectsFunctionText?: boolean;
-  /** Whether a tagged template may only call the builtin `String.raw`, as for TypeScript, whose other tags come later. */
-  allowsOnlyStringRawTag?: boolean;
   /** Whether reading a library member the realm leaves out ends the program, as for TypeScript, which rejects it. */
   rejectsUnavailableMembers?: boolean;
+  /** Generated helper bindings (such as namespace/enum receivers) omitted from learner variable snapshots. */
+  hiddenNames?: ReadonlySet<string>;
 }
 
 /** The names a function body or block declares, which its scope creates before running its statements. */
@@ -131,6 +131,8 @@ export interface FunctionNode extends Span {
   scope: ScopeDeclarations;
   /** Whether a trace shows a call to this function as part of its caller's step, marked by `// atomic`. */
   isAtomic: boolean;
+  /** Whether calling this function omits its call site from trace `callLines`, as for a synthesized namespace wrapper. */
+  hidesCallRow?: boolean;
   /** The text `toString()` returns. */
   source: string;
   /** Whether the function is strict mode code, which a class or a `"use strict"` directive makes it. */
@@ -144,10 +146,20 @@ export interface ClassNode extends Span {
   afterSuper?: Statement[];
   members: ClassMember[];
   source: string;
+  /** The class's decorators, in source order, as TypeScript's standard decorators apply them. */
+  decorators?: Expression[];
+  /** Whether the class is an unnamed `export default [abstract] class` declaration rather than an expression. */
+  isUnnamedDefaultDeclaration?: boolean;
 }
 
 export type ClassMember =
-  | { kind: 'method' | 'getter' | 'setter'; isStatic: boolean; key: PropertyName; fn: FunctionNode }
+  | {
+      kind: 'method' | 'getter' | 'setter';
+      isStatic: boolean;
+      key: PropertyName;
+      fn: FunctionNode;
+      decorators?: Expression[];
+    }
   | {
       kind: 'field';
       isStatic: boolean;
@@ -156,6 +168,9 @@ export type ClassMember =
       value?: Expression;
       stepRow?: number;
       row: number;
+      decorators?: Expression[];
+      /** Whether it is `accessor x`, a getter and a setter of a value the instance keeps privately. */
+      isAutoAccessor?: true;
     }
   | { kind: 'staticBlock'; body: Statement[]; scope: ScopeDeclarations; row: number };
 
@@ -208,12 +223,13 @@ export type Expression = Span & {
     | { kind: 'templateObject'; cooked: (string | undefined)[]; raw: string[] }
     | { kind: 'regex'; pattern: string; flags: string }
     | { kind: 'identifier'; name: string }
+    | { kind: 'importedModule'; specifier: string; isNamespace?: boolean }
     | { kind: 'this' }
     | { kind: 'newTarget' }
     | { kind: 'array'; elements: (Argument | undefined)[] }
     | { kind: 'object'; members: ObjectMember[] }
     | { kind: 'functionExpression'; fn: FunctionNode }
-    | { kind: 'classExpression'; cls: ClassNode }
+    | { kind: 'classExpression'; cls: ClassNode; inferredName?: string }
     | MemberExpression
     | {
         kind: 'call';
@@ -222,8 +238,6 @@ export type Expression = Span & {
         args: Argument[];
         optional: boolean;
         calleeText: string;
-        /** Whether it calls the tag of a tagged template. */
-        isTaggedTemplate?: boolean;
       }
     | { kind: 'new'; callee: Expression; args: Argument[]; calleeText: string }
     | { kind: 'assign'; operator: string; target: Pattern; value: Expression }
@@ -251,6 +265,8 @@ export interface MemberExpression extends Span {
   object: Expression | SuperReference;
   property: PropertyName;
   optional: boolean;
+  inferredName?: string;
+  isUnboundCall?: boolean;
 }
 
 /** How V8 names what a pattern takes apart, in the TypeError a value it cannot take apart throws. */

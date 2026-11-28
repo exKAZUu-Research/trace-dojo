@@ -1,0 +1,6 @@
+import * as fs from 'fs';
+console.log('first');
+fs.writeFileSync('/dev/stdout', 'direct\n');
+fs.appendFileSync('/dev/stdout', 'more\n');
+fs.writeFileSync('/dev/fd/1', 'fd\n');
+console.log('last');

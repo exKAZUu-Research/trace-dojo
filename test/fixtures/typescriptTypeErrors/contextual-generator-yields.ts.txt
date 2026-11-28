@@ -1,0 +1,12 @@
+function run<U>(f: (x: number) => Generator<U>) { return [...f(1)]; }
+console.log(run(function* (x) { yield x * 2; }));
+console.log(run(function* (x) { yield x; }));
+const r: string[] = run(function* (x) { yield String(x); });
+console.log(r);
+const g: () => Generator<string> = function* () {
+  yield 1;
+};
+function* h(): Generator<string> {
+  yield 2;
+}
+console.log(g, h);

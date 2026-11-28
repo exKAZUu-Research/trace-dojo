@@ -166,14 +166,14 @@ export function propertyNameText(node: TreeNode): string | undefined {
     }
     case 'number': {
       const value = numberValue(node.text);
-      return typeof value === 'number' ? String(value) : undefined;
+      return value !== undefined ? String(value) : undefined;
     }
     case 'computed_property_name': {
       const inner = named(node)[0];
       if (inner?.type === 'string') return stringValue(inner);
       if (inner?.type === 'number') {
         const value = numberValue(inner.text);
-        return typeof value === 'number' ? String(value) : undefined;
+        return value !== undefined ? String(value) : undefined;
       }
       return undefined;
     }
@@ -250,6 +250,15 @@ export function isRawTypeTemplateFragment(node: TreeNode): boolean {
   return parent?.type === 'template_literal_type' && !named(parent).some((child) => child.type === 'template_type');
 }
 
+/** Whether `node` is the template of `` tag`...` ``, which stands for the `TemplateStringsArray` argument. */
+export function isTaggedTemplateArgument(node: TreeNode): boolean {
+  return (
+    node.type === 'template_string' &&
+    node.parent?.type === 'call_expression' &&
+    node.parent.childForFieldName('arguments')?.id === node.id
+  );
+}
+
 export function hasInvalidCharacterEscape(node: TreeNode): boolean {
   if (node.type !== 'escape_sequence') return false;
   const body = node.text.slice(1);
@@ -294,7 +303,14 @@ export function numberValue(text: string): number | bigint {
 
 /** Whether a node is a function whose `this` is its own, rather than an arrow function's enclosing one. */
 export function isFunctionWithOwnThis(node: TreeNode): boolean {
-  return ['function_declaration', 'function_expression', 'method_definition', 'class_static_block'].includes(node.type);
+  return [
+    'function_declaration',
+    'function_expression',
+    'generator_function_declaration',
+    'generator_function',
+    'method_definition',
+    'class_static_block',
+  ].includes(node.type);
 }
 
 /** Whether a node is a link of an optional chain: `a?.b`, or a link continuing one without parentheses, as `a?.b.c`. */
@@ -336,4 +352,67 @@ export function isImmediatelyInvoked(node: TreeNode): boolean {
   while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;
   const parent = expression.parent;
   return parent?.type === 'call_expression' && parent.childForFieldName('function')?.id === expression.id;
+}
+
+/** The labels a chain of labeled statements gives, and the statement they label. */
+export function labeledBody(node: TreeNode): { labels: string[]; body: TreeNode | undefined } {
+  const labels: string[] = [];
+  let body: TreeNode | null = node;
+  while (body?.type === 'labeled_statement') {
+    labels.push(body.childForFieldName('label')?.text ?? '');
+    body = body.childForFieldName('body');
+  }
+  return { labels, body: body ?? undefined };
+}
+
+/** The label a `break` or `continue` jumps to, if it names one. */
+export function jumpLabel(jump: TreeNode): string | undefined {
+  return named(jump).find((child) => child.type === 'statement_identifier')?.text;
+}
+
+export const loopStatementTypes = new Set(['while_statement', 'do_statement', 'for_statement', 'for_in_statement']);
+
+export function isGlobalAugmentationNamespace(node: TreeNode): boolean {
+  const name = node.childForFieldName('name');
+  return (
+    node.type === 'internal_module' &&
+    !hasToken(node, 'namespace') &&
+    name?.type === 'identifier' &&
+    name.text === 'global'
+  );
+}
+
+export function isTopLevelAmbientModule(node: TreeNode | null | undefined): boolean {
+  if (
+    (node?.type !== 'module' && node?.type !== 'internal_module') ||
+    node.childForFieldName('name')?.type !== 'string'
+  )
+    return false;
+  let container = node.parent;
+  while (container && (container.type === 'ambient_declaration' || container.type === 'export_statement')) {
+    container = container.parent;
+  }
+  return container?.type === 'program';
+}
+
+export function isAmbientModuleBody(node: TreeNode | null | undefined): boolean {
+  return node?.type === 'statement_block' && isTopLevelAmbientModule(node.parent);
+}
+
+export function isNamespaceBody(node: TreeNode | null | undefined): boolean {
+  const owner = node?.type === 'statement_block' ? node.parent : undefined;
+  return (
+    (owner?.type === 'internal_module' || owner?.type === 'module') &&
+    owner.childForFieldName('name')?.type !== 'string' &&
+    !isGlobalAugmentationNamespace(owner)
+  );
+}
+
+export function isDirectGlobalAugmentationContainer(node: TreeNode, isExternalModule: boolean): boolean {
+  return isExternalModule ? node.parent?.type === 'program' : isAmbientModuleBody(node.parent);
+}
+
+/** Whether a program has an `import` or an `export`, which makes it a module. */
+export function isModule(root: TreeNode): boolean {
+  return root.namedChildren.some((child) => child?.type === 'import_statement' || child?.type === 'export_statement');
 }

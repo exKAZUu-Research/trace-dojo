@@ -1,0 +1,13 @@
+function h<T>(x: Awaited<T>): T { return x; }
+async function allOf<T>(ps: Promise<T>[]): Promise<T[]> { const arr = await Promise.all(ps); return arr; }
+async function allDirect<T>(ps: Promise<T>[]): Promise<T[]> { return Promise.all(ps); }
+async function pairUp<A, B>(a: Promise<A>, b: Promise<B>): Promise<[A, B]> { const pair = await Promise.all([a, b]); return pair; }
+async function getOne<T>(p: Promise<T>): Promise<T> { const v = await p; return v; }
+async function keepConstrained<T extends string | number>(value: T): Promise<T> { const x: T = await value; return x; }
+async function keepObject<T extends { id: number }>(value: T): Promise<T> { const x: T = await value; return x; }
+async function unwrapGeneric<T>(value: T): Promise<Awaited<T>> { const x: Awaited<T> = await value; return x; }
+async function inferAsync<T>(value: T) { return await value; }
+const checkInferred: <T>(value: T) => Promise<T> = inferAsync;
+async function main() { console.log(await allOf([Promise.resolve(1)]), await allDirect([Promise.resolve(2)]), await pairUp(Promise.resolve(3), Promise.resolve("b")), await getOne(Promise.resolve("a")), await keepConstrained("k"), (await keepObject({ id: 7 })).id, await unwrapGeneric(Promise.resolve(9)), await checkInferred(4)); }
+main();
+console.log(typeof h);

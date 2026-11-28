@@ -1,0 +1,14 @@
+function tag(): string { return "x"; }
+console.log(tag`a`);
+console.log(tag`a${1}b`);
+function two(s: TemplateStringsArray, n: number) { return s[0] + n; }
+console.log(two`a${1}`);
+console.log(two`a`);
+function any(...a: unknown[]) { return a.length; }
+console.log(any`x${1}`);
+function many(s: TemplateStringsArray, a: number, b?: number) { return a; }
+console.log(many`a${1}${2}${3}`);
+function over(s: TemplateStringsArray): string;
+function over(s: TemplateStringsArray, a: number, b: number): string;
+function over(...a: unknown[]) { return ''; }
+console.log(over`a${1}`);

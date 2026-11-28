@@ -1,7 +1,9 @@
 // code-gauge-allow-file fileNcss -- Builds and checks conditional flow for each expression form.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { isAlwaysAwaitableType } from './awaited';
 import type { Checker } from './checker';
+import type { RetainFresh } from './expressionTypeCache';
 import type { State } from './flow';
 import { InlinedConditions } from './inlinedConditions';
 import type { Sym } from './scopes';
@@ -42,13 +44,22 @@ export interface Condition {
 const parenthesizedConditionStatements = new Set(['if_statement', 'while_statement', 'do_statement']);
 
 /** The kinds of expressions that are objects, which are always truthy. */
-const alwaysTruthyTypes = new Set(['array', 'arrow_function', 'class', 'function_expression', 'object', 'regex']);
+const alwaysTruthyTypes = new Set([
+  'array',
+  'arrow_function',
+  'class',
+  'function_expression',
+  'generator_function',
+  'object',
+  'regex',
+]);
 
 /** Checks conditions, computing the flow states where they are true and false. */
 export class ConditionChecker {
   private readonly inlined: InlinedConditions;
   private readonly logicalRightTypes = new Map<number, Type>();
   private readonly propertyDeclarations = new Map<number, number>();
+  private readonly reportedKnownTruthy = new Set<number>();
 
   constructor(private readonly c: Checker) {
     this.inlined = new InlinedConditions(c);
@@ -66,8 +77,8 @@ export class ConditionChecker {
     return { whenTrue, whenFalse };
   }
 
-  condition(node: TreeNode, testsTruthiness = true): Condition {
-    const result = this.conditionOf(node);
+  condition(node: TreeNode, testsTruthiness = true, contextual?: Type, retainFresh: RetainFresh = false): Condition {
+    const result = this.conditionOf(node, contextual, retainFresh);
     if (node.type === 'true') result.whenFalse = undefined;
     if (node.type === 'false') result.whenTrue = undefined;
     if (testsTruthiness) this.checkTruthiness(node, result.type);
@@ -75,7 +86,7 @@ export class ConditionChecker {
   }
 
   // code-gauge-allow functionNcss -- Computes branch states for each kind of narrowing expression.
-  private conditionOf(node: TreeNode): Condition {
+  private conditionOf(node: TreeNode, contextual?: Type, retainFresh: RetainFresh = false): Condition {
     const expression = skipParentheses(node);
     switch (expression.type) {
       case 'unary_expression': {
@@ -91,12 +102,12 @@ export class ConditionChecker {
         };
       }
       case 'binary_expression': {
-        const result = this.binaryCondition(expression);
+        const result = this.binaryCondition(expression, contextual, retainFresh);
         if (result) return result;
         break;
       }
       case 'call_expression': {
-        return this.c.members.chainCondition(expression, () => this.callCondition(expression));
+        return this.c.members.chainCondition(expression, () => this.callCondition(expression, contextual));
       }
       case 'identifier': {
         const aliased = this.inlined.aliasedCondition(expression);
@@ -116,17 +127,22 @@ export class ConditionChecker {
       }
     }
     return this.c.members.chainCondition(expression, () => {
-      const type = this.c.expressions.check(expression);
+      const type = this.c.expressions.check(expression, contextual, retainFresh);
       return { ...this.truthiness(expression), type };
     });
   }
 
   /** The condition a binary expression is, if its operator narrows. */
-  private binaryCondition(expression: TreeNode): Condition | undefined {
+  private binaryCondition(
+    expression: TreeNode,
+    contextual?: Type,
+    retainFresh: RetainFresh = false
+  ): Condition | undefined {
     const operator = expression.childForFieldName('operator')?.text ?? '';
     const left = expression.childForFieldName('left') as TreeNode;
     const right = expression.childForFieldName('right') as TreeNode;
-    if (operator === '&&' || operator === '||') return this.logicalCondition(operator, left, right);
+    if (operator === '&&' || operator === '||')
+      return this.logicalCondition(operator, left, right, contextual, retainFresh);
     if (!['===', '!==', '==', '!=', 'instanceof', 'in'].includes(operator)) return undefined;
     const { type, leftType, rightType } = this.c.operators.checkBinaryOperands(expression, operator, left, right);
     if (operator === 'instanceof') {
@@ -153,12 +169,18 @@ export class ConditionChecker {
       : this.truthiness(expression);
   }
 
-  private logicalCondition(operator: '&&' | '||', left: TreeNode, right: TreeNode): Condition {
-    const leftResult = this.condition(left);
+  private logicalCondition(
+    operator: '&&' | '||',
+    left: TreeNode,
+    right: TreeNode,
+    contextual?: Type,
+    retainFresh: RetainFresh = false
+  ): Condition {
+    const leftResult = this.condition(left, true, operator === '||' ? contextual : undefined, retainFresh);
     const rightState = operator === '&&' ? leftResult.whenTrue : leftResult.whenFalse;
     let rightResult: Condition = { whenTrue: undefined, whenFalse: undefined, type: neverType };
     this.c.flow.from(rightState, () => {
-      rightResult = this.condition(right, false);
+      rightResult = this.condition(right, false, contextual, retainFresh);
     });
     this.checkLogicalOperands(left, leftResult.type, right, rightResult.type);
     const merged =
@@ -175,16 +197,17 @@ export class ConditionChecker {
     const truthy = this.c.flow.narrowByTruthiness(leftResult.type, operator === '||');
     return {
       ...merged,
-      type: unionOf([
-        operator === '&&' ? this.c.flow.narrowByTruthiness(leftResult.type, false) : truthy,
-        rightResult.type,
-      ]),
+      type: unionOf(
+        [operator === '&&' ? this.c.flow.narrowByTruthiness(leftResult.type, false) : truthy, rightResult.type],
+        true
+      ),
     };
   }
 
   /** Whether every variable an expression refers to is a constant, or a parameter or variable never reassigned. */
   private narrowsOnlyConstantReferences(expression: TreeNode): boolean {
-    if (['arrow_function', 'function_expression', 'class'].includes(expression.type)) return false;
+    if (['arrow_function', 'function_expression', 'generator_function', 'class'].includes(expression.type))
+      return false;
     if (expression.type === 'identifier') {
       const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
       return !symbol?.valueKind || symbol.valueKind === 'const' || !symbol.isReassigned;
@@ -193,13 +216,13 @@ export class ConditionChecker {
   }
 
   /** The condition a call is, narrowing what its signature's type predicate tests. */
-  private callCondition(expression: TreeNode): Condition {
+  private callCondition(expression: TreeNode, contextual?: Type): Condition {
     const cached = this.c.flow.narrowingScope?.reuseCallPredicates
       ? this.c.expressions.calls.predicateOf(expression)
       : undefined;
-    const type = cached ? booleanType : this.c.expressions.check(expression);
+    const type = cached ? booleanType : this.c.expressions.check(expression, contextual);
     const predicate = cached ?? this.c.expressions.calls.predicateOf(expression);
-    if (!predicate) return { ...this.truthiness(expression), type };
+    if (!predicate || predicate.asserts) return { ...this.truthiness(expression), type };
     const { target, type: predicateType } = predicate;
     const { whenTrue, whenFalse } = this.narrowed(target, (current, assumeTrue) =>
       assumeTrue
@@ -208,6 +231,32 @@ export class ConditionChecker {
     );
     const excludesUndefined = !this.c.relations.isAssignable(undefinedType, predicateType);
     return { whenTrue: excludesUndefined ? this.chainEvaluated(whenTrue, target) : whenTrue, whenFalse, type };
+  }
+
+  /**
+   * Narrows the flow after a call to an assertion function, `asserts x is T` or `asserts x`, to where the assertion
+   * holds, as a condition that is true there would.
+   */
+  applyAssertion(call: TreeNode, requireExplicitCallee = true): void {
+    const predicate = this.c.expressions.calls.predicateOf(call);
+    if (!predicate?.asserts) return;
+    // As tsc does, an assertion statement through a callee without an explicit type is reported and narrows nothing.
+    if (requireExplicitCallee && !this.c.expressions.calls.hasExplicitCalleeType(call)) {
+      this.c.error(
+        call.childForFieldName('function') ?? call,
+        'アサーションを使うには、呼び出し先のすべての名前が、明示的な型注釈を付けて宣言されている必要があります。'
+      );
+      return;
+    }
+    const { target, type } = predicate;
+    const narrowCurrent = (): State =>
+      predicate.asserts === 'truthy'
+        ? this.c.silently(() => this.condition(target, false)).whenTrue
+        : this.narrowed(target, (current) => this.c.flow.narrowByPredicate(current, type)).whenTrue;
+    const chain = this.c.members.callChainFlow(call);
+    this.c.flow.current = chain
+      ? this.c.flow.merge([this.c.flow.withState(chain.executed, narrowCurrent), ...chain.stops])
+      : narrowCurrent();
   }
 
   /** Reports a tested expression that is `void`, or that is always truthy or always falsy by its syntax. */
@@ -301,9 +350,18 @@ export class ConditionChecker {
     body: TreeNode | null | undefined,
     chainNode: TreeNode = tested
   ): void {
-    if (!this.isAlwaysDefinedFunction(tested, type)) return;
+    if (this.reportedKnownTruthy.has(tested.id)) return;
+    const isCallable = this.isAlwaysDefinedFunction(tested, type);
+    const isAwaitable = !isCallable && isAlwaysAwaitableType(this.c, type);
+    if (!isCallable && !isAwaitable) return;
     if (this.usedInConjunction(chainNode, tested) || (body && this.refersTo(named(body), tested))) return;
-    this.c.error(tested, 'この関数は常に定義されているので、この条件は常に真になります。呼び出すつもりでしたか？');
+    this.reportedKnownTruthy.add(tested.id);
+    this.c.error(
+      tested,
+      isCallable
+        ? 'この関数は常に定義されているので、この条件は常に真になります。呼び出すつもりでしたか？'
+        : `'${this.c.print(type)}' が常に定義されているため、この条件は常に true を返します。'await' を使用することを忘れていませんか?`
+    );
   }
 
   private usedInConjunction(node: TreeNode, reference: TreeNode): boolean {

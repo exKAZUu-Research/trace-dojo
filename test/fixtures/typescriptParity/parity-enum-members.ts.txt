@@ -1,0 +1,10 @@
+enum Direction { Up = 1, Down, Left = Up * 10 }
+enum Label { A = 'a', B = 'b' }
+const label = Label.A;
+const direction: Direction = Direction.Down;
+let moving = Direction.Up;
+moving = Direction.Left;
+console.log(label.length, Direction.Up.toFixed(2), direction.toFixed(1), Direction[direction], moving, Direction, Label);
+const base = 3;
+enum Folded { A = base, B, C = `${base}` }
+console.log(Folded);

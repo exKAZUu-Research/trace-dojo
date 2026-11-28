@@ -1,0 +1,21 @@
+enum E { A = 1, B = 1, C = 2 }
+const x: E.B = E.A;
+function f(y: E.A) { return y; }
+console.log(x, f(E.B));
+const z: E.C = E.A;
+namespace N { export enum F { A = 1 } }
+const a = E.A as const;
+const b = N.F.A as const;
+const c = E["C"] as const;
+const k = E.A;
+const d = k as const;
+enum Color { Red, Green }
+namespace Color {
+  export interface Pair { first: Color; second: Color }
+  export type Opt = number | undefined;
+  export const make = (): Pair => ({ first: Color.Red, second: Color.Green });
+}
+const p: Color.Pair = Color.make();
+const o: Color.Opt = 1;
+const r: Color.Red = Color.Red;
+console.log(a, b, c, d, p.first, p.second, o, r);

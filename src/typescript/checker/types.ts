@@ -3,6 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
 import type { Checker } from './checker';
+import type { Sym } from './scopes';
 
 /** A TypeScript type, as the checker represents it. */
 export type Type = (
@@ -53,6 +54,17 @@ export interface IntrinsicType {
 export type LiteralValue = string | number | bigint | boolean | symbol;
 type LiteralKind = 'string' | 'number' | 'bigint' | 'boolean' | 'symbol';
 
+export interface EnumMemberInfo {
+  enumId: number;
+  enumName: string;
+  name: string;
+  computed: boolean;
+  isConst?: boolean;
+  empty?: boolean;
+  members: () => ReadonlyMap<string, { value: string | number | undefined; computed: boolean }>;
+  base: () => Type;
+}
+
 export interface LiteralType {
   kind: 'literal';
   id: number;
@@ -62,6 +74,8 @@ export interface LiteralType {
   fresh: boolean;
   /** The other of the fresh and regular types of the same value. */
   counterpart: LiteralType;
+  /** For an enum member's type, the enum and the member, and the enum's type, to which the member's type widens. */
+  enumMember?: EnumMemberInfo;
 }
 
 export interface UnionType {
@@ -73,6 +87,8 @@ export interface UnionType {
    * the type arguments the alias's type parameters get.
    */
   aliasMapper?: Map<number, Type>;
+  /** For an enum's type, the union of its members' types, the enum's name. */
+  enumName?: string;
 }
 
 export interface IntersectionType {
@@ -102,6 +118,8 @@ export interface Property {
   getterOnly?: boolean;
   setterOnly?: boolean;
   isAbstract?: boolean;
+  /** The enum symbol a namespace or module export stands for, so member and index reads enforce const-enum rules. */
+  enumSymbol?: Sym;
 }
 
 export interface Parameter {
@@ -120,8 +138,11 @@ export interface Signature {
   checkImmediateBody?: () => void;
   thisType?: Type;
   returnType: () => Type;
-  /** A type predicate `x is T`, by the index of the parameter it narrows (-1 for `this`). */
-  predicate?: { index: number; type: Type };
+  /**
+   * A type predicate `x is T`, by the index of the parameter it narrows (-1 for `this`), or an assertion: `asserts x is
+   * T`, or `asserts x`, which narrows `x` to where it is truthy, and whose type is then `unknown`.
+   */
+  predicate?: { index: number; type: Type; asserts?: 'type' | 'truthy' };
   declaration?: TreeNode;
   /** Whether it constructs an abstract class. */
   isAbstract?: boolean;
@@ -129,11 +150,15 @@ export interface Signature {
   minimumArguments?: number;
   /** The required count before expanding a rest tuple or checking whether trailing parameters accept void. */
   declaredMinimumArguments?: number;
+  /** Parameter types with uninferred or constraint-clamped type parameters kept non-inferrable for argument checking. */
+  contextualSignature?: Signature;
 }
 
 export interface IndexInfo {
   type: Type;
   readonly: boolean;
+  /** For the reverse mapping of a numeric enum object, which `E[0]` reads but `keyof typeof E` does not list. */
+  isEnumReverseMapping?: boolean;
 }
 
 /** An index signature with the key type it is declared for, as `` [k: `a${string}`]: T `` is for `` `a${string}` ``. */
@@ -192,6 +217,8 @@ export interface ObjectType {
   /** For an object literal typed by one alternative of a union it spreads, which TypeScript leaves unnormalized. */
   isUnionSpread?: boolean;
   hasSpread?: boolean;
+  /** For the type of a value other than a class, such as an enum object, the name `typeof` prints it with. */
+  valueName?: string;
   /** The alias the type was written with, for printing. */
   aliasName?: string;
   aliasArguments?: Type[];
@@ -257,6 +284,12 @@ export interface TypeParameter {
   substitution?: { base: TypeParameter; constraint: Type };
   /** A `this` type, whose constraint is the class or interface it belongs to. */
   isThisType?: boolean;
+  /** The variance its `in` and `out` annotations declare, which relates instantiations by their type arguments. */
+  variance?: 'in' | 'out' | 'in out';
+  /** A placeholder substituted for an uninferred outer type parameter when probing a nested call's contextual type. */
+  isNonInferrable?: true;
+  /** The outer return-type candidate a nested generic call's return-type inference may expand this placeholder to. */
+  returnCandidate?: Type;
 }
 
 export function thisParameter(type: ObjectType): TypeParameter {
@@ -375,7 +408,9 @@ export function uniqueSymbolName(propertyName: string): string | undefined {
 
 /** Whether a type is a literal that names a property: a string, a number, or a unique symbol. */
 export function isPropertyKeyLiteral(type: Type): type is LiteralType & { value: string | number | symbol } {
-  return type.kind === 'literal' && ['string', 'number', 'symbol'].includes(typeof type.value);
+  return (
+    type.kind === 'literal' && !type.enumMember?.computed && ['string', 'number', 'symbol'].includes(typeof type.value)
+  );
 }
 
 const literalPrimitives: Record<LiteralKind, Type> = {
@@ -391,9 +426,14 @@ export function primitiveOfLiteral(type: LiteralType): Type {
   return literalPrimitives[typeof type.value as LiteralKind];
 }
 
+/** The type a literal widens to: an enum member's enum, or else the primitive of its value. */
+export function widenedLiteralType(type: LiteralType): Type {
+  return type.enumMember ? type.enumMember.base() : primitiveOfLiteral(type);
+}
+
 export function baseTypeOfLiteral(type: Type): Type {
   if (isTemplateOrStringMapping(type)) return stringType;
-  return type.kind === 'literal' && typeof type.value !== 'symbol' ? primitiveOfLiteral(type) : type;
+  return type.kind === 'literal' && typeof type.value !== 'symbol' ? widenedLiteralType(type) : type;
 }
 
 export function isIntrinsic(type: Type, name: IntrinsicName): boolean {
@@ -410,6 +450,9 @@ export function isAnyLike(type: Type): boolean {
  */
 export function aliasedDeclaredType(type: Type, name: string, typeParameters: TypeParameter[], aliasId: number): Type {
   if (type.kind !== 'object' && type.kind !== 'conditional') return type;
+  if (type.aliasName !== undefined && typeParameters.length > 0 && (type.aliasArguments?.length ?? 0) === 0) {
+    return type;
+  }
   const arguments_ = type.aliasArguments ?? [];
   const renames =
     type.aliasName !== undefined &&
@@ -427,6 +470,17 @@ export function aliasedDeclaredType(type: Type, name: string, typeParameters: Ty
 /** An anonymous or mapped object type printed as an alias applied to type arguments; any other type as it is. */
 export function withAlias<T extends Type>(type: T, name: string, typeArguments: Type[], aliasId?: number): T {
   if (type.kind !== 'object' || (type.objectKind !== 'anonymous' && type.objectKind !== 'mapped')) return type;
+  if (typeArguments.length > 0 && type.nonGeneric) {
+    return {
+      ...type,
+      id: newTypeId(),
+      nonGeneric: false,
+      origin: type.origin ?? type,
+      aliasName: name,
+      aliasArguments: typeArguments,
+      aliasId,
+    };
+  }
   return { ...type, aliasName: name, aliasArguments: typeArguments, aliasId };
 }
 
@@ -557,7 +611,7 @@ function intersectionConstraintOperand(variable: Type, bound: Type): Type | unde
   return isPrimitive(bound) ||
     bound.kind === 'literal' ||
     isIntrinsic(bound, 'object') ||
-    bound.id === emptyObjectType.id ||
+    isEmptyObject(bound) ||
     isPatternLiteralType(bound)
     ? variable
     : undefined;
@@ -599,12 +653,16 @@ function reducedIntersectionMembers(members: Type[]): Type[] {
   const hasNonNullableMember = members.some(nonNullableIntersectionMember);
   const narrowDomains = new Set(members.map(narrowIntersectionDomain));
   const hasUndefined = members.some((type) => isIntrinsic(type, 'undefined'));
-  return members.filter(
-    (type) =>
-      (type.kind !== 'intrinsic' || !narrowDomains.has(type.name)) &&
-      (!isIntrinsic(type, 'void') || !hasUndefined) &&
-      (type.id !== emptyObjectType.id || !hasNonNullableMember)
-  );
+  let seenEmptyObject = false;
+  return members.filter((type) => {
+    if (type.kind === 'intrinsic' && narrowDomains.has(type.name)) return false;
+    if (isIntrinsic(type, 'void') && hasUndefined) return false;
+    if (isEmptyObject(type)) {
+      if (hasNonNullableMember || seenEmptyObject) return false;
+      seenEmptyObject = true;
+    }
+    return true;
+  });
 }
 
 function narrowIntersectionDomain(type: Type): string | undefined {
@@ -614,7 +672,7 @@ function narrowIntersectionDomain(type: Type): string | undefined {
 
 function nonNullableIntersectionMember(type: Type): boolean {
   return (
-    (type.kind === 'object' && type.id !== emptyObjectType.id) ||
+    (type.kind === 'object' && !isEmptyObject(type)) ||
     isTemplateOrStringMapping(type) ||
     (isPrimitive(type) && !isIntrinsic(type, 'void')) ||
     type.kind === 'literal' ||
@@ -691,7 +749,7 @@ function canBlockInference(type: Type, budget: ExecutionBudget): boolean {
     budget.spend(type.types.length);
     return type.types.some((member) => canBlockInference(member, budget));
   }
-  if (type.kind === 'object') return type.id !== emptyObjectType.id;
+  if (type.kind === 'object') return !isEmptyObject(type);
   if (isTemplateOrStringMapping(type)) return !isPatternLiteralType(type);
   return (
     type.kind === 'typeParameter' ||
@@ -699,6 +757,10 @@ function canBlockInference(type: Type, budget: ExecutionBudget): boolean {
     type.kind === 'indexedAccess' ||
     type.kind === 'keyof'
   );
+}
+
+function isEmptyObject(type: Type): boolean {
+  return type.kind === 'object' && (type.origin ?? type).id === emptyObjectType.id;
 }
 
 function primitiveDomain(type: Type): string | undefined {

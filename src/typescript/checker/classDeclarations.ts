@@ -1,10 +1,14 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { isAmbient } from '../namespaceInstantiation';
+import { checkAmbientInitializer } from './ambientDeclarations';
 import type { Checker } from './checker';
 import { checkDuplicateMembers, checkOverloadOptionality, memberName } from './declarations';
+import { checkDecorators } from './decoratorChecks';
 import { FlowState, propertyReferenceKey, type State } from './flow';
 import { checkIndexConformance } from './indexConformance';
 import { isBaseTypeVariable, isMixinConstructor } from './mixinConstructors';
+import { checkClassMemberModifiers, checkOverrideModifiers } from './overrideModifiers';
 import { assignmentKind, hasToken, isClassConstructor, isWithin, named } from './syntax';
 import {
   anyType,
@@ -19,6 +23,7 @@ import {
   undefinedType,
   unionOf,
 } from './types';
+import { checkVarianceAnnotations } from './varianceAnnotations';
 import { checkWrittenType } from './writtenTypes';
 
 /** Checks class declarations: their members, constructors, and the types they implement and extend. */
@@ -53,6 +58,14 @@ export class ClassDeclarationChecker {
     this.checkAbstractMembers(node, info);
     this.checkBaseCompatibility(node, info);
     this.checkStaticCompatibility(node, info);
+    this.checkModifiers(node, members, info);
+  }
+
+  /** The `override` modifiers and decorators of the members, and the `in` and `out` annotations of the type parameters. */
+  private checkModifiers(node: TreeNode, members: TreeNode[], info: ClassInfo): void {
+    checkOverrideModifiers(this.c, node, members);
+    checkVarianceAnnotations(this.c, node);
+    checkDecorators(this.c, node, info);
   }
 
   private checkIndexes(node: TreeNode, info: ClassInfo): void {
@@ -150,7 +163,8 @@ export class ClassDeclarationChecker {
   /** Reports a derived class's constructor that lacks a `super` call, or that has one although the class extends `null`. */
   private checkSuperCallPresence(node: TreeNode, ctor: TreeNode): void {
     const body = ctor.childForFieldName('body');
-    const superCall = body ? this.firstSuperCall(body) : undefined;
+    if (!body) return;
+    const superCall = this.firstSuperCall(body);
     if (this.c.classes.extendsNull(node)) {
       if (superCall)
         this.c.error(
@@ -174,9 +188,15 @@ export class ClassDeclarationChecker {
         return;
       }
       if (
-        ['function_declaration', 'function_expression', 'arrow_function', 'class', 'method_definition'].includes(
-          current.type
-        )
+        [
+          'function_declaration',
+          'function_expression',
+          'generator_function_declaration',
+          'generator_function',
+          'arrow_function',
+          'class',
+          'method_definition',
+        ].includes(current.type)
       )
         return;
       for (const child of named(current)) visit(child);
@@ -197,12 +217,13 @@ export class ClassDeclarationChecker {
         this.c.functions.checkOverloadImplementation(member);
         break;
       }
+      case 'abstract_method_signature': {
+        this.c.signatures.signatureOf(member);
+        this.c.functions.checkSignatureAnnotations(member);
+        break;
+      }
       case 'method_definition': {
-        const signature = this.c.signatures.signatureOf(member);
-        this.c.functions.checkFunctionLike(member, signature, undefined);
-        const returnType = member.childForFieldName('return_type');
-        if (member.id === ctor?.id && returnType)
-          this.c.error(returnType, 'コンストラクタには戻り値の型を書けません。');
+        this.checkMethodDefinition(member, ctor);
         break;
       }
       case 'class_static_block': {
@@ -216,6 +237,15 @@ export class ClassDeclarationChecker {
         break;
       }
     }
+  }
+
+  private checkMethodDefinition(member: TreeNode, ctor: TreeNode | undefined): void {
+    const body = member.childForFieldName('body');
+    if (body && isAmbient(member)) this.c.error(body, '実装は環境コンテキストでは宣言できません。');
+    const signature = this.c.signatures.signatureOf(member);
+    this.c.functions.checkFunctionLike(member, signature, undefined);
+    const returnType = member.childForFieldName('return_type');
+    if (member.id === ctor?.id && returnType) this.c.error(returnType, 'コンストラクタには戻り値の型を書けません。');
   }
 
   private checkMethodOverloads(node: TreeNode, members: TreeNode[], info: ClassInfo): void {
@@ -247,6 +277,8 @@ export class ClassDeclarationChecker {
   private checkFieldInitializer(member: TreeNode): void {
     const value = member.childForFieldName('value');
     if (!value) return;
+    if (isAmbient(member) || hasToken(member, 'declare'))
+      checkAmbientInitializer(this.c, member, hasToken(member, 'readonly'));
     const declared = this.c.typeNodes.annotationType(member.childForFieldName('type'));
     const annotation = declared && hasToken(member, '?') ? unionOf([declared, undefinedType]) : declared;
     if (hasToken(member, 'abstract'))
@@ -264,10 +296,7 @@ export class ClassDeclarationChecker {
   private checkMemberDeclaration(member: TreeNode, info: ClassInfo): void {
     const name = member.childForFieldName('name');
     if (name?.type === 'computed_property_name') this.c.expressions.checkComputedPropertyName(name);
-    if (hasToken(member, 'abstract') && !info.isAbstract)
-      this.c.error(name ?? member, '抽象メンバーは抽象クラスの中でのみ宣言できます。');
-    if (isClassConstructor(member) && hasToken(member, 'static'))
-      this.c.error(member, "'static' 修飾子はコンストラクタの宣言には付けられません。");
+    checkClassMemberModifiers(this.c, member, info.isAbstract === true);
   }
 
   private checkImplements(node: TreeNode, info: ClassInfo): void {
@@ -458,7 +487,8 @@ export class ClassDeclarationChecker {
       declaration?.type !== 'field_definition' ||
       declaration.childForFieldName('value') ||
       property.isAbstract ||
-      hasToken(declaration, 'declare')
+      hasToken(declaration, 'declare') ||
+      isAmbient(declaration)
     )
       return false;
     return hasToken(declaration, '!') || !this.constructorAssignedFields.has(declaration.id);
@@ -511,7 +541,7 @@ export class ClassDeclarationChecker {
     returnStates: State[]
   ): void {
     const body = classNode.childForFieldName('body');
-    if (!body) return;
+    if (!body || isAmbient(classNode)) return;
     const ownerId = ctor?.id ?? 0;
     const states = [endState, ...returnStates].filter(
       (state): state is FlowState => state !== undefined && !state.dead
@@ -551,9 +581,9 @@ export class ClassDeclarationChecker {
     if (!typeNode || !nameNode) return undefined;
     const type = this.c.typeNodes.annotationType(typeNode) ?? anyType;
     const types = type.kind === 'union' ? type.types : [type];
-    if (isAnyLike(type) || isIntrinsic(type, 'unknown') || types.some((member) => isIntrinsic(member, 'undefined')))
-      return undefined;
-    return nameNode;
+    return isAnyLike(type) || isIntrinsic(type, 'unknown') || types.some((item) => isIntrinsic(item, 'undefined'))
+      ? undefined
+      : nameNode;
   }
 }
 
@@ -561,7 +591,11 @@ export class ClassDeclarationChecker {
 function memberKind(property: Property): 'method' | 'accessor' | 'field' {
   if (property.isMethod) return 'method';
   const declarationType = property.declaration?.type ?? '';
-  return ['method_definition', 'method_signature', 'abstract_method_signature'].includes(declarationType)
+  // `accessor x = 1` declares a getter and a setter, as tsc compares it.
+  const isAutoAccessor =
+    declarationType === 'field_definition' && hasToken(property.declaration as TreeNode, 'accessor');
+  return isAutoAccessor ||
+    ['method_definition', 'method_signature', 'abstract_method_signature'].includes(declarationType)
     ? 'accessor'
     : 'field';
 }
@@ -584,8 +618,9 @@ function isInterfaceMember(property: Property): boolean {
 
 /** The name a member is declared with, or the parameter that declares a parameter property. */
 function memberNameNode(property: Property): TreeNode | undefined {
-  const { declaration } = property;
-  return declaration?.childForFieldName('name') ?? declaration?.childForFieldName('pattern') ?? undefined;
+  return (
+    property.declaration?.childForFieldName('name') ?? property.declaration?.childForFieldName('pattern') ?? undefined
+  );
 }
 
 /** How narrowly each visibility exposes a member, which a derived class may not narrow further. */

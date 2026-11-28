@@ -148,7 +148,10 @@ export abstract class EvaluatorBase {
     if (!binding) {
       const receiver = runtime.evaluator.globalReceiverFor(name);
       if (receiver) return runtime.set(receiver, name, value, undefined, this.isStrict());
-      return runtime.throwError('ReferenceError', `${name} is not defined`);
+      if (this.isStrict()) return runtime.throwError('ReferenceError', `${name} is not defined`);
+      // Sloppy mode code assigning a name nothing declares creates a property of the global object.
+      runtime.set(runtime.evaluator.globalReceiver(), name, value, undefined, false);
+      return;
     }
     if (mode === 'initialize') {
       binding.value = value;
@@ -160,6 +163,7 @@ export abstract class EvaluatorBase {
     if (!binding.isMutable) {
       runtime.throwError('TypeError', `Assignment to ${binding.immutableKind ?? 'constant'} variable.`);
     }
+    if (binding.declaredClass && value !== binding.value) binding.declaredClass = undefined;
     binding.value = value;
     binding.isHoisted = false;
   }
@@ -281,8 +285,20 @@ export abstract class EvaluatorBase {
       }
       case 'default': {
         const resolved = value === undefined ? this.evaluate(pattern.value) : value;
-        if (pattern.target.kind === 'identifier' && resolved instanceof JsFunction)
-          nameFunction(runtime, resolved, pattern.target.name);
+        const targetName =
+          pattern.target.kind === 'identifier'
+            ? pattern.target.name
+            : pattern.target.kind === 'member'
+              ? pattern.target.inferredName
+              : undefined;
+        if (
+          value === undefined &&
+          targetName !== undefined &&
+          resolved instanceof JsFunction &&
+          isAnonymousFunctionOrClass(pattern.value)
+        ) {
+          nameFunction(runtime, resolved, targetName);
+        }
         this.bindPattern(pattern.target, resolved, mode);
         return;
       }
@@ -347,12 +363,21 @@ export abstract class EvaluatorBase {
   }
 }
 
+function isAnonymousFunctionOrClass(expression: Expression): boolean {
+  let inner = expression;
+  while (inner.kind === 'parenthesized') inner = inner.expression;
+  return inner.kind === 'functionExpression' || (inner.kind === 'classExpression' && inner.cls.name === '');
+}
+
 /** Names a function by the variable or parameter default it was assigned to when it has no name yet. */
 export function nameFunction(runtime: Runtime, fn: JsFunction, name: Key): void {
   if (runtime.functionName(fn) !== '' || fn.behavior.kind === 'native') return;
-  // A function named by a symbol key takes the symbol's description in brackets.
-  const text = typeof name === 'string' ? name : name.description === undefined ? '' : `[${name.description}]`;
-  defineFunctionName(fn, text);
+  defineFunctionName(fn, functionKeyText(name));
+}
+
+/** A function or accessor key as ECMAScript formats it in `name`: a symbol's description in brackets, or `""`. */
+export function functionKeyText(name: Key): string {
+  return typeof name === 'string' ? name : name.description === undefined ? '' : `[${name.description}]`;
 }
 
 /** The variables a pattern declares, in order. */

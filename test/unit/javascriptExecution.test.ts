@@ -197,6 +197,18 @@ test.each([
     'using 宣言は case の中に直接は書けません。{ } で囲んでください。',
   ],
   ['import', "import x from 'x';", 0, 'import や export は、この採点環境では使えません。'],
+  [
+    'a method decorator',
+    'function dec() {}\nclass C {\n  @dec m() {}\n}',
+    2,
+    'デコレータは、この採点環境では使えません。',
+  ],
+  [
+    'a constructor decorator',
+    "function dec() {}\nclass C {\n  @dec 'constructor'() {}\n}",
+    2,
+    'デコレータは、この採点環境では使えません。',
+  ],
   ['a syntax error', 'const t = new Turtle(;', 0, '「)」が足りません。'],
   ['try without catch or finally', 'try {\n  console.log(1);\n}', 0, '書き方に誤りがあります。'],
   ['a stray comma in arguments', 'function f(a, b) {}\nf(1,, 2);', 1, '書き方に誤りがあります。'],

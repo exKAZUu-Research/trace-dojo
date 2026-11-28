@@ -26,6 +26,7 @@ import {
   anyType,
   booleanType,
   type ConditionalType,
+  type EnumMemberInfo,
   errorType,
   filterType,
   freshTypeCacheKey,
@@ -36,6 +37,8 @@ import {
   isAnyLike,
   isIntrinsic,
   isPrimitive,
+  isPropertyKeyLiteral,
+  type LiteralType,
   literalType,
   nonPrimitiveType,
   nullType,
@@ -75,6 +78,8 @@ const MAX_RECURSION_IDENTITY_COUNT = 3;
 
 /** Whether one type is assignable to, or comparable with, another, as TypeScript decides it. */
 export class Relations {
+  /** While positive, `in` and `out` variance shortcuts are skipped for structural comparison while `in out` stays enforced. */
+  private ignoresVariance = 0;
   /** Pairs assumed related while comparing their members, which recursive types revisit. */
   private readonly assumed = new Set<string>();
   /**
@@ -338,7 +343,7 @@ export class Relations {
   private writeTypeOf(object: Type, key: Type, numberIndexOnly: boolean): Type | undefined {
     const structure = this.c.structureOf(object);
     const { stringIndex, numberIndex } = structure;
-    if (key.kind === 'literal') {
+    if (isPropertyKeyLiteral(key)) {
       const indexed = typeof key.value === 'number' && numberIndex !== undefined;
       const name = String(key.value);
       if (numberIndexOnly && !indexed && !this.hasProperty(object, name)) return undefined;
@@ -346,7 +351,8 @@ export class Relations {
       if (property) return propertyAccessType(property, 'write');
       return this.c.typeOperators.indexedAccess(object, key);
     }
-    if (isIntrinsic(key, 'number')) return (numberIndex ?? (numberIndexOnly ? undefined : stringIndex))?.type;
+    if (isIntrinsic(key, 'number') || (key.kind === 'literal' && key.enumMember?.computed))
+      return (numberIndex ?? (numberIndexOnly ? undefined : stringIndex))?.type;
     if (numberIndexOnly) return undefined;
     if (isIntrinsic(key, 'string') || isIntrinsic(key, 'symbol') || isPatternKey(key))
       return applicableIndex(this.c, structure, key)?.type;
@@ -371,11 +377,29 @@ export class Relations {
     if (t.kind === s.kind && this.sameGeneric(s, t)) return true;
     if (s.kind === 'indexedAccess' && t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
     if (s.kind === 'conditional' && t.kind === 'conditional' && this.conditionalsRelated(s, t, relation)) return true;
+    if (this.isAwaitedOf(s, t)) return true;
     // TypeScript tries a conditional type's branches before their constraints, so `Exclude<keyof T, K>` fits `keyof T`.
     if (s.kind === 'conditional' && this.isRelated(s.trueType, t, relation) && this.isRelated(s.falseType, t, relation))
       return true;
     const constraint = this.c.baseConstraint(s);
     return constraint !== s && this.isRelated(constraint, t, relation, 0, EXPANDING_SOURCE);
+  }
+
+  /** The library's `Awaited<T>` of a generic type, which TypeScript relates to `T` as what awaiting a `T` gives. */
+  private isAwaitedOf(source: Type, target: Type): boolean {
+    const inner =
+      source.kind === 'conditional' && source.aliasArguments?.length === 1 ? source.aliasArguments[0] : undefined;
+    return (
+      source.kind === 'conditional' &&
+      inner !== undefined &&
+      source.aliasName === 'Awaited' &&
+      (inner === target || (inner.kind === target.kind && this.sameGeneric(inner, target))) &&
+      this.isLibraryDeclared(source.root ?? source)
+    );
+  }
+
+  private isLibraryDeclared(type: ConditionalType): boolean {
+    return type.declaration !== undefined && this.c.isLibrary(type.declaration);
   }
 
   private conditionalComparableToParameter(source: ConditionalType, target: TypeParameter): boolean {
@@ -480,8 +504,7 @@ export class Relations {
         return this.intrinsicTarget(s, t.name, relation);
       }
       case 'literal': {
-        if (s.kind === 'literal') return s.value === t.value;
-        return relation === 'comparable' && s.kind === 'intrinsic' && s.name === typeof t.value;
+        return literalTargetRelated(s, t, relation);
       }
       case 'templateLiteral':
       case 'stringMapping': {
@@ -694,7 +717,8 @@ export class Relations {
     if (isIntrinsic(type, 'number')) return isNumberTemplateText(text);
     // TypeScript accepts what scans as a bigint literal, so radix prefixes but no leading zero, sign, or separator.
     if (isIntrinsic(type, 'bigint')) return isBigintTemplateText(text);
-    if (type.kind === 'literal') return String(type.value) === text;
+    if (type.kind === 'literal')
+      return type.enumMember?.computed ? isNumberTemplateText(text) : String(type.value) === text;
     if (type.kind === 'union') return type.types.some((member) => this.matchesPlaceholder(text, member));
     if (type.kind === 'templateLiteral' || type.kind === 'stringMapping') return this.matchesTemplate(text, type);
     return false;
@@ -749,7 +773,8 @@ export class Relations {
     const discriminants = [...this.c.structureOf(source).properties.values()]
       .filter((property) => this.c.flow.isDiscriminant(union, property.name))
       .map((property) => {
-        const type = property.type();
+        // An optional discriminant may also be absent, which reads as undefined.
+        const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
         return { property, values: type.kind === 'union' ? type.types : [type] };
       })
       .filter(({ values }) => values.length > 1 && values.every((value) => isUnit(value)));
@@ -765,7 +790,8 @@ export class Relations {
         const structure = this.c.structureOf(source);
         const properties = new Map(structure.properties);
         for (const [index, { property }] of discriminants.entries()) {
-          properties.set(property.name, { ...property, type: () => combination[index] });
+          // tsc compares each combination by its values alone, so an optional discriminant is required in it.
+          properties.set(property.name, { ...property, optional: false, type: () => combination[index] });
         }
         return { ...structure, properties };
       });
@@ -780,6 +806,8 @@ export class Relations {
     }
     const byElements = this.elementsRelated(source, target, relation);
     if (byElements !== undefined) return byElements;
+    const byVariance = this.annotatedVarianceRelation(source, target, relation);
+    if (byVariance !== undefined) return byVariance;
     const sourceStructure = this.c.structureOf(source);
     const targetStructure = this.c.structureOf(target);
     if (
@@ -795,6 +823,59 @@ export class Relations {
         this.indexRelated(sourceStructure, source, index.type, index.keyType, relation, state)
       )
     );
+  }
+
+  /** Compares the members' structures while still honoring nested `in out` invariance annotations, as tsc does. */
+  structurally<T>(run: () => T): T {
+    this.ignoresVariance++;
+    try {
+      return run();
+    } finally {
+      this.ignoresVariance--;
+    }
+  }
+
+  /**
+   * How two instantiations of a generic class, interface, or alias are related by the variance the `in` and `out`
+   * annotations of its type parameters declare, as tsc relates them before their members: unrelated when an argument
+   * breaks its annotation, related when every parameter is annotated and none does, and otherwise left to the members.
+   */
+  private annotatedVarianceRelation(source: Type, target: ObjectType, relation: Relation): boolean | undefined {
+    if (source.kind !== 'object') return undefined;
+    const generic = this.instantiationsOfOneGeneric(source, target);
+    if (!generic) return undefined;
+    const { parameters, sourceArguments, targetArguments } = generic;
+    let isEveryAnnotated = true;
+    for (const [index, parameter] of parameters.entries()) {
+      const [from, to] = [sourceArguments[index], targetArguments[index]];
+      const variance = this.ignoresVariance > 0 && parameter.variance !== 'in out' ? undefined : parameter.variance;
+      if (!variance || !from || !to) {
+        isEveryAnnotated = false;
+        continue;
+      }
+      const covariant = variance === 'in' || this.isRelated(from, to, relation);
+      const contravariant = variance === 'out' || this.isRelated(to, from, relation);
+      if (!(covariant && contravariant)) return false;
+    }
+    return isEveryAnnotated ? true : undefined;
+  }
+
+  /** The type parameters and arguments of two instantiations of the same generic class, interface, or alias. */
+  private instantiationsOfOneGeneric(
+    source: ObjectType,
+    target: ObjectType
+  ): { parameters: TypeParameter[]; sourceArguments: Type[]; targetArguments: Type[] } | undefined {
+    if (source.objectKind === 'reference' && target.objectKind === 'reference' && source.target === target.target) {
+      const parameters = source.target?.typeParameters;
+      return parameters && source.typeArguments && target.typeArguments
+        ? { parameters, sourceArguments: source.typeArguments, targetArguments: target.typeArguments }
+        : undefined;
+    }
+    if (source.aliasId === undefined || source.aliasId !== target.aliasId) return undefined;
+    const parameters = this.c.aliasTypeParameters.get(source.aliasId);
+    return parameters && source.aliasArguments && target.aliasArguments
+      ? { parameters, sourceArguments: source.aliasArguments, targetArguments: target.aliasArguments }
+      : undefined;
   }
 
   private literalSubtypeProperties(source: Type, from: Structure, target: ObjectType, to: Structure): boolean {
@@ -1405,4 +1486,61 @@ function tupleIdentity(tuple: TupleInfo): string {
     return element.optional ? '?' : '!';
   });
   return `tuple:${tuple.readonly}:${shape.join('')}`;
+}
+
+function literalTargetRelated(s: Type, t: LiteralType, relation: Relation): boolean {
+  if (s.kind === 'literal') return literalRelated(s, t, relation);
+  if (s.kind !== 'intrinsic' || s.name !== typeof t.value) return false;
+  // Any number is assignable to a member of a numeric enum, as bit flags combined with `|` are.
+  return relation === 'comparable' || (relation === 'assignable' && t.enumMember !== undefined && s.name === 'number');
+}
+
+/**
+ * Whether two enum declarations are compatible in TypeScript (`isEnumTypeRelatedTo`): the same declaration, or two
+ * enums of the same name where every member of `source` exists in `target` with compatible string or numeric values.
+ */
+export function enumDeclarationsRelated(source: EnumMemberInfo, target: EnumMemberInfo): boolean {
+  if (source.enumId === target.enumId) return true;
+  if (source.isConst || target.isConst || source.enumName !== target.enumName) return false;
+  const [sourceMembers, targetMembers] = [source.members(), target.members()];
+  if ((sourceMembers.size === 0) !== (targetMembers.size === 0)) return false;
+  for (const [name, member] of sourceMembers) {
+    const other = targetMembers.get(name);
+    if (!other || !enumMemberSummariesCompatible(member, other)) return false;
+  }
+  return true;
+}
+
+function enumMemberSummariesCompatible(
+  source: { value: number | string | undefined; computed: boolean },
+  target: { value: number | string | undefined; computed: boolean }
+): boolean {
+  if (typeof source.value === 'string' || typeof target.value === 'string') return source.value === target.value;
+  return source.computed || target.computed || source.value === target.value;
+}
+
+/**
+ * Whether a literal or enum-member type is related to another, where computed enum members match only compatible
+ * declarations' members of the same name (or a number on the source when assigning, or on either side when comparing)
+ * and distinct enum declarations require compatible member sets.
+ */
+function literalRelated(s: LiteralType, t: LiteralType, relation: Relation): boolean {
+  if (s.enumMember && t.enumMember) return enumMembersRelated(s, t);
+  if (s.enumMember) {
+    return s.enumMember.computed ? relation === 'comparable' && typeof t.value === 'number' : s.value === t.value;
+  }
+  return t.enumMember ? literalToEnumRelated(s, t, relation) : s.value === t.value;
+}
+
+function enumMembersRelated(s: LiteralType, t: LiteralType): boolean {
+  const [from, to] = [s.enumMember as EnumMemberInfo, t.enumMember as EnumMemberInfo];
+  if (Boolean(from.empty) !== Boolean(to.empty) || from.computed !== to.computed) return false;
+  if (from.computed) return from.name === to.name && enumDeclarationsRelated(from, to);
+  return s.value === t.value && enumDeclarationsRelated(from, to);
+}
+
+function literalToEnumRelated(s: LiteralType, t: LiteralType, relation: Relation): boolean {
+  if (t.enumMember?.computed)
+    return (relation === 'assignable' || relation === 'comparable') && typeof s.value === 'number';
+  return s.value === t.value && (relation === 'comparable' || typeof s.value === 'number');
 }

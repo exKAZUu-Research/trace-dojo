@@ -1,0 +1,9 @@
+function g(a: number): void;
+export function g(a: any) { console.log("g", a); }
+export function q(a: number): void;
+function q(a: any) {}
+export function ok(a: number): void;
+export function ok(a: any) {}
+function lo(a: number): void;
+function lo(a: any) {}
+g(2);

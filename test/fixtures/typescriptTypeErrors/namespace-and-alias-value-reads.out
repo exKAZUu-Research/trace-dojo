@@ -1,0 +1,3 @@
+(2,14): error TS2694: Namespace 'E' has no exported member 'Q'.
+(5,13): error TS2708: Cannot use namespace 'O' as a value.
+(8,13): error TS2693: 'Y' only refers to a type, but is being used as a value here.

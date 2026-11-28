@@ -46,6 +46,12 @@ export interface Realm {
   promisePrototype: JsObject;
   regExpPrototype: JsObject;
   regExpConstructor?: JsFunction;
+  /** Node.js's `fs` module, which `require` returns. */
+  fsModule?: JsObject;
+  /** Objects representing Node.js `fs` (the module and its ESM namespace wrappers), for unavailable-member checks. */
+  fsObjects?: WeakSet<JsObject>;
+  loadNodeModule?: (runtime: Runtime, name: string) => Value;
+  importNodeModule?: (runtime: Runtime, name: string) => Value;
   regExpExec?: JsFunction;
   datePrototype: JsObject;
   mapPrototype: JsObject;
@@ -57,8 +63,6 @@ export interface Realm {
    * step through directly; an iterator whose methods the program replaced is stepped through its methods instead.
    */
   hostIteratorMethods: Set<JsFunction>;
-  /** The builtin `String.raw`, which a program may replace. */
-  stringRaw?: JsFunction;
   /** The symbols `Symbol.for` registered in this run, by key, which end with the run. */
   symbolRegistry: Map<string, symbol>;
   /** `%GeneratorPrototype%`, with the methods every generator object has. */

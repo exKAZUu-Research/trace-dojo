@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps POSIX virtual files, byte-offset handles, and standard-stream path resolution together.
 import { type ExecutionBudget, ExecutionLimitError, LIMITS } from './limits';
 
 export interface ProgramInput {
@@ -17,8 +18,9 @@ export interface ProgramOutput {
 
 /** The working directory, which relative paths start from. */
 export const WORKING_DIRECTORY = '/';
-/** The path that reads standard input as a file, as on Linux. */
-const STDIN_PATH = '/dev/stdin';
+export type StandardStreamName = 'stdin' | 'stdout' | 'stderr';
+export const UTF8_ENCODER = new TextEncoder();
+export const UTF8_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /**
  * The standard streams and the file system of one run, which every language's builtins share. Files hold text, which
@@ -49,10 +51,10 @@ export class ProgramIO {
 
   /**
    * Opens a file to read, which reads what the file holds as it reads, as a POSIX file descriptor does, and where
-   * `/dev/stdin` reads what remains of standard input.
+   * `/dev/stdin` or `/dev/fd/0` reads what remains of standard input.
    */
   openReader(path: string): TextReader {
-    if (resolvePath(path) === STDIN_PATH) return this.stdin.reader;
+    if (this.files.resolveStreamPath(path) === 'stdin') return this.stdin.reader;
     return new TextReader(this.files.openForReading(path), this.budget);
   }
 
@@ -202,6 +204,10 @@ export interface OpenMode {
 class FileNode {
   readonly kind = 'file';
   content = '';
+  /** Backing UTF-8 byte buffer when byte-addressed writes have updated the file. */
+  rawBytes?: Uint8Array;
+  rawByteLength = 0;
+  syncedByteLength = 0;
   /** Whether a path names the file, whose contents then count as stored; a deleted file counts only what is written. */
   isLinked = true;
 }
@@ -215,6 +221,7 @@ class DirectoryNode {
 export class FileHandle {
   /** Where the next write goes, or `undefined` for the end of the file. */
   position: number | undefined;
+  private bytePosition: number | undefined;
 
   constructor(
     private readonly files: VirtualFileSystem,
@@ -222,11 +229,23 @@ export class FileHandle {
     append: boolean
   ) {
     this.position = append ? undefined : 0;
+    this.bytePosition = append ? undefined : 0;
+  }
+
+  read(): string {
+    return this.files.readNode(this.node);
   }
 
   write(text: string): void {
     this.writeAt(this.position ?? this.node.content.length, text);
     if (this.position !== undefined) this.position += text.length;
+  }
+
+  /** Writes UTF-8 bytes at the handle's byte offset or the end of the file. */
+  writeBytes(bytes: Uint8Array): void {
+    const start = this.bytePosition ?? this.files.ensureByteLength(this.node);
+    this.files.writeBytesAt(this.node, start, bytes);
+    if (this.bytePosition !== undefined) this.bytePosition += bytes.length;
   }
 
   /** Writes at a position that the caller keeps instead of {@link position}, as a handle that also reads does. */
@@ -257,6 +276,22 @@ interface Step {
   name: string;
 }
 
+const DEV_STREAMS: Readonly<Record<string, StandardStreamName>> = {
+  stdin: 'stdin',
+  stdout: 'stdout',
+  stderr: 'stderr',
+};
+const DEV_FDS: Readonly<Record<string, StandardStreamName>> = {
+  '0': 'stdin',
+  '1': 'stdout',
+  '2': 'stderr',
+};
+
+type StreamStep =
+  | { kind: 'real'; dir: DirectoryNode }
+  | { kind: 'dev'; dir: DirectoryNode | undefined }
+  | { kind: 'devFd'; dir: DirectoryNode | undefined };
+
 /**
  * An in-memory file system holding text files, whose total length is bounded by {@link LIMITS}. Each call charges
  * the run for the names of its paths, which a program can make as long as its strings.
@@ -268,6 +303,69 @@ export class VirtualFileSystem {
 
   constructor(private readonly budget: ExecutionBudget) {}
 
+  /**
+   * Resolves `path` component-by-component to a standard stream (`/dev/stdin`, `/dev/stdout`, `/dev/stderr`, or
+   * `/dev/fd/0..2`), failing with `ENOENT` or `ENOTDIR` when an intermediate component is missing or is a file.
+   */
+  resolveStreamPath(path: string): StandardStreamName | undefined {
+    const { components, namesDirectory } = this.componentsOf(path);
+    const last = components.pop();
+    const steps: StreamStep[] = [{ kind: 'real', dir: this.root }];
+    for (const name of components) {
+      if (!this.enterStreamStep(steps, name, path)) return undefined;
+    }
+    if (last === undefined || last === '.' || last === '..') return undefined;
+    const top = steps.at(-1) as StreamStep;
+    if (top.kind === 'dev' && Object.hasOwn(DEV_STREAMS, last)) {
+      if (namesDirectory) throw new FileSystemError('ENOTDIR', path);
+      return DEV_STREAMS[last];
+    }
+    if (top.kind === 'devFd' && Object.hasOwn(DEV_FDS, last)) {
+      if (namesDirectory) throw new FileSystemError('ENOTDIR', path);
+      return DEV_FDS[last];
+    }
+    return undefined;
+  }
+
+  private enterStreamStep(steps: StreamStep[], name: string, path: string): boolean {
+    if (name === '.') return true;
+    if (name === '..') {
+      if (steps.length > 1) steps.pop();
+      return true;
+    }
+    const top = steps.at(-1) as StreamStep;
+    const special = this.specialStreamStep(steps.length, top, name, path);
+    if (special) {
+      steps.push(special);
+      return true;
+    }
+    const child = top.dir?.children.get(name);
+    if (!child) throw new FileSystemError('ENOENT', path);
+    if (child.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+    steps.push({ kind: 'real', dir: child });
+    return true;
+  }
+
+  private specialStreamStep(depth: number, top: StreamStep, name: string, path: string): StreamStep | undefined {
+    if (depth === 1 && top.kind === 'real' && name === 'dev') {
+      const realDev = this.root.children.get('dev');
+      if (realDev?.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+      return { kind: 'dev', dir: realDev };
+    }
+    if (top.kind === 'dev' && name === 'fd') {
+      const realFd = top.dir?.children.get('fd');
+      if (realFd?.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+      return { kind: 'devFd', dir: realFd };
+    }
+    if (
+      (top.kind === 'dev' && Object.hasOwn(DEV_STREAMS, name)) ||
+      (top.kind === 'devFd' && Object.hasOwn(DEV_FDS, name))
+    ) {
+      throw new FileSystemError('ENOTDIR', path);
+    }
+    return undefined;
+  }
+
   kindOf(path: string): 'file' | 'directory' | undefined {
     try {
       return this.locate(path).node?.kind;
@@ -278,7 +376,11 @@ export class VirtualFileSystem {
   }
 
   readFile(path: string): string {
-    const content = this.fileNodeOf(path).content;
+    return this.readNode(this.fileNodeOf(path));
+  }
+
+  readNode(node: FileNode): string {
+    const { content } = node;
     this.budget.spend(Math.ceil((content.length + 1) / 64));
     return content;
   }
@@ -299,12 +401,14 @@ export class VirtualFileSystem {
     if (mode.truncate) {
       this.storedLength -= node.content.length;
       node.content = '';
+      resetByteBuffer(node);
     }
     return new FileHandle(this, node, mode.append);
   }
 
   writeAt(node: FileNode, position: number, text: string): void {
     this.budget.spend(Math.ceil((text.length + Math.max(position - node.content.length, 0) + 1) / 64));
+    resetByteBuffer(node);
     // Writing past the end, as a handle may after another truncates the file, leaves a gap of NUL characters.
     const content = node.content.padEnd(text === '' ? 0 : position, '\0');
     const updated = `${content.slice(0, position)}${text}${content.slice(position + text.length)}`;
@@ -312,6 +416,48 @@ export class VirtualFileSystem {
     this.storedLength += node.isLinked ? updated.length - node.content.length : text.length + gap;
     if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
     node.content = updated;
+  }
+
+  ensureByteLength(node: FileNode): number {
+    this.ensureByteBuffer(node);
+    return node.rawByteLength;
+  }
+
+  writeBytesAt(node: FileNode, position: number, bytes: Uint8Array): void {
+    const initial = this.ensureByteBuffer(node);
+    const oldLength = node.rawByteLength;
+    const gap = Math.max(position - oldLength, 0);
+    const newLength = Math.max(oldLength, position + bytes.length);
+    const chargeBytes = position < oldLength ? newLength : bytes.length + gap;
+    this.budget.spend(Math.ceil((chargeBytes + 1) / 64));
+    const buffer = growByteBuffer(node, initial, oldLength, newLength);
+    if (position > oldLength) buffer.fill(0, oldLength, position);
+    buffer.set(bytes, position);
+    node.rawByteLength = newLength;
+    const updated =
+      position < oldLength
+        ? UTF8_DECODER.decode(buffer.subarray(0, newLength))
+        : node.content + UTF8_DECODER.decode(buffer.subarray(node.syncedByteLength, newLength));
+    this.storedLength += node.isLinked ? updated.length - node.content.length : bytes.length + gap;
+    if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
+    node.syncedByteLength = newLength;
+    node.content = updated;
+  }
+
+  private ensureByteBuffer(node: FileNode): Uint8Array {
+    if (node.rawBytes) return node.rawBytes;
+    if (node.content.length === 0) {
+      node.rawBytes = new Uint8Array(64);
+      node.rawByteLength = 0;
+      node.syncedByteLength = 0;
+      return node.rawBytes;
+    }
+    this.budget.spend(Math.ceil((node.content.length + 1) / 64));
+    const encoded = UTF8_ENCODER.encode(node.content);
+    node.rawBytes = encoded;
+    node.rawByteLength = encoded.length;
+    node.syncedByteLength = encoded.length;
+    return encoded;
   }
 
   /**
@@ -519,4 +665,20 @@ function segmentsOf(path: string): string[] {
     else segments.push(segment);
   }
   return segments;
+}
+
+function resetByteBuffer(node: FileNode): void {
+  node.rawBytes = undefined;
+  node.rawByteLength = 0;
+  node.syncedByteLength = 0;
+}
+
+function growByteBuffer(node: FileNode, buffer: Uint8Array, oldLength: number, newLength: number): Uint8Array {
+  if (newLength <= buffer.length) return buffer;
+  let capacity = Math.max(64, buffer.length * 2);
+  while (capacity < newLength) capacity *= 2;
+  const grown = new Uint8Array(capacity);
+  grown.set(buffer.subarray(0, oldLength));
+  node.rawBytes = grown;
+  return grown;
 }

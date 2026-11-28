@@ -53,6 +53,8 @@ export interface FlowEntry {
   evolving?: boolean;
   /** For a value of a type parameter constrained to a union, that constraint as narrowed so far. */
   constraint?: Type;
+  /** Uncontextualized `yield` nodes whose untyped results may still reach an auto-typed variable here. */
+  yieldDeps?: ReadonlySet<number>;
 }
 
 /** What the paths to a point in a program tell about its variables and references; undefined where none reach it. */
@@ -138,12 +140,14 @@ export class Flow {
   }
 
   joinEntries(entries: FlowEntry[]): FlowEntry {
+    const yieldDeps = joinYieldDeps(entries);
     return {
       type: this.joinTypes(entries.map((entry) => entry.type)),
       writeType: this.joinOptionalTypes(entries.map((entry) => entry.writeType)),
       assigned: entries.every((entry) => entry.assigned),
       evolving: entries.some((entry) => entry.evolving),
       constraint: this.joinOptionalTypes(entries.map((entry) => entry.constraint)),
+      ...(yieldDeps ? { yieldDeps } : {}),
     };
   }
 
@@ -172,6 +176,7 @@ export class Flow {
   }
 
   readonly declaredTypes = new Map<string, Type>();
+  private readonly resolvingEnumAccess = new Set<number>();
 
   /** Runs `run` from `state`, returning the state it ends in. */
   from(state: State, run: () => void): State {
@@ -257,14 +262,16 @@ export class Flow {
         const object = expression.childForFieldName('object');
         const property = expression.childForFieldName('property');
         if (!object || !property) return undefined;
+        const memberName = this.c.classes.propertyKey(expression, property);
+        if (this.isEnumMemberAccess(object, memberName)) return undefined;
         const base = this.referenceKey(object);
-        return base ? propertyReferenceKey(base, this.c.classes.propertyKey(expression, property)) : undefined;
+        return base ? propertyReferenceKey(base, memberName) : undefined;
       }
       case 'subscript_expression': {
         const object = expression.childForFieldName('object');
         const index = expression.childForFieldName('index');
         const base = object && index ? this.referenceKey(object) : undefined;
-        return base && index ? this.elementReferenceKey(base, index) : undefined;
+        return object && base && index ? this.elementReferenceKey(object, base, index) : undefined;
       }
       default: {
         return undefined;
@@ -274,7 +281,8 @@ export class Flow {
 
   private variableReferenceKey(expression: TreeNode): string | undefined {
     const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
-    return symbol && !this.c.isGlobalUndefined(expression) ? `s${symbol.id}` : undefined;
+    if (!symbol || symbol.valueKind === 'enumMember' || this.c.isGlobalUndefined(expression)) return undefined;
+    return `s${symbol.id}`;
   }
 
   /**
@@ -282,12 +290,36 @@ export class Flow {
    * TypeScript's `isMatchingReference` lets narrow while the variable cannot change. `%` sets it apart from a property
    * name, which `propertyReferenceKey` escapes it in.
    */
-  private elementReferenceKey(base: string, index: TreeNode): string | undefined {
+  private elementReferenceKey(object: TreeNode, base: string, index: TreeNode): string | undefined {
     const name = this.constantIndexName(index);
-    if (name !== undefined) return propertyReferenceKey(base, name);
+    if (name !== undefined) return this.isEnumMemberAccess(object, name) ? undefined : propertyReferenceKey(base, name);
     if (index.type !== 'identifier' || !isUnchangedVariable(this.c, index)) return undefined;
     const indexKey = this.referenceKey(index);
     return indexKey ? `${base}.%${indexKey}` : undefined;
+  }
+
+  private isEnumMemberAccess(object: TreeNode, memberName: string): boolean {
+    const symbol = this.c.namespaces.qualifiedValueSymbol(object);
+    if (symbol?.valueKind === 'enum') return Boolean(symbol.enumMembers?.values.has(memberName));
+    if (this.resolvingEnumAccess.has(object.id)) return false;
+    this.resolvingEnumAccess.add(object.id);
+    try {
+      const objectType = this.c.silently(() => this.c.expressions.check(object));
+      return this.hasEnumMemberProperty(this.c.relations.removeNullish(objectType), memberName);
+    } finally {
+      this.resolvingEnumAccess.delete(object.id);
+    }
+  }
+
+  private hasEnumMemberProperty(type: Type, memberName: string): boolean {
+    const apparent = this.c.apparentType(type);
+    if (apparent.kind === 'union') {
+      return apparent.types.every((member) => this.hasEnumMemberProperty(member, memberName));
+    }
+    if (apparent.kind === 'intersection') {
+      return apparent.types.some((member) => this.hasEnumMemberProperty(member, memberName));
+    }
+    return this.c.propertyOf(apparent, memberName)?.declaration?.parent?.type === 'enum_body';
   }
 
   /** Narrows the reference `node` to `narrow` of its current type. */
@@ -312,10 +344,10 @@ export class Flow {
       assigned: assigned || !this.c.relations.isAssignable(undefinedType, narrow(unionOf([current, undefinedType]))),
       evolving: entry?.evolving,
       constraint: constraint && narrow(constraint),
+      ...(entry?.yieldDeps ? { yieldDeps: entry.yieldDeps } : {}),
     });
   }
 
-  /** As TypeScript's `isGenericTypeWithUnionConstraint`, the base constraint of a type variable that may be a union. */
   private unionConstraint(type: Type): Type | undefined {
     if (type.kind !== 'typeParameter' && type.kind !== 'indexedAccess') return undefined;
     const constraint = this.c.baseConstraint(type);
@@ -513,11 +545,14 @@ export class Flow {
     if (assumeTrue)
       return nonNullableType(
         this.c,
-        filterType(type, (member) => member.kind !== 'literal' || Boolean(member.value))
+        filterType(
+          type,
+          (member) => member.kind !== 'literal' || Boolean(member.enumMember?.computed) || Boolean(member.value)
+        )
       );
     if (isAnyLike(type) || isIntrinsic(type, 'unknown')) return type;
     return mapType(type, (member) => {
-      if (member.kind === 'literal') return member.value ? neverType : member;
+      if (member.kind === 'literal') return member.enumMember?.computed ? member : member.value ? neverType : member;
       if (member === narrowedUnknownObjectType || member === emptyObjectType) return member;
       if (member.kind === 'object' || isIntrinsic(member, 'object') || isIntrinsic(member, 'symbol')) return neverType;
       if (member === booleanType) return falseType;
@@ -705,16 +740,21 @@ export class Flow {
     const reduced = filterType(declared, (member) => parts.some((part) => this.c.relations.isAssignable(part, member)));
     if (isIntrinsic(reduced, 'never') || !this.c.relations.isAssignable(regular, reduced)) return declared;
     // A literal assigned to a union keeps its literal when the union lists literals, as `"a" | "b"` does.
-    if (
-      assigned.kind === 'literal' &&
-      reduced.kind === 'union' &&
-      reduced.types.some((member) => member.kind === 'literal')
-    ) {
-      return filterType(reduced, (member) => member.kind !== 'literal' || member.value === assigned.value);
-    }
+    const exact = this.narrowAssignedLiteral(reduced, assigned, regular);
+    if (exact) return exact;
     return reduced === regular && assigned.kind === 'literal' && typeof assigned.value === 'boolean'
       ? assigned
       : reduced;
+  }
+
+  private narrowAssignedLiteral(reduced: Type, assigned: Type, regular: Type): Type | undefined {
+    if (assigned.kind !== 'literal' || assigned.enumMember?.computed || reduced.kind !== 'union') return undefined;
+    if (!reduced.types.some(isKnownValueLiteral)) return undefined;
+    const exact = filterType(
+      reduced,
+      (member) => member.kind !== 'literal' || (!member.enumMember?.computed && member.value === assigned.value)
+    );
+    return !isIntrinsic(exact, 'never') && this.c.relations.isAssignable(regular, exact) ? exact : undefined;
   }
 
   objectTypeOf(type: Type): ObjectType | undefined {
@@ -731,6 +771,10 @@ const typeofTypes = new Map<string, Type>([
   ['undefined', undefinedType],
 ]);
 
+function isKnownValueLiteral(type: Type): boolean {
+  return type.kind === 'literal' && !type.enumMember?.computed;
+}
+
 export function isUnit(type: Type): boolean {
   return type.kind === 'literal' || isUnitIntrinsic(type);
 }
@@ -740,7 +784,10 @@ function isUnitIntrinsic(type: Type): boolean {
 }
 
 function sameUnit(a: Type, b: Type): boolean {
-  if (a.kind === 'literal' && b.kind === 'literal') return a.value === b.value;
+  if (a.kind === 'literal' && b.kind === 'literal') {
+    if (a.enumMember?.computed || b.enumMember?.computed) return regularOf(a) === regularOf(b);
+    return a.value === b.value;
+  }
   if (isIntrinsic(a, 'void') || isIntrinsic(b, 'void'))
     return (
       isUnitIntrinsic(a) &&
@@ -754,4 +801,14 @@ export { trueType };
 
 export function propertyReferenceKey(base: string, name: string): string {
   return `${base}.${name.replaceAll('%', '%25').replaceAll('.', '%2E')}`;
+}
+
+function joinYieldDeps(entries: FlowEntry[]): ReadonlySet<number> | undefined {
+  let merged: Set<number> | undefined;
+  for (const entry of entries) {
+    if (!entry.yieldDeps || entry.yieldDeps.size === 0) continue;
+    merged ??= new Set();
+    for (const id of entry.yieldDeps) merged.add(id);
+  }
+  return merged;
 }

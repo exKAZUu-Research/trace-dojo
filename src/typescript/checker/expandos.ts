@@ -11,6 +11,8 @@ import { anonymousObject, anyType, emptyStructure, type Property, type Signature
 export const laterRunningTypes = new Set([
   'function_declaration',
   'function_expression',
+  'generator_function_declaration',
+  'generator_function',
   'arrow_function',
   'method_definition',
 ]);
@@ -174,7 +176,7 @@ function isExpandoInitializer(declarator: TreeNode): boolean {
   return (
     declarator.type === 'variable_declarator' &&
     !declarator.childForFieldName('type') &&
-    (value?.type === 'arrow_function' || value?.type === 'function_expression')
+    ['arrow_function', 'function_expression', 'generator_function'].includes(value?.type ?? '')
   );
 }
 

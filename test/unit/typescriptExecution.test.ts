@@ -2,7 +2,7 @@ import fs from 'node:fs';
 
 import { expect, test } from 'vitest';
 
-import { executeProgram } from '../../src/interpreter/program';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 const diagnosticsOf = (source: string): string[] => {
   const execution = executeProgram('typescript', source);
@@ -305,53 +305,10 @@ console.log(s.area() as Id, s, Object.keys(s), (s.name() satisfies string).lengt
 });
 
 test.each([
-  ['an enum', 'enum Color { Red }', 'enum は、この採点環境では使えません。'],
-  ['a namespace', 'namespace N {}', 'namespace は、この採点環境では使えません。'],
-  ['a declare statement', 'declare const x: number;', 'declare による宣言は、この採点環境では使えません。'],
-  ['an import', 'import fs from "fs";', 'import や export は、この採点環境では使えません。'],
-  ['a generator', 'function* g() {}', 'ジェネレータ関数は、この採点環境では使えません。'],
-  ['an async function', 'async function f() {}', 'async 関数は、この採点環境では使えません。'],
-  ['a decorator', 'function d(t: unknown) {}\n@d class A {}', 'デコレータは、この採点環境では使えません。'],
-  ['a label', 'a: for (;;) break a;', 'ラベル付きの文は、この採点環境では使えません。'],
   [
-    'the override modifier',
-    'class A { m() {} }\nclass B extends A { override m() {} }',
-    'override 修飾子は、この採点環境では使えません。',
-  ],
-  ['satisfies', 'const a = 1 satisfies number;', 'satisfies 演算子は、この採点環境では使えません。'],
-  [
-    'a String.raw replaced by a value that is not a function',
-    'String.raw = 1 as any;\nString.raw`x${(() => { throw new Error("bad"); })()}`;',
-    'タグ付きテンプレートは、この採点環境では使えません。',
-  ],
-  [
-    'a String.raw replaced by the program',
-    'String.raw = (...a: any[]) => 42 as any;\nconsole.log(String.raw`x`);',
-    'タグ付きテンプレートは、この採点環境では使えません。',
-  ],
-  [
-    'a tag spelled String.raw that names a parameter',
-    'const raw = (...a: unknown[]) => 1;\nfunction f(String: { raw: typeof raw }) { return String.raw`x`; }',
-    'タグ付きテンプレートは、この採点環境では使えません。',
-  ],
-  [
-    'a computed String.raw tag replaced by the program',
-    'String["raw"] = (...a: any[]) => 42 as any;\nconsole.log((String["raw"])`x`);',
-    'タグ付きテンプレートは、この採点環境では使えません。',
-  ],
-  [
-    'a parenthesized computed tag that names a String parameter',
-    'const raw = (...a: unknown[]) => 1;\nfunction f(String: { raw: typeof raw }) { return (String["raw"])`x`; }',
-    'タグ付きテンプレートは、この採点環境では使えません。',
-  ],
-  ['a Promise', 'Promise.resolve(1);', 'Promise は、この採点環境では使えません。'],
-  ['a timer', 'setTimeout(() => {}, 1);', 'setTimeout などのタイマーは、この採点環境では使えません。'],
-  ['a Date', 'new Date();', 'Date（日付と時刻）は、この採点環境では使えません。'],
-  ['Math.random', 'Math.random();', 'Math.random は、この採点環境では使えません。'],
-  [
-    'Math.random through any',
-    'const m: any = Math;\nconsole.log(m.random());',
-    'Math.random は、この採点環境では使えません。',
+    'an import of another file',
+    'import { f } from "./other";',
+    "モジュール './other' の import は、この採点環境では使えません。",
   ],
   [
     'the stack of an Error through any',
@@ -374,24 +331,19 @@ test.each([
     'RegExp の compile は、この採点環境では使えません。',
   ],
   [
-    'Math.random through an intersection whose first member declares it too',
-    'const m: { random(): number } & Math = Math;\nm.random();',
-    'Math.random は、この採点環境では使えません。',
-  ],
-  [
     'the stack of an Error through a type parameter constrained to an intersection',
     'function f<E extends { stack?: string } & Error>(e: E) { return e.stack; }',
     'Error の stack は、この採点環境では使えません。',
   ],
   [
     'a well-known symbol',
-    'Symbol.iterator;',
-    'Symbol.iterator などの well-known シンボルは、この採点環境では使えません。',
+    'Symbol.toPrimitive;',
+    'Symbol.toPrimitive などの well-known シンボルは、この採点環境では使えません。',
   ],
   [
     'a well-known symbol through any',
-    'const constructor: any = Symbol;\nconsole.log(constructor.iterator);',
-    'Symbol.iterator などの well-known シンボルは、この採点環境では使えません。',
+    'const constructor: any = Symbol;\nconsole.log(constructor.hasInstance);',
+    'Symbol.hasInstance などの well-known シンボルは、この採点環境では使えません。',
   ],
   [
     'a reflected well-known symbol',
@@ -403,16 +355,16 @@ test.each([
 });
 
 test('reflecting keys cannot hand a well-known symbol to a TypeScript program', () => {
-  const expose = 'const keys = Object.getOwnPropertySymbols(Array.prototype);';
-  const message = '1: Symbol.iterator などの well-known シンボルは、この採点環境では使えません。';
+  const expose = 'const keys = Object.getOwnPropertySymbols(Promise.prototype);';
+  const message = '1: Symbol.toStringTag などの well-known シンボルは、この採点環境では使えません。';
   expect(diagnosticsOf(`${expose}\nconsole.log(keys[0]);`)).toEqual([message]);
   expect(
     diagnosticsOf(`${expose}
-const iterable: any = {};
-iterable[keys[0]] = () => [3].values();
-console.log([...iterable]);`)
+const tagged: any = {};
+tagged[keys[0]] = "Tagged";
+console.log(String(tagged));`)
   ).toEqual([message]);
-  expect(executeProgram('javascript', `${expose}\nconsole.log(keys[0] === Symbol.iterator);`)).toMatchObject({
+  expect(executeProgram('javascript', `${expose}\nconsole.log(keys[0] === Symbol.toStringTag);`)).toMatchObject({
     kind: 'executed',
     stdout: 'true\n',
   });
@@ -478,10 +430,8 @@ test('a function turned into text through any or an array ends the program as un
   });
 });
 
-test('Node.js names are unknown, as the reference tsc has no Node.js types', () => {
-  expect(diagnosticsOf('process.exit(0);')).toEqual([
-    '1: 名前 process が見つかりません。Node.js の機能は、この採点環境では使えません。',
-  ]);
+test('Node.js features beyond the standard streams and fs are unavailable', () => {
+  expect(diagnosticsOf('process.cwd();')).toEqual(['1: process.cwd は、この採点環境では使えません。']);
 });
 
 test('a type error is reported in Japanese on its row and stops the program before it runs', () => {
@@ -560,9 +510,9 @@ test('console.table stops before expanding repeated cells or table padding past 
   }
 });
 
-test('computed class and object members reject well-known symbols before execution', () => {
-  const source = `class A { [Symbol.iterator]() { return [1, 2].values(); } }
-const object = { [Symbol.iterator]() { return [1].values(); } };
+test('computed class and object members reject well-known symbols other than iteration ones before execution', () => {
+  const source = `class A { [Symbol.toPrimitive]() { return 1; } }
+const object = { [Symbol.hasInstance]() { return true; } };
 class B { get [Symbol.toStringTag]() { return 'B'; } }
 const tagged = { get [Symbol.toStringTag]() { return 'tagged'; } };`;
   const execution = executeProgram('typescript', source);
@@ -574,12 +524,12 @@ const tagged = { get [Symbol.toStringTag]() { return 'tagged'; } };`;
 test('reading unavailable values and calling unavailable methods are rejected through indirection', () => {
   const sources = [
     'const {stack} = new Error("bad"); console.log(stack);',
-    'const {random} = Math; console.log(random());',
-    'const key = "random"; const {[key]: random} = Math; random();',
+    'const {time} = console; time("a");',
+    'const key = "time"; const {[key]: time} = console; time("a");',
     'const key = "stack"; const {[key]: stack} = new Error("bad");',
-    'const key = "random" as "random" | "abs"; const {[key]: selected} = Math; selected(1);',
-    'function select<K extends "random">(key: K) { const {[key]: selected} = Math; selected(); } select("random");',
-    'const key = "random"; let selected: () => number; ({[key]: selected} = Math); selected();',
+    'const key = "time" as "time" | "log"; const {[key]: selected} = console; selected("a");',
+    'function select<K extends "time">(key: K) { const {[key]: selected} = console; selected(); } select("time");',
+    'const key = "time"; let selected: (label?: string) => void; ({[key]: selected} = console); selected();',
     'const key = "stack"; let selected: string | undefined; ({[key]: selected = "none"} = new Error("bad"));',
     'console["time"]("start");',
     'function show(error: Error | TypeError) { const {stack} = error; console.log(stack); }',
@@ -632,11 +582,8 @@ test('legacy HTML builders enforce string limits before escaping and wrapping', 
   }
 });
 
-test('unsupported type syntax and omitted host globals stop execution before effects', () => {
+test('omitted host globals stop execution before effects', () => {
   for (const source of [
-    'console.log("never"); const value: unique symbol = Symbol();',
-    'console.log("never"); const value: unique  symbol = Symbol();',
-    'console.log("never"); const value: unique /* type */ symbol = Symbol();',
     'console.log("never"); const make = Uint8Array; make(3);',
     'console.log("never"); let values: Uint8Array;',
     'console.log("never"); type Constructor = typeof Uint8Array;',
@@ -668,7 +615,6 @@ test.each([
 
 test('reflected unavailable methods and error stack accessors reject invocation', () => {
   for (const source of [
-    'Object.getOwnPropertyDescriptor(Math, "random")!.value();',
     'Object.getOwnPropertyDescriptors(RegExp.prototype).compile.value!.call(/a/, "b");',
     'Object.getOwnPropertyDescriptor(console, "time")!.value("start");',
     'const e = new Error("bad"); Object.getOwnPropertyDescriptor(e, "stack")!.get!.call(e);',
@@ -821,4 +767,469 @@ const optional: Point | undefined = { x: 2 };`;
     expect(diagnostic).toContain("型 'Point' に代入");
     expect(diagnostic).toContain("プロパティ 'y' がありません");
   }
+});
+
+test.each(["'utf8'", "'utf-8'", "{ encoding: 'utf-8' }"])(
+  'reads standard input and lists files with %s',
+  (encoding) => {
+    const source = `import * as fs from 'fs';\nconsole.log(fs.readFileSync(0, ${encoding}).trim(), fs.readdirSync('.', ${encoding}));`;
+    expect(executeProgram('typescript', source, { stdin: 'hi\n', files: { 'a.txt': '' } })).toMatchObject({
+      kind: 'executed',
+      stdout: "hi [ 'a.txt' ]\n",
+    });
+  }
+);
+
+test('preserves ESM namespace interop, named default imports, and live named fs bindings', () => {
+  const source = `"use strict";
+import * as ns from 'fs';
+import * as ns2 from 'fs';
+import * as nodeNs from 'node:fs';
+import fs, { default as fs2, existsSync } from 'fs';
+import { default as nodeFs, existsSync as nodeExists } from 'node:fs';
+const req = require('fs');
+console.log(ns === req, ns === ns2, ns === nodeNs, (ns as any).default === req);
+console.log(fs === req, fs2 === req, nodeFs === req, typeof (ns as any).default);
+req.existsSync = function (this: unknown) {
+  return [this === undefined, this === ns];
+} as any;
+console.log(existsSync('missing'), nodeExists('missing'), ns.existsSync('missing'));`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false false false true\ntrue true true object\n[ true, false ] [ true, false ] [ false, true ]\n',
+    uncaughtException: undefined,
+  });
+  expect(diagnosticsOf("import * as ns from 'fs'; (ns as any)['read' + 'File']('a', () => {});")).toEqual([
+    '1: fs.readFile は、この採点環境では使えません。',
+  ]);
+});
+
+test('resolves type-position import("fs") queries and type references while rejecting dynamic import()', () => {
+  const source = `type FsModule = typeof import('fs');
+const fs2: FsModule = require('fs') as typeof import('fs');
+let p: import('fs').PathLike = 'a.txt';
+const exists: typeof import('node:fs').existsSync = fs2.existsSync;
+declare module 'custom-mod' {
+  export interface Box<T> { value: T }
+  export const version: number;
+}
+const boxed: import('custom-mod').Box<string> = { value: 'ok' };
+const ver: typeof import('custom-mod').version = 1;
+console.log(typeof exists, p, boxed.value, ver);`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'function a.txt ok 1\n',
+    uncaughtException: undefined,
+  });
+  expect(diagnosticsOf("const m = import('fs');")).toEqual(['1: import や export は、この採点環境では使えません。']);
+  expect(diagnosticsOf("type Bad = typeof import('no-such');")).toEqual([
+    "1: モジュール 'no-such' またはそれに対応する型宣言が見つかりません。",
+  ]);
+  expect(diagnosticsOf("type Bad = import('fs').NoSuch;")).toEqual([
+    "1: 名前空間 '\"fs\"' にエクスポートされたメンバー 'NoSuch' がありません。",
+  ]);
+  expect(diagnosticsOf("type Bad = typeof import('fs').readFile;")).toEqual([
+    '1: fs.readFile は、この採点環境では使えません。',
+  ]);
+  expect(diagnosticsOf("type Bad = import('fs').Stats;")).toEqual(['1: fs.Stats は、この採点環境では使えません。']);
+});
+
+test('rejects context.addInitializer after its decorator finishes', () => {
+  const source = `const saved: ((fn: () => void) => void)[] = [];
+function save(_value: any, ctx: DecoratorContext) {
+  ctx.addInitializer(() => console.log('ok:' + String(ctx.name)));
+  saved.push(ctx.addInitializer);
+}
+function checkPrev(_value: any, _ctx: DecoratorContext) {
+  try {
+    saved.at(-1)!(() => console.log('during-next'));
+  } catch (e: any) {
+    console.log('next:' + e.name + ':' + e.message);
+  }
+}
+@save
+class C {
+  @checkPrev
+  @save
+  m() {}
+  @save
+  x = 1;
+}
+for (const add of saved) {
+  try {
+    add(() => console.log('late'));
+  } catch (e: any) {
+    console.log('after:' + e.name + ':' + e.message);
+  }
+}
+new C();`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'next:TypeError:Already initialized\nok:C\nafter:TypeError:Already initialized\nafter:TypeError:Already initialized\nafter:TypeError:Already initialized\nok:m\nok:x\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('validates namespace and module-top-level placement of this, return, exports, imports, and global augmentations', () => {
+  expect(diagnosticsOf('namespace N { console.log(this); }')).toEqual([
+    "1: 'this' はモジュール本体内または名前空間本体内では参照できません。",
+  ]);
+  expect(diagnosticsOf('namespace N { if (true) console.log(this); }')).toEqual([
+    "1: 'this' はモジュール本体内または名前空間本体内では参照できません。",
+  ]);
+  expect(
+    executeProgram(
+      'typescript',
+      'namespace N { export function f(this: number) { return this + 1; } } console.log(N.f.call(2));'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '3\n',
+  });
+
+  expect(diagnosticsOf('namespace N { return 5; } console.log(N);')).toEqual([
+    "1: 'return' ステートメントは、関数本体でのみ使用できます。",
+  ]);
+  expect(diagnosticsOf('namespace N { if (true) { return; } }')).toEqual([
+    "1: 'return' ステートメントは、関数本体でのみ使用できます。",
+  ]);
+
+  expect(diagnosticsOf('namespace N { const a = 1; export { a }; }')).toEqual([
+    '1: エクスポート宣言は名前空間でサポートされません。',
+  ]);
+  expect(diagnosticsOf('namespace N { type T = number; export type { T }; }')).toEqual([
+    '1: エクスポート宣言は名前空間でサポートされません。',
+  ]);
+  expect(diagnosticsOf('namespace N { export default 1; }')).toEqual([
+    '1: 既定のエクスポートは、ECMAScript スタイルのモジュールでのみ使用できます。',
+  ]);
+  expect(
+    executeProgram('typescript', 'declare namespace N { const a: number; export { a }; } console.log(1);')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+  });
+
+  expect(diagnosticsOf('namespace N { import fs from "fs"; console.log(fs.existsSync("x")); }')).toEqual([
+    '1: 名前空間内のインポート宣言は、モジュールを参照できません。',
+  ]);
+  expect(diagnosticsOf('if (true) { import { existsSync } from "fs"; console.log(existsSync("x")); }')).toEqual([
+    '1: インポート宣言は、名前空間またはモジュールの最上位レベルでのみ使用できます。',
+  ]);
+
+  expect(
+    diagnosticsOf(
+      'export {};\nnamespace N { declare global { interface Array<T> { extra: number } } }\nconsole.log([1].extra);'
+    )
+  ).toEqual([
+    '2: グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。',
+    "3: プロパティ 'extra' は型 'number[]' にありません。",
+  ]);
+  expect(
+    diagnosticsOf(
+      'export {};\nif (true) { declare global { interface Array<T> { extra: number } } }\nconsole.log([1].extra);'
+    )
+  ).toEqual([
+    '2: アンビエント モジュール宣言は、ファイルの最上位にのみ使用できます。',
+    "3: プロパティ 'extra' は型 'number[]' にありません。",
+  ]);
+  expect(
+    executeProgram(
+      'typescript',
+      'declare module "custom-aug" { global { interface Array<T> { extra?: number } } }\nconst n: number | undefined = [1].extra;\nconsole.log(n);'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'undefined\n',
+  });
+});
+
+test('lowers qualified fs import aliases, anonymous abstract default exports, declare-only namespaces, colliding decorated keys, and stream flags/paths', () => {
+  expect(
+    executeProgram(
+      'typescript',
+      "import * as fs from 'fs';\nimport fsDefault from 'fs';\nimport { default as nodeFs } from 'node:fs';\nimport exists = fs.existsSync;\nimport exists2 = fsDefault.existsSync;\nimport write = nodeFs.writeFileSync;\nimport P = fs.PathLike;\nconst p: P = 'f.txt';\nwrite(p, 'ok');\nconsole.log(exists('missing'), exists2('f.txt'));"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'false true\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      "export default abstract class { abstract m(): void; static label = this.name; static { console.log(this.name, this.label); } }\nconsole.log('done');"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'default default\ndone\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      'function d(v: any, c: any) { c.addInitializer(function(this: any) { console.log("init:" + this.name); }); console.log(JSON.stringify([v.name, c.name])); }\n@d export default abstract class { static { console.log("static:" + this.name); } }'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '["",""]\nstatic:default\ninit:\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      'function d(v: any, c: any) { console.log(JSON.stringify([v.name, c.name])); }\n@d export default class {}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '["",""]\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      'namespace N { declare function g(): void; }\nconsole.log(typeof N);\nnamespace N { export const x = 1; }\nconsole.log(N.x);\nnamespace A.B.C { declare const y: number; }\nconsole.log(typeof A, typeof A.B, typeof (A.B as any).C);'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'undefined\n1\nobject object undefined\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      'const key1: string = "m", key2: string = "m";\nfunction dec(value: any, _ctx: any) { console.log(value()); return () => 3; }\nclass X { @dec [key1]() { return 1; } [key2]() { return 2; } }\nconsole.log((new X() as any).m());'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '2\n3\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      `import fs from 'fs';
+fs.writeFileSync('part', 'x');
+const results: string[] = [];
+for (const fn of [
+  () => fs.writeFileSync('/dev/stdout', 'bad', { flag: 'wx' }),
+  () => fs.appendFileSync('/dev/stderr', 'bad', { flag: 'ax' }),
+  () => fs.writeFileSync('/dev/stdout', 'bad', { flag: 'nonsense' }),
+  () => fs.readFileSync('/missing/../dev/stdin', 'utf8'),
+  () => fs.writeFileSync('part/../dev/stdout', 'bad'),
+  () => fs.writeFileSync(1, 'bad', { get flag(): string { throw new Error('stop1'); } }),
+  () => fs.appendFileSync(2, 'bad', { get flag(): string { throw new Error('stop2'); } }),
+]) {
+  try { fn(); results.push('ok'); } catch (e: any) { results.push(e.code ?? (e.name === 'Error' ? e.message : e.name)); }
+}
+fs.writeFileSync(1, 'fd1:', { flag: 'nonsense' });
+fs.appendFileSync(2, 'fd2', { flag: 'nonsense' });
+console.log(fs.existsSync('/missing/../dev/stdin'), fs.existsSync('part/../dev/stdout'), results.join(','));`,
+      { stdin: 'hi' }
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'fd1:false false EEXIST,EEXIST,ERR_INVALID_ARG_VALUE,ENOENT,ENOTDIR,stop1,stop2\n',
+    stderr: 'fd2',
+    uncaughtException: undefined,
+  });
+});
+
+test('enforces variance, thenable, import-query, optional-assertion, ambient-module, namespace-import, enum-key, and computed-this checks', () => {
+  expect(diagnosticsOf('interface Box<in out T> {}\ninterface Outer<out T> { box: Box<T> }')).toEqual([
+    "2: 分散の注釈が示すとおりには、型 'Outer<sub-T>' を型 'Outer<super-T>' に代入できません。",
+  ]);
+  expect(
+    diagnosticsOf(
+      'type Box<in out T> = {};\ntype Outer<out T> = { box: Box<T> };\nconst s: Box<string> = {};\nconst n: Box<number> = s;'
+    )
+  ).toEqual([
+    "2: 分散の注釈が示すとおりには、型 'Outer<sub-T>' を型 'Outer<super-T>' に代入できません。",
+    "4: 型 'Box<string>' を型 'Box<number>' に代入することはできません。",
+  ]);
+  expect(
+    executeProgram(
+      'typescript',
+      'type Consumer<in T> = ((x: T) => void);\nconst f: Consumer<number> = (x) => console.log(x);\nf(1);'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '1\n' });
+
+  expect(diagnosticsOf('async function f(v: { then?: (resolve: (n: number) => void) => void }) { await v; }')).toEqual([
+    "1: 'await' オペランドの型は、有効な Promise であるか、呼び出し可能な 'then' メンバーを含んでいないかのどちらかであることが必要です。",
+  ]);
+  expect(
+    diagnosticsOf(
+      'class Loop { then(resolve: (v: Loop) => void) { resolve(this); } }\nasync function main() { await new Loop(); }'
+    )
+  ).toEqual(["2: 型は、それ自身の 'then' メソッドのフルフィルメント コールバック内で直接または間接的に参照されます。"]);
+
+  expect(
+    diagnosticsOf(
+      "declare module 'custom' { export function id<T>(x: T): T; }\ntype Fn = typeof import('custom').id<string>;\nconst f: Fn = (x) => x;\nconst n: number = f('hello');"
+    )
+  ).toEqual(["4: 型 'string' を型 'number' に代入することはできません。"]);
+  expect(diagnosticsOf("type Bad = typeof import('fs').readFile<string>;")).toEqual([
+    '1: fs.readFile は、この採点環境では使えません。',
+  ]);
+
+  expect(
+    diagnosticsOf(
+      'function f(check: ((x: unknown) => asserts x is string) | undefined, value: unknown) { check?.(value); console.log(value.toUpperCase()); }'
+    )
+  ).toEqual(["1: 'value' の型は 'unknown' です。"]);
+
+  expect(
+    executeProgram(
+      'typescript',
+      "declare module 'custom' { export interface A { x: number } }\ndeclare module 'custom' { export interface B { y: number } }\nconst a: import('custom').A = { x: 1 };\nconst b: import('custom').B = { y: 2 };\nconsole.log(a.x, b.y);"
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '1 2\n' });
+
+  expect(diagnosticsOf("declare namespace N { console.log('hidden'); }")).toEqual([
+    '1: ステートメントは環境コンテキストでは使用できません。',
+  ]);
+
+  expect(diagnosticsOf("import * as fs from 'fs'; fs.existsSync = () => true;")).toEqual([
+    '1: existsSync は読み取り専用のプロパティなので、代入できません。',
+  ]);
+  expect(diagnosticsOf("import * as fs from 'node:fs'; fs['existsSync'] = () => true;")).toEqual([
+    '1: existsSync は読み取り専用のプロパティなので、代入できません。',
+  ]);
+
+  expect(diagnosticsOf('namespace M { export var v = 1; var v = 2; }')).toEqual([
+    "1: マージされた宣言 'v' の個々の宣言はすべてエクスポートされるか、すべてローカルであるかのどちらかである必要があります。",
+    "1: マージされた宣言 'v' の個々の宣言はすべてエクスポートされるか、すべてローカルであるかのどちらかである必要があります。",
+  ]);
+
+  expect(
+    executeProgram(
+      'typescript',
+      'function* inner() { return Promise.resolve(3); }\nasync function* outer() { const n: number = yield* inner(); console.log(n.toFixed(1)); }\nouter().next();'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '3.0\n' });
+
+  expect(executeProgram('typescript', 'process.exitCode = null;\nconsole.log(process.exitCode);')).toMatchObject({
+    kind: 'executed',
+    stdout: 'undefined\n',
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      "const f = () => 3;\nenum Level { Low = 1, High = f() }\nconst labels: Record<Level, string> = { [Level.Low]: 'low', [Level.High]: 'high' };\nconsole.log(labels[Level.High]);"
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'high\n' });
+
+  expect(diagnosticsOf('function f(this: { key: string }) { return class C { [this.key]() { return 1; } }; }')).toEqual(
+    ["1: 'this' は、計算されたプロパティ名では参照できません。"]
+  );
+  expect(
+    executeProgram(
+      'typescript',
+      "function f(this: { key: string }) { return { [this.key]() { return 7; } }; }\nconsole.log((f.call({ key: 'm' }) as any).m());"
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '7\n' });
+
+  const descriptorCollision = executeProgram(
+    'typescript',
+    "const a: string = 'x', b: string = 'x';\nfunction first(v: any) { console.log('first', typeof v); return v; }\nfunction second(v: any) { console.log('second', typeof v); return () => 3; }\nclass C { @first @second [a]() { return 1; } get [b]() { return 2; } }"
+  );
+  expect(descriptorCollision).toMatchObject({
+    kind: 'executed',
+    stdout: 'second undefined\nfirst function\n',
+  });
+  expect(descriptorCollision.kind === 'executed' ? descriptorCollision.uncaughtException : '').toContain(
+    'TypeError: Invalid property descriptor'
+  );
+
+  expect(
+    diagnosticsOf(
+      "export {};\nnamespace N { declare module 'custom' { global { interface Array<T> { extra: number } } } }\nconsole.log([1].extra);"
+    )
+  ).toEqual([
+    '2: アンビエント モジュールを、他のモジュールまたは名前空間内の入れ子にすることはできません。',
+    '2: グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。',
+    "3: プロパティ 'extra' は型 'number[]' にありません。",
+  ]);
+
+  expect(
+    diagnosticsOf(
+      'import * as fs from "fs";\ndeclare module "foo" { export const x: number }\ntype Missing = import("foo").x;\nconsole.log(fs.existsSync("a"));'
+    )
+  ).toEqual([
+    "2: 拡張のモジュール名が無効です。モジュール 'foo' が見つかりません。",
+    "3: モジュール 'foo' またはそれに対応する型宣言が見つかりません。",
+  ]);
+
+  expect(
+    executeProgram(
+      'typescript',
+      'import { extraVal, ExtraInfo, existsSync } from "fs";\ndeclare module "fs" { export const extraVal: number; export interface ExtraInfo { tag: string } }\nconst info: ExtraInfo = { tag: "ok" };\nconsole.log(existsSync("none"), typeof extraVal, info.tag);'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'false undefined ok\n',
+    uncaughtException: undefined,
+  });
+
+  expect(
+    diagnosticsOf(
+      'declare namespace N { interface Visible { x: number } interface Hidden { y: string } export { Visible as Pub }; }\nconst ok: N.Pub = { x: 1 };\nconst bad: N.Hidden = { y: "no" };'
+    )
+  ).toEqual(["3: 名前空間 'N' には、エクスポートされたメンバー 'Hidden' がありません。"]);
+
+  expect(
+    executeProgram(
+      'typescript',
+      'type Box<T> = { value: T };\ntype Read<out T> = Box<T>;\nconst p: Read<string> = { value: "hi" };\nfunction initial(): number { return typeof E === "undefined" ? 1 : 2; }\nenum E { A = initial() }\nString.raw = () => "ok";\nfunction dec(_v: any, c: ClassMethodDecoratorContext) { try { console.log(c.access.has(1)); } catch (e: any) { console.log(e.name); } }\nclass D { @dec m() {} }\nimport * as fs from "fs";\nconsole.log(p.value, E.A, String.raw`x${() => 1}`, JSON.stringify(fs.readdirSync(".")));',
+      { files: { '😀.txt': '', 'Ａ.txt': '' } }
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\nhi 1 ok ["Ａ.txt","😀.txt"]\n',
+    uncaughtException: undefined,
+  });
+
+  expect(diagnosticsOf('enum E { A }\nE = {} as any;\nnamespace N { export const x = 1 }\nN = {} as any;')).toEqual([
+    "2: 列挙型であるため、'E' に割り当てることはできません。",
+    "4: 名前空間であるため、'N' に割り当てることはできません。",
+  ]);
+
+  expect(
+    executeProgram(
+      'typescript',
+      'declare module "short";\ndeclare module "pkg-*" { export interface Box { x: number } }\nconst q: typeof import("short") = { a: 7 };\nconst b: import("pkg-one").Box = { x: 9 };\nfunction d(value: any, c: ClassDecoratorContext) { c.addInitializer(function(this: any) { console.log(C.name, this === C); }); return class Replacement extends value {}; }\n@d class C {}\nconst sym = Symbol("x");\nclass Acc { accessor [sym] = 1; }\nconst desc = Object.getOwnPropertyDescriptor(Acc.prototype, sym)!;\nconst fsMod = (require as NodeJS.Require)("fs");\nlet Mut: any = (class { static current() { return Mut; } });\nconst before = Mut;\nMut = class {};\nconsole.log(q.a, b.x, desc.get!.name, desc.set!.name, fsMod.existsSync("none"), before.current() === Mut, before.name);'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'Replacement true\n7 9 get [x] set [x] false true Mut\n',
+    uncaughtException: undefined,
+  });
+
+  const factoryTrace = traceProgram(
+    'typescript',
+    'function d(C: any): any { return class extends C {}; }\nfunction make() { @d class C { static count = 1; } return C; }\nconst Returned = make();\nconsole.log(Returned.count);',
+    'function d(C: any): any { return class extends C {}; }\nfunction make() { @d class C { static count = 1; } return C; }\nconst Returned = make();\nconsole.log(Returned.count);'
+  );
+  expect('traceItems' in factoryTrace ? factoryTrace.traceItems.at(-1)?.vars : undefined).toEqual({
+    'Returned.count': 1,
+  });
+
+  expect(
+    executeProgram(
+      'typescript',
+      'async function wrap<T>(p: Promise<T>): Promise<T> { return await p; }\nfunction wrapUnion<T>(p: Promise<T> | undefined): Promise<T> | undefined { return p; }\nfunction wrapLike<T>(p: PromiseLike<T>): PromiseLike<T> { return p; }\nasync function main() {\n  console.log(await wrap(new Promise((resolve) => resolve("slow"))), await wrapUnion(new Promise((resolve) => resolve(42))), await wrapLike(new Promise((resolve) => resolve(true))));\n}\nmain();'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'slow 42 true\n',
+    uncaughtException: undefined,
+  });
 });

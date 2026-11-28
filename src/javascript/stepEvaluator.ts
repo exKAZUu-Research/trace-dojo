@@ -328,7 +328,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
   private *calleeSteps(callee: Expression): Steps<{ fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT> {
     let target = callee;
     while (target.kind === 'parenthesized') target = target.expression;
-    if (target.kind !== 'member') {
+    if (target.kind !== 'member' || target.isUnboundCall) {
       const fn = yield* this.chainSteps(callee);
       return fn === SHORT_CIRCUIT ? SHORT_CIRCUIT : { fn, thisValue: undefined };
     }
@@ -346,7 +346,6 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     const { fn, thisValue } = resolved;
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
-    if (expression.isTaggedTemplate) runtime.checkTag(fn);
     const args = yield* this.holdingSteps([fn, thisValue], () => this.argumentSteps(expression.args));
     if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
     return this.holdWhile([fn, thisValue, ...args], () => runtime.call(fn, thisValue, args, expression.row));

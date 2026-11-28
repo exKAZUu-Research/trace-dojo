@@ -365,7 +365,7 @@ export class TypeOperators {
   }
 
   private addMappedMember(structure: Structure, info: MappedInfo, mapper: Mapper, nameMember: Type): void {
-    if (nameMember.kind === 'literal' && typeof nameMember.value !== 'boolean') {
+    if (isPropertyKeyLiteral(nameMember)) {
       const name = String(nameMember.value);
       const key = mapper.get(info.typeParameter.id) as Type;
       let names = this.mappedKeys.get(structure);
@@ -378,7 +378,11 @@ export class TypeOperators {
       structure.properties.set(name, this.mappedProperty(info, keys, name, unionOf(nameTypes)));
       return;
     }
-    const key = isAnyLike(nameMember) ? stringType : nameMember;
+    const key = isAnyLike(nameMember)
+      ? stringType
+      : nameMember.kind === 'literal' && nameMember.enumMember?.computed
+        ? numberType
+        : nameMember;
     if (key !== stringType && key !== numberType && key !== symbolType && !isPatternKey(key)) return;
     const source =
       !info.readonlyModifier && info.source ? applicableIndex(this.c, this.c.structureOf(info.source), key) : undefined;
@@ -398,8 +402,7 @@ export class TypeOperators {
   private mappedProperty(info: MappedInfo, keys: Type[], name: string, nameType: Type): Property {
     const [firstKey] = keys;
     const key = unionOf(keys);
-    const sourceName =
-      firstKey.kind === 'literal' && typeof firstKey.value !== 'boolean' ? String(firstKey.value) : undefined;
+    const sourceName = isPropertyKeyLiteral(firstKey) ? String(firstKey.value) : undefined;
     const sourceProperty =
       info.source && sourceName !== undefined ? this.c.propertyOf(info.source, sourceName) : undefined;
     let type: Type | undefined;
@@ -845,25 +848,27 @@ export class TypeOperators {
     inferTypeParameters,
   }: ConditionalInstantiation): Type {
     if (outer.size === 0) return type;
+    const snapshot = createMapper(outer, outer.preserveLiterals);
+    const branchMapper = createMapper(mapper, mapper.preserveLiterals);
     const checker = this.c;
     return {
       kind: 'conditional',
       distributive: type.distributive,
       aliasName: type.aliasName,
-      aliasArguments: type.aliasArguments?.map((argument) => checker.instantiate(argument, outer)),
+      aliasArguments: type.aliasArguments?.map((argument) => checker.instantiate(argument, snapshot)),
       id: newTypeId(),
       checkType,
       extendsType,
       get trueType() {
-        return checker.instantiate(type.trueType, mapper);
+        return checker.instantiate(type.trueType, branchMapper);
       },
       get falseType() {
-        return checker.instantiate(type.falseType, outer);
+        return checker.instantiate(type.falseType, snapshot);
       },
       inferTypeParameters,
       outerTypeParameters: type.outerTypeParameters,
       root: type,
-      mapper: outer,
+      mapper: snapshot,
     };
   }
 
@@ -957,7 +962,7 @@ function mappedModifiers(
 function indexKeys(structure: Structure): Type[] {
   const keys: Type[] = [];
   if (structure.stringIndex) keys.push(stringType, numberType);
-  else if (structure.numberIndex) keys.push(numberType);
+  else if (structure.numberIndex && !structure.numberIndex.isEnumReverseMapping) keys.push(numberType);
   if (structure.symbolIndex) keys.push(symbolType);
   keys.push(...(structure.patternIndexes ?? []).map((info) => info.keyType));
   return keys;

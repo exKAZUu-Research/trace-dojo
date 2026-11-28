@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss -- Binding declarations and assignments share property and rest type resolution.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { assert } from 'es-toolkit';
 
+// code-gauge-allow-file fileNcss -- Binding declarations and assignments share property and rest type resolution.
+import { awaitedType } from './awaited';
 import { functionLikeTypes } from './binder';
 import {
   defaultedTarget,
@@ -21,6 +22,7 @@ import {
   anyType,
   emptyStructure,
   errorType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
@@ -36,6 +38,7 @@ import {
   undefinedType,
   unionOf,
   type UnionType,
+  unknownType,
 } from './types';
 
 export { defaultedTarget } from './bindingPatternTypes';
@@ -493,7 +496,10 @@ export class BindingPatterns {
       return errorType;
     }
     this.c.members.checkPropertyUse(node, node, node, type, property);
-    return propertyAccessType(property, 'read', true);
+    const value = propertyAccessType(property, 'read', true);
+    return type.kind === 'object' && type.fresh && (!property.readonly || property.getterOnly === true)
+      ? this.c.literals.widenDeclared(value, false, true)
+      : value;
   }
 
   /** The union of a property's types when each member of a union has it, or `undefined` when one lacks it. */
@@ -522,7 +528,7 @@ export class BindingPatterns {
   }
 
   private bindArrayPattern(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions, assigned?: Type): void {
-    if (isEmptyPattern(pattern)) this.iteratedType(pattern, type);
+    if (isEmptyPattern(pattern)) this.iteratedType(pattern, type, 'destructure');
     for (const { element, index } of arrayPatternElements(pattern)) {
       if (!containsBinding(element, options.binding)) continue;
       if (element.type === 'rest_pattern') {
@@ -540,7 +546,7 @@ export class BindingPatterns {
     if (isAnyLike(type)) return anyType;
     if (isTuple(type)) return this.tupleElementAt(node, type, index);
     if (type.kind === 'union' && type.types.some(isTuple)) return this.unionElementAt(node, type, index);
-    return this.iteratedType(node, type);
+    return this.iteratedType(node.parent ?? node, type, 'destructure');
   }
 
   /**
@@ -559,7 +565,7 @@ export class BindingPatterns {
     return unionOf(
       type.types.map((member) => {
         if (!isTuple(member) || reaches(member)) return this.elementAt(node, member, index);
-        return allTuples ? undefinedType : this.iteratedType(node, member);
+        return allTuples ? undefinedType : this.iteratedType(node.parent ?? node, member, 'destructure');
       }),
       true
     );
@@ -585,7 +591,9 @@ export class BindingPatterns {
     const source = binding ? this.arrayPatternSource(type) : type;
     if (source.kind === 'union' && source.types.every(isTuple))
       return unionOf(source.types.map((member) => this.sliceTuple(member, from)));
-    return isTuple(source) ? this.sliceTuple(source, from) : this.c.arrayType(this.iteratedType(pattern, type));
+    return isTuple(source)
+      ? this.sliceTuple(source, from)
+      : this.c.arrayType(this.iteratedType(pattern, type, 'destructure'));
   }
 
   private sliceTuple(type: ObjectType, from: number): Type {
@@ -603,32 +611,244 @@ export class BindingPatterns {
   }
 
   /** The type of the elements a `for...of` loop or a spread takes from a value. */
-  iteratedType(node: TreeNode | undefined, type: Type): Type {
+  iteratedType(
+    node: TreeNode | undefined,
+    type: Type,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar' = 'spread'
+  ): Type {
     if (isAnyLike(type)) return anyType;
     if (type.kind === 'union')
       return unionOf(
-        type.types.map((member) => this.iteratedType(node, member)),
+        type.types.map((member) => this.iteratedType(node, member, consumer)),
         true
       );
     if (type.kind === 'object' && this.c.isArrayOrTuple(type)) return this.c.elementTypeOf(type);
     const bound = this.iterableConstraint(type);
-    if (bound) return this.iteratedType(node, bound);
+    if (bound) return this.iteratedType(node, bound, consumer);
     if (
       isIntrinsic(type, 'string') ||
       (type.kind === 'literal' && typeof type.value === 'string') ||
       type.kind === 'templateLiteral'
     )
       return stringType;
-    const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey('iterator'));
-    const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
-    if (iteratorType?.kind === 'object' && iteratorType.typeArguments?.[0]) return iteratorType.typeArguments[0];
+    const element = this.iteratorElementType(type, 'iterator', node, consumer);
+    if (element) return element;
     if (type.kind === 'typeParameter') {
       const constraint = this.c.constraintOf(type);
-      if (constraint) return this.iteratedType(node, constraint);
+      if (constraint) return this.iteratedType(node, constraint, consumer);
     }
     if (node)
       this.c.error(node, `型 '${this.c.print(type)}' には、反復処理に使う [Symbol.iterator]() メソッドがありません。`);
     return errorType;
+  }
+
+  /**
+   * The type `for await` gives each element of `type`: what its `[Symbol.asyncIterator]()` iterator yields, or else
+   * what the promises its synchronous iterator yields fulfill with.
+   */
+  asyncIteratedType(
+    node: TreeNode | undefined,
+    type: Type,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar' = 'loop'
+  ): Type {
+    if (isAnyLike(type)) return anyType;
+    if (type.kind === 'union')
+      return unionOf(
+        type.types.map((member) => this.asyncIteratedType(node, member, consumer)),
+        true
+      );
+    const asyncElement = this.iteratorElementType(type, 'asyncIterator', node, consumer);
+    if (asyncElement) return asyncElement;
+    const syncFallback = this.syncFallbackAsyncElement(node, type, consumer);
+    if (syncFallback) return syncFallback;
+    if (node)
+      this.c.error(
+        node,
+        `型 '${this.c.print(type)}' には、非同期イテレーターを返す '[Symbol.asyncIterator]()' メソッドが必要です。`
+      );
+    return errorType;
+  }
+
+  private syncFallbackAsyncElement(
+    node: TreeNode | undefined,
+    type: Type,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar'
+  ): Type | undefined {
+    if (this.hasCallableIteratorMethod(type, 'asyncIterator')) return undefined;
+    const element = this.iteratedType(undefined, type, consumer);
+    if (element === errorType) return undefined;
+    if (node) this.iteratedType(node, type, consumer);
+    return awaitedType(this.c, element, this.iterationAwaitSite(node, consumer));
+  }
+
+  private iterationAwaitSite(
+    node: TreeNode | undefined,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar'
+  ): { node: TreeNode; kind: 'yield' | 'await' } | undefined {
+    return node ? { node, kind: consumer === 'yieldStar' ? 'yield' : 'await' } : undefined;
+  }
+
+  /**
+   * What the iterator a value's `[Symbol.iterator]()` or `[Symbol.asyncIterator]()` returns yields, as tsc reads it: the
+   * `value` of the results its `next()` gives that are not done (awaited for an async iterator, and awaited again for
+   * declared library async iterators), or else a library iterator's type argument.
+   */
+  private iteratorElementType(
+    type: Type,
+    method: 'iterator' | 'asyncIterator',
+    node?: TreeNode,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar' = 'spread'
+  ): Type | undefined {
+    const rawIteratorType = this.iteratorMethodReturnType(type, method);
+    if (!rawIteratorType) return undefined;
+    if (isAnyLike(rawIteratorType)) return anyType;
+    const iterations = this.iteratorResultsList(rawIteratorType, method, node);
+    if (!iterations) return undefined;
+    const elements: Type[] = [];
+    for (const { iteratorType, settled } of iterations) {
+      const rawElement = this.rawIteratorElement(iteratorType, settled);
+      if (!rawElement) return undefined;
+      elements.push(this.awaitedLibraryAsyncElement(iteratorType, rawElement, method, node, consumer));
+    }
+    if (node && consumer !== 'yieldStar') {
+      const nextType = intersectionOf(
+        iterations.map((iteration) => iteration.nextType),
+        this.c
+      );
+      this.checkIteratorNextInput(node, nextType, consumer);
+    }
+    return unionOf(elements, true);
+  }
+
+  private awaitedLibraryAsyncElement(
+    iteratorType: Type,
+    rawElement: Type,
+    method: 'iterator' | 'asyncIterator',
+    node: TreeNode | undefined,
+    consumer: 'loop' | 'spread' | 'destructure' | 'yieldStar'
+  ): Type {
+    return method === 'asyncIterator' &&
+      iteratorType.kind === 'object' &&
+      this.c.functions.isKnownLibraryIterator(iteratorType, 'asyncIterator')
+      ? awaitedType(this.c, rawElement, this.iterationAwaitSite(node, consumer))
+      : rawElement;
+  }
+
+  private rawIteratorElement(iteratorType: Type, settled: Type | undefined): Type | undefined {
+    if (!settled) return iteratorType.kind === 'object' ? iteratorType.typeArguments?.[0] : undefined;
+    if (isAnyLike(settled)) return anyType;
+    const results = settled.kind === 'union' ? settled.types : [settled];
+    const yielding = results.filter((member) => !this.isDoneResult(member));
+    // tsc rejects an iterator whose results have no value, or one that yields without one (TS2490).
+    const hasValue = (member: Type): boolean => this.c.propertyOf(member, 'value') !== undefined;
+    if (!results.some(hasValue) || !yielding.every(hasValue)) return undefined;
+    const values = yielding.flatMap((member) => {
+      const property = this.c.propertyOf(member, 'value');
+      return property ? [propertyAccessType(property, 'read', true)] : [];
+    });
+    // tsc gives an iterator whose results are all done elements of type any.
+    return values.length > 0 ? unionOf(values, true) : anyType;
+  }
+
+  private checkIteratorNextInput(node: TreeNode, nextType: Type, consumer: 'loop' | 'spread' | 'destructure'): void {
+    if (isAnyLike(nextType) || this.c.relations.isAssignable(undefinedType, nextType)) return;
+    const sender = consumer === 'loop' ? 'for-of' : consumer === 'destructure' ? '配列の非構造化' : '配列展開';
+    this.c.error(
+      node,
+      `反復子の 'next' メソッドは型 '${this.c.print(nextType)}' を予期するため、値を反復処理できませんが、${sender} は常に 'undefined' を送信します。`
+    );
+  }
+
+  /**
+   * What the iterator a value's `[Symbol.iterator]()` or `[Symbol.asyncIterator]()` returns gives back when done, as
+   * `yield*` reads it: the `value` of its done results, or undefined when it is no iterable.
+   */
+  iteratorReturnType(type: Type, method: 'iterator' | 'asyncIterator'): Type | undefined {
+    const rawIteratorType = this.iteratorMethodReturnType(this.c.apparentType(type), method);
+    if (!rawIteratorType) return undefined;
+    if (isAnyLike(rawIteratorType)) return anyType;
+    const iterations = this.iteratorResultsList(rawIteratorType, method);
+    if (!iterations) return undefined;
+    return unionOf(
+      iterations.map(({ settled }) => this.doneResultValueType(settled)),
+      true
+    );
+  }
+
+  private doneResultValueType(settled: Type | undefined): Type {
+    if (!settled || isAnyLike(settled)) return anyType;
+    const results = settled.kind === 'union' ? settled.types : [settled];
+    const values = results
+      .filter((member) => this.isDoneResult(member))
+      .flatMap((member) => {
+        const property = this.c.propertyOf(member, 'value');
+        return property ? [propertyAccessType(property, 'read', true)] : [];
+      });
+    return values.length > 0 ? unionOf(values, true) : anyType;
+  }
+
+  hasCallableIteratorMethod(type: Type, method: 'iterator' | 'asyncIterator'): boolean {
+    return this.iteratorMethodReturnType(type, method) !== undefined;
+  }
+
+  private iteratorMethodReturnType(type: Type, method: 'iterator' | 'asyncIterator'): Type | undefined {
+    const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey(method));
+    return iterator && this.c.signaturesOf(propertyAccessType(iterator), 'call')[0]?.returnType();
+  }
+
+  private iteratorResultsList(
+    rawIteratorType: Type,
+    method: 'iterator' | 'asyncIterator',
+    node?: TreeNode,
+    directIterator = true
+  ): { iteratorType: Type; nextType: Type; settled: Type | undefined }[] | undefined {
+    const iteratorType = this.c.apparentType(rawIteratorType);
+    if (isAnyLike(iteratorType)) return [{ iteratorType: anyType, nextType: anyType, settled: anyType }];
+    if (iteratorType.kind === 'union') {
+      const results: { iteratorType: Type; nextType: Type; settled: Type | undefined }[] = [];
+      for (const member of iteratorType.types) {
+        const nested = this.iteratorResultsList(member, method, node, false);
+        if (!nested) return undefined;
+        results.push(...nested);
+      }
+      return results;
+    }
+    const single = this.singleIteratorResults(iteratorType, method, node, directIterator);
+    return single ? [single] : undefined;
+  }
+
+  /** The iterator a value's iteration method returns, and what its `next()` settles to (awaited for an async one). */
+  private singleIteratorResults(
+    iteratorType: Type,
+    method: 'iterator' | 'asyncIterator',
+    node: TreeNode | undefined,
+    directIterator: boolean
+  ): { iteratorType: Type; nextType: Type; settled: Type | undefined } | undefined {
+    if (iteratorType.kind !== 'object' && iteratorType.kind !== 'intersection') return undefined;
+    const next = this.c.propertyOf(iteratorType, 'next');
+    const nextSignature = next && this.c.signaturesOf(propertyAccessType(next), 'call')[0];
+    const isKnownLibrary =
+      iteratorType.kind === 'object' && this.c.functions.isKnownLibraryIterator(iteratorType, method);
+    if (!nextSignature && !isKnownLibrary) return undefined;
+    const result = nextSignature?.returnType();
+    const libraryNext = (iteratorType as ObjectType).typeArguments?.[2] ?? unknownType;
+    const nextType = nextSignature
+      ? this.c.functions.iteratorNextParameterType(nextSignature, directIterator)
+      : directIterator
+        ? libraryNext
+        : unionOf([libraryNext, undefinedType]);
+    const site = node ? { node, kind: 'await' as const } : undefined;
+    return {
+      iteratorType,
+      nextType,
+      settled: result && (method === 'asyncIterator' ? awaitedType(this.c, result, site) : result),
+    };
+  }
+
+  /** Whether an iterator result says it is done, as `IteratorReturnResult` does, so it yields no element. */
+  private isDoneResult(result: Type): boolean {
+    const done = this.c.propertyOf(result, 'done')?.type();
+    return done?.kind === 'literal' && done.value === true;
   }
 
   private iterableConstraint(type: Type): Type | undefined {

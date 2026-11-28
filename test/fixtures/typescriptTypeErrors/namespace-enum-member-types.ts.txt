@@ -1,0 +1,9 @@
+namespace N { export enum E { A = 1, B = 2 } export namespace M { export enum F { X = "x" } } }
+let v: N.E.A = N.E.A;
+let w: N.E = N.E.B;
+let bad: N.E.C;
+import X = N.E.A;
+let z: N.E.A = N.E.B;
+let f: N.M.F.X = N.M.F.X;
+let g: N.M.F = f;
+console.log(v, w, X, z, g);

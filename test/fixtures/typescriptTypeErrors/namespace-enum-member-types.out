@@ -1,0 +1,2 @@
+(4,14): error TS2694: Namespace 'N.E' has no exported member 'C'.
+(6,5): error TS2322: Type 'E.B' is not assignable to type 'E.A'.

@@ -1,0 +1,2 @@
+(1,10): error TS2383: Overload signatures must all be exported or non-exported.
+(3,17): error TS2383: Overload signatures must all be exported or non-exported.

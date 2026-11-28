@@ -1,0 +1,3 @@
+(2,12): error TS2695: Left side of comma operator is unused and has no side effects.
+(3,12): error TS2695: Left side of comma operator is unused and has no side effects.
+(4,12): error TS2695: Left side of comma operator is unused and has no side effects.

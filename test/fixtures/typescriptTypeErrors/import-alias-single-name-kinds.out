@@ -1,0 +1,4 @@
+(2,13): error TS2503: Cannot find namespace 'cv'.
+(4,12): error TS2702: 'T' only refers to a type, but is being used as a namespace here.
+(5,12): error TS2702: 'Math' only refers to a type, but is being used as a namespace here.
+(10,20): error TS2708: Cannot use namespace 'X' as a value.

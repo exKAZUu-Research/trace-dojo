@@ -15,13 +15,11 @@ test.each([
 });
 
 test.each([
-  ['asyncIterator', 'console.log(Symbol.asyncIterator);'],
-  ['iterator', 'const iterator = [1][Symbol.iterator](); console.log(iterator.next());'],
-  ['iterator', 'const iterator = new Map<string, number>()[Symbol.iterator](); console.log(iterator.next());'],
-  ['dispose', 'console.log(Symbol.dispose);'],
-  ['asyncDispose', 'console.log(Symbol["asyncDispose"]);'],
-  ['dispose', 'const constructor: any = Symbol; console.log(constructor[["dis", "pose"].join("")]);'],
-  ['asyncDispose', 'console.log(Object.getOwnPropertyDescriptor(Symbol, "asyncDispose")?.value);'],
+  ['toPrimitive', 'console.log(Symbol.toPrimitive);'],
+  ['species', 'const species = Array[Symbol.species]; console.log(species);'],
+  ['hasInstance', 'console.log(Symbol["hasInstance"]);'],
+  ['toStringTag', 'const constructor: any = Symbol; console.log(constructor[["toString", "Tag"].join("")]);'],
+  ['species', 'console.log(Object.getOwnPropertyDescriptor(Symbol, "species")?.value);'],
 ])('reports an unavailable Symbol.%s without cascading errors', (name, source) => {
   expect(executeProgram('typescript', source)).toMatchObject({
     kind: 'compileError',
@@ -171,15 +169,74 @@ test.each([
 });
 
 test.each([
-  'type Box<in out T>={value:T};const a:Box<string>={value:"hi"};const b:Box<string|number>=a;console.log(b.value);',
-  'type Getter<in T>=()=>T;const get:Getter<number>=()=>3;console.log(get());',
-  'interface Producer<out T>{readonly value:T}const p:Producer<number>={value:1};console.log(p.value);',
-  'class Consumer<in T>{accept(value:T){console.log(value)}}new Consumer<number>().accept(1);',
-])('explicit generic variance is unavailable: %s', (source) => {
-  expect(executeProgram('typescript', source)).toMatchObject({
+  ['type Box<in out T>={value:T};const a:Box<string>={value:"hi"};const b:Box<string|number>=a;', 'compileError'],
+  ['type Getter<in T>=()=>T;', 'compileError'],
+  ['interface Producer<out T>{readonly value:T}const p:Producer<number>={value:1};', 'executed'],
+  ['class Consumer<in T>{accept(value:T){}}new Consumer<number>().accept(1);', 'executed'],
+])('variance annotations are checked as tsc checks them: %s', (source, kind) => {
+  expect(executeProgram('typescript', source)).toMatchObject({ kind });
+});
+
+test.each([
+  ["const path = require('path');", "モジュール 'path' の require は、この採点環境では使えません。"],
+  ['const p: any = process; p.cwd();', 'process.cwd は、この採点環境では使えません。'],
+  ["const fs = require('fs'); fs.readFile('a', () => {});", 'fs.readFile は、この採点環境では使えません。'],
+  [
+    "const fs = require('fs'); fs.writeFileSync('a.txt', 'aGk=', 'base64');",
+    'writeFileSync の encoding: "base64" は、この採点環境では使えません。',
+  ],
+  [
+    "process.stdout.write('6869', 'hex');",
+    'process.stdout.write のエンコーディング指定は、この採点環境では使えません。',
+  ],
+  ["process.stdout.write('x', () => {});", 'process.stdout.write のコールバックは、この採点環境では使えません。'],
+  ['console.log(typeof Symbol.dispose);', 'Symbol.dispose などの well-known シンボルは、この採点環境では使えません。'],
+  ["enum H { ['key'] = 4 }", 'enum のメンバー名を [ ] で書くことは、この採点環境では使えません。'],
+  [
+    'console.log(E); const enum E { A }',
+    "'const' enum は、プロパティやインデックスのアクセス式、import 宣言やエクスポート代入の右辺、型のクエリーでしか使えません。",
+  ],
+  ["const fs = require('fs', 'utf8');", '引数は 1 個必要ですが、2 個渡されています。'],
+  ['const fs = require(1);', "型 'number' の引数を型 'string' のパラメーターに渡すことはできません。"],
+  [
+    "const fs = require('fs'); fs.readdirSync('.', { recursive: true });",
+    'readdirSync の recursive は、この採点環境では使えません。',
+  ],
+  [
+    "const fs = require('fs'); fs.readdirSync('.', 'hex');",
+    'readdirSync の encoding: "hex" は、この採点環境では使えません。',
+  ],
+  [
+    "const fs = require('fs'); fs.readFileSync('x', 'base64');",
+    'readFileSync の encoding: "base64" は、この採点環境では使えません。',
+  ],
+  ["let id = 'fs'; const fs = require(id);", '名前が定数で決まらない require は、この採点環境では使えません。'],
+  ["const fs = require('fs'); fs.statSync('.');", 'fs.statSync は、この採点環境では使えません。'],
+  ["const load = require; load('path');", '呼び出し以外での require は、この採点環境では使えません。'],
+  ["require.call(null, 'path');", 'require.call は、この採点環境では使えません。'],
+  ["const { readFile } = require('fs');", 'fs.readFile は、この採点環境では使えません。'],
+  ["import { readFile } from 'fs';", 'fs.readFile は、この採点環境では使えません。'],
+  ['const { cwd } = process;', 'process.cwd は、この採点環境では使えません。'],
+  [
+    "const fs = require('fs'); fs.readFileSync('x', null);",
+    'エンコーディングを指定しない readFileSync（Buffer）は、この採点環境では使えません。',
+  ],
+  [
+    "const fs = require('fs'); fs.readFileSync('x', { flag: 'r' });",
+    'エンコーディングを指定しない readFileSync（Buffer）は、この採点環境では使えません。',
+  ],
+  ["import * as fs from 'fs'; fs.readFile('x', () => {});", 'fs.readFile は、この採点環境では使えません。'],
+  ['console.log(process.cwd());', 'process.cwd は、この採点環境では使えません。'],
+  ['console.log(process.stdout.columns);', 'WriteStream.columns は、この採点環境では使えません。'],
+  ['const out: any = process.stdout; console.log(out.isTTY);', 'process.stdout.isTTY は、この採点環境では使えません。'],
+  ['const err: any = process.stderr; err.end("x");', 'process.stderr.end は、この採点環境では使えません。'],
+])('rejects a Node.js feature the interpreter lacks before running %s', (source, message) => {
+  expect(executeProgram('typescript', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
+});
+
+test('suggests the member a misspelled name of a Node.js object means, as tsc does', () => {
+  expect(executeProgram('typescript', 'console.log(process.stdout.writ);')).toMatchObject({
     kind: 'compileError',
-    diagnostics: [
-      { message: expect.stringContaining('型パラメーターの in / out による分散指定は、この採点環境では使えません。') },
-    ],
+    diagnostics: [{ message: "プロパティ 'writ' は型 'WriteStream' にありません。'write' のことですか？" }],
   });
 });

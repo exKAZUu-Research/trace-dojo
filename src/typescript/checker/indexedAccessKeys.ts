@@ -8,6 +8,7 @@ import {
   intersectionOf,
   isAnyLike,
   isIntrinsic,
+  isPropertyKeyLiteral,
   type LiteralType,
   type MappedInfo,
   newTypeId,
@@ -431,13 +432,17 @@ export class IndexedAccessKeys {
 
   private structureHasKey(type: Type, key: Type, written: boolean): boolean {
     const structure = this.c.structureOf(type);
-    const name = key.kind === 'literal' ? key.value : undefined;
+    const name = isPropertyKeyLiteral(key) ? key.value : undefined;
     if (isIntrinsic(key, 'symbol') || typeof name === 'symbol')
-      return structure.symbolIndex !== undefined || (key.kind === 'literal' && this.propertyHasKey(structure, key));
+      return structure.symbolIndex !== undefined || (isPropertyKeyLiteral(key) && this.propertyHasKey(structure, key));
     if (structure.stringIndex || applicablePatternIndexes(this.c, structure, key).length > 0) return true;
-    if (structure.numberIndex && (isIntrinsic(key, 'number') || typeof name === 'number')) return true;
+    if (
+      structure.numberIndex &&
+      (isIntrinsic(key, 'number') || typeof name === 'number' || (key.kind === 'literal' && key.enumMember?.computed))
+    )
+      return true;
     if (structure.numberIndex && written && isNumericStringKey(key)) return true;
-    return key.kind === 'literal' && this.propertyHasKey(structure, key);
+    return isPropertyKeyLiteral(key) && this.propertyHasKey(structure, key);
   }
 
   /**

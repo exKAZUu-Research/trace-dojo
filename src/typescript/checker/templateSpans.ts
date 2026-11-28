@@ -84,7 +84,11 @@ export function placeholderTemplate(texts: string[], types: Type[]): Type {
 
 /** Whether a template placeholder spells one text, as a literal, `null`, or `undefined` does. */
 export function isSpelledLiteral(member: Type): boolean {
-  return member.kind === 'literal' || isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined');
+  return (
+    (member.kind === 'literal' && !member.enumMember?.computed) ||
+    isIntrinsic(member, 'null') ||
+    isIntrinsic(member, 'undefined')
+  );
 }
 
 /**

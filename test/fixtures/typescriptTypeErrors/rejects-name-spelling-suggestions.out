@@ -5,6 +5,6 @@
 (7,13): error TS2304: Cannot find name 'xyzzy'.
 (8,42): error TS2552: Cannot find name 'countr'. Did you mean 'counter'?
 (9,13): error TS2552: Cannot find name 'cosole'. Did you mean 'console'?
-(10,13): error TS2591: Cannot find name 'require'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+(10,13): error TS2591: Cannot find name 'module'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
 (11,13): error TS2552: Cannot find name 'Stirng'. Did you mean 'String'?
 (11,24): error TS2552: Cannot find name 'lenght'. Did you mean 'length'?

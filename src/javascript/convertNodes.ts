@@ -8,6 +8,7 @@ import { printedOperation, stringLiteralValue } from './operatorPrinter';
 export interface Node {
   readonly type: string;
   readonly text: string;
+  readonly displayText?: string;
   readonly isNamed: boolean;
   readonly startIndex: number;
   readonly endIndex: number;
@@ -94,7 +95,7 @@ export function isOptionalChain(node: Node): boolean {
 function printedCallee(node: Node): string | undefined {
   switch (node.type) {
     case 'identifier': {
-      return nameOf(node);
+      return node.displayText ?? nameOf(node);
     }
     case 'this':
     case 'super': {
@@ -150,8 +151,16 @@ function printedCallee(node: Node): string | undefined {
 
 /** Gives an anonymous function or class the name it is assigned to, as `name` shows. */
 export function nameAnonymous(value: Expression, name: string): void {
-  if (value.kind === 'functionExpression' && value.fn.name === '') value.fn.name = name;
-  if (value.kind === 'classExpression' && value.cls.name === '') value.cls.name = name;
+  let inner = value;
+  while (inner.kind === 'parenthesized') inner = inner.expression;
+  if (inner.kind === 'functionExpression' && inner.fn.name === '') inner.fn.name = name;
+  if (inner.kind === 'classExpression' && inner.cls.name === '') inner.inferredName ??= name;
+}
+
+export function firstUndecoratedChild(member: Node): Node | undefined {
+  return member.children.find(
+    (child): child is Node => child !== null && child.type !== 'decorator' && child.type !== 'comment'
+  );
 }
 
 export function keyName(key: PropertyName): string {

@@ -1,0 +1,37 @@
+interface Box<T> { next(): { value: string; done: boolean }; tag: T }
+const bx = { [Symbol.iterator](): Box<number> { return { tag: 1, next: () => ({ value: 'str', done: true }) }; } };
+for (const x of bx) console.log(x.toUpperCase());
+interface Box2<T> { next(): { value: number; done: boolean }; tag: T }
+const b2 = { [Symbol.iterator](): Box2<string> { return { tag: 'a', next: () => ({ value: 1, done: true }) }; } };
+for (const x of b2) console.log(x.toUpperCase());
+const u = { [Symbol.iterator]() { return { next(): IteratorResult<string, void> { return { value: undefined, done: true }; } }; } };
+for (const x of u) console.log(x.toUpperCase());
+interface MyIt<K, V> { next(): { value: V; done: boolean }; key?: K }
+const m = { [Symbol.iterator](): MyIt<string, number> { return { next: () => ({ value: 1, done: true }) }; } };
+for (const [k] of m) console.log(k);
+interface BoxC<T> { next(): Promise<{ value: number; done: boolean }>; tag?: T }
+async function f() {
+  const c = { [Symbol.asyncIterator](): BoxC<string> { return { next: async () => ({ value: 1, done: true }) }; } };
+  for await (const x of c) console.log(x.toUpperCase());
+}
+function* g() { yield 1; return 'end'; }
+for (const x of g()) console.log(x.toFixed(1));
+for (const x of [1, 2]) console.log(x.toFixed(1));
+for (const x of new Map([['a', 1]])) console.log(x[0].toUpperCase(), x[1].toFixed(0));
+const done = { [Symbol.iterator]() { return { next(): { value: string; done: true } { return { value: '', done: true }; } }; } };
+for (const x of done) console.log(x.toUpperCase());
+const anyNext = { [Symbol.iterator]() { return { next(): any { return { done: true }; } }; } };
+for (const x of anyNext) { const n: number = x; console.log(x.foo); }
+const noValue = { [Symbol.iterator]() { return { next(): { done: true } { return { done: true }; } }; } };
+for (const x of noValue) console.log(x);
+const a = { [Symbol.iterator]() { return { next(): { done: true } | { value: number; done: false } { return { done: true }; } }; } };
+for (const x of a) { const s: string = x; }
+const b = { [Symbol.iterator]() { return { next(): { done: true } | { value: number; done: boolean } { return { done: true }; } }; } };
+for (const x of b) { const s: string = x; }
+const c = { [Symbol.iterator]() { return { next(): { done: false } | { value: number; done: false } { return { done: false }; } }; } };
+for (const x of c) console.log(x);
+const d = { [Symbol.iterator]() { return { next(): { done: boolean } { return { done: true }; } }; } };
+for (const x of d) console.log(x);
+const e = [...a];
+const [f] = a;
+const g: string = e[0];

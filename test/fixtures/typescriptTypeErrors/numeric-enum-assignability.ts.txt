@@ -1,0 +1,14 @@
+enum Perm { None = 0, Read = 1 << 0, Write = 1 << 1 }
+let p: Perm = Perm.Read | Perm.Write;
+function f(q: Perm) {}
+f(3 as number);
+let r: Perm.Read = 5 as number;
+let lit: Perm = 3;
+let lit1: Perm = 1;
+let lit2: Perm.Read = 1;
+let lit3: Perm.Read = 2;
+enum S { A = 'a' }
+let s: S = 'a' as string;
+const n: number = p;
+let mixed: Perm | string = 7 as number;
+console.log(p === 5, p);

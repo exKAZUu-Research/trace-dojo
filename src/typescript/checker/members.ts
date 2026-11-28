@@ -12,12 +12,14 @@ import type { Checker } from './checker';
 import type { State } from './flow';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { applicableIndex } from './indexInfos';
+import { unavailableNodeMember } from './nodeLibrary';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { printedPropertyName } from './print';
 import { spellingSuggestion } from './spelling';
 import { assignmentKind, chainObject, isOptionalChain, skipParentheses } from './syntax';
 import { tupleElementBeyond } from './tupleIndexes';
 import {
+  anyType,
   errorType,
   intersectionOf,
   isAnyLike,
@@ -71,17 +73,27 @@ export class MemberChecker {
 
   /** For each optional chain being checked, its end and the flow states where its `?.` links stop it. */
   private readonly chainFrames: { end: TreeNode; stops: State[] }[] = [];
+  private readonly callChainFlows = new Map<number, { executed: State; stops: State[] }>();
 
   constructor(private readonly c: Checker) {}
 
   /** Checks a link of a chain, which joins where the chain's `?.` links stop it when it is the chain's end. */
   chainLink<T>(node: TreeNode, check: () => T): T {
     this.continuedTypes.delete(node.id);
+    this.callChainFlows.delete(node.id);
     if (this.chainFrames.at(-1)?.end.id === node.id) return check();
     const start = this.c.flow.current;
     const { result, stops } = this.stoppingChain(node, check);
-    if (stops.length > 0) this.c.flow.rejoin(start, stops);
+    if (stops.length > 0) {
+      if (!this.c.silent && node.type === 'call_expression' && this.continuedTypes.has(node.id))
+        this.callChainFlows.set(node.id, { executed: this.c.flow.current, stops });
+      this.c.flow.rejoin(start, stops);
+    }
     return result;
+  }
+
+  callChainFlow(node: TreeNode): { executed: State; stops: State[] } | undefined {
+    return this.callChainFlows.get(node.id);
   }
 
   /** Checks `condition` on `node`, which is false where `node`'s optional chain stops early. */
@@ -309,6 +321,7 @@ export class MemberChecker {
     if (!isWrite || assignmentKind(node) === 'compound')
       this.c.classDeclarations.checkFieldRead(node, objectNode, propertyNode, property);
     this.c.expressions.expandos.checkAssignedBefore(node, propertyNode, property);
+    if (property.enumSymbol) this.c.enums.checkConstEnumUse(node, property.enumSymbol);
     return this.checkPropertyAvailability(propertyNode, objectType, property);
   }
 
@@ -344,12 +357,14 @@ export class MemberChecker {
     if (!declaration || !this.c.isLibrary(declaration)) return undefined;
     const owner = declaration.parent?.parent?.childForFieldName('name')?.text;
     const { name } = property;
-    // The well-known symbols replace the protocols of the language, which this interpreter does not support yet.
+    // The well-known symbols other than those of iteration and `using` replace protocols this interpreter keeps fixed.
     if (owner === 'SymbolConstructor' && unavailableWellKnownSymbols.has(name) && !this.isTypeOnlyUse(propertyNode))
       return wellKnownSymbolFeature(name);
     // A stack trace names the files and lines of the host, which differ from the program's.
     if (owner === 'Error' && name === 'stack') return 'Error の stack';
     if (owner === 'ArrayConstructor' && name === 'fromAsync') return 'Array.fromAsync';
+    const nodeMember = unavailableNodeMember(owner, name);
+    if (nodeMember) return nodeMember;
     if (owner === 'RegExpConstructor' && unavailableRegExpStatics.has(name)) return legacyRegExpStaticsFeature;
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
     if (owner === 'Function' && name === 'toString' && !this.isTypeOnlyUse(propertyNode))
@@ -402,6 +417,22 @@ export class MemberChecker {
     );
   }
 
+  /**
+   * A call that gives a library `Buffer`, as `readFileSync` without an encoding does, which this interpreter does not
+   * provide: its value is any, so that no use of it reports more than the call does.
+   */
+  rejectLibraryBuffer(call: TreeNode, type: Type): Type {
+    if (!this.isLibraryBuffer(call, type)) return type;
+    this.c.error(call, unsupportedMessage('エンコーディングを指定しない readFileSync（Buffer）'));
+    return anyType;
+  }
+
+  private isLibraryBuffer(node: TreeNode, type: Type): boolean {
+    if (type.kind !== 'object' || type.name !== 'Buffer') return false;
+    const declarations = this.c.scopeOf(node).lookupType('Buffer')?.typeDeclarations ?? [];
+    return declarations.length > 0 && declarations.every((declaration) => this.c.isLibrary(declaration));
+  }
+
   /** A property of the type, or of a primitive's wrapper, as `length` of a string, that `name` may misspell. */
   private suggestProperty(type: Type, name: string): string | undefined {
     const members = type.kind === 'union' ? type.types : [type];
@@ -445,7 +476,7 @@ export class MemberChecker {
       return this.c.relations.stringIndexByGenericKey(objectType, indexType)?.readonly === true;
     if (objectType.kind === 'union') return objectType.types.some((member) => this.isReadonlyIndex(member, indexType));
     if (indexType.kind === 'union') return indexType.types.some((member) => this.isReadonlyIndex(objectType, member));
-    if (indexType.kind === 'literal' && this.c.propertyOf(objectType, String(indexType.value))) return false;
+    if (isPropertyKeyLiteral(indexType) && this.c.propertyOf(objectType, String(indexType.value))) return false;
     return applicableIndex(this.c, this.c.structureOf(objectType), indexType)?.readonly === true;
   }
 
@@ -556,6 +587,7 @@ export class MemberChecker {
     }
     if (!this.checkPropertyAvailability(access.indexNode, objectType, property)) return errorType;
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
+    if (property.enumSymbol) this.c.enums.checkConstEnumUse(access.node, property.enumSymbol);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
     return propertyAccessType(property, access.write ? 'write' : 'read');
   }
@@ -582,10 +614,9 @@ export class MemberChecker {
       return unionOf(index.types.map((member) => this.indexedTypeAt(access, objectType, member)));
     }
     if (objectType.kind === 'indexedAccess') return this.c.typeOperators.indexedAccess(objectType, index);
-    const missing =
-      index.kind === 'literal'
-        ? `プロパティ '${printedPropertyName(String(index.value), index)}' は型 '${this.c.print(objectType)}' にありません。`
-        : '';
+    const missing = isPropertyKeyLiteral(index)
+      ? `プロパティ '${printedPropertyName(String(index.value), index)}' は型 '${this.c.print(objectType)}' にありません。`
+      : '';
     this.c.error(
       access.node,
       `型 '${this.c.print(index)}' の式は型 '${this.c.print(objectType)}' のインデックスに使えないため、要素の型が暗黙に any になります。${missing}`

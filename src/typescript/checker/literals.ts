@@ -122,20 +122,9 @@ export class LiteralChecker {
     const isConstContext = this.isConstContext(node, contextual);
     const lengths = contextual ? this.arrayElementLengths(elements) : [];
     const firstSpread = elements.findIndex((element) => element?.type === 'spread_element');
-    const types: { type: Type; spread: boolean }[] = elements.map((element, index) => {
-      // A hole, as in `[, 1]`, reads as `undefined`.
-      if (!element) return { type: undefinedType, spread: false };
-      if (element.type === 'spread_element') {
-        const spread = this.c.expressions.check(named(element)[0]);
-        return { type: spread, spread: true };
-      }
-      const fixed = firstSpread === -1 || index < firstSpread;
-      const contexts = contextual ? this.arrayElementContexts(contextual, index, lengths, fixed) : [];
-      const context = contexts.length > 0 ? unionOf(contexts, true, true) : undefined;
-      const type = this.c.expressions.check(element, context);
-      const literalContext = contexts.find((candidate) => this.expectsLiteral(candidate, type)) ?? context;
-      return { type: this.literalValueType(type, literalContext, isConstContext), spread: false };
-    });
+    const types = elements.map((element, index) =>
+      this.checkArrayElement(element, index, { contextual, isConstContext, lengths, firstSpread })
+    );
     if (isConstContext || this.isInTupleContext(node, contextual)) {
       return this.tupleOfElements(
         node,
@@ -154,6 +143,31 @@ export class LiteralChecker {
     };
     this.arrayLiterals.add(array.id);
     return array;
+  }
+
+  private checkArrayElement(
+    element: TreeNode | undefined,
+    index: number,
+    options: {
+      contextual: Type | undefined;
+      isConstContext: boolean;
+      lengths: (number | undefined)[];
+      firstSpread: number;
+    }
+  ): { type: Type; spread: boolean } {
+    // A hole, as in `[, 1]`, reads as `undefined`.
+    if (!element) return { type: undefinedType, spread: false };
+    const { contextual, isConstContext, lengths, firstSpread } = options;
+    if (element.type === 'spread_element') {
+      const spreadContext = contextual && isAnyLike(contextual) ? contextual : undefined;
+      return { type: this.c.expressions.check(named(element)[0], spreadContext), spread: true };
+    }
+    const fixed = firstSpread === -1 || index < firstSpread;
+    const contexts = contextual ? this.arrayElementContexts(contextual, index, lengths, fixed) : [];
+    const context = contexts.length > 0 ? unionOf(contexts, true, true) : undefined;
+    const type = this.c.expressions.check(element, context);
+    const literalContext = contexts.find((candidate) => this.expectsLiteral(candidate, type)) ?? context;
+    return { type: this.literalValueType(type, literalContext, isConstContext), spread: false };
   }
 
   private arrayElementLengths(elements: (TreeNode | undefined)[]): (number | undefined)[] {
@@ -296,13 +310,14 @@ export class LiteralChecker {
   }
 
   private elementContext(contextual: Type, position: number | undefined): Type | undefined {
+    if (isAnyLike(contextual)) return contextual;
     if (contextual.kind !== 'object') return undefined;
     const property = position === undefined ? undefined : this.c.propertyOf(contextual, String(position));
     if (property) return propertyAccessType(property);
     if (this.c.isArrayOrTuple(contextual)) return this.c.elementTypeOf(contextual);
     if (!this.c.propertyOf(contextual, this.c.typeNodes.librarySymbolKey('iterator'))) return undefined;
     const iterated = this.c.silently(() => this.c.patterns.iteratedType(undefined, contextual));
-    return iterated === errorType || isAnyLike(iterated) ? undefined : iterated;
+    return iterated === errorType ? undefined : iterated;
   }
 
   /** Whether a literal is checked with const inference or inside a const assertion. */
@@ -465,7 +480,10 @@ export class LiteralChecker {
     if (
       !members.some((member) => {
         const value = member.childForFieldName('value');
-        return member.type === 'method_definition' || (value && skipParentheses(value).type === 'function_expression');
+        return (
+          member.type === 'method_definition' ||
+          (value && ['function_expression', 'generator_function'].includes(skipParentheses(value).type))
+        );
       })
     )
       return;
@@ -487,7 +505,7 @@ export class LiteralChecker {
     const value = member.childForFieldName('value');
     const key = keyNode ? this.memberKey(keyNode) : literalType(member.text);
     const receiverOwner = isMethod ? member : value && skipParentheses(value);
-    if (receiverOwner && (isMethod || receiverOwner.type === 'function_expression'))
+    if (receiverOwner && (isMethod || ['function_expression', 'generator_function'].includes(receiverOwner.type)))
       this.c.classes.registerObjectThis(receiverOwner, literal.receiver);
     if (!isMethod) {
       this.declareObjectValue(literal, member, key, value);
@@ -505,6 +523,7 @@ export class LiteralChecker {
         () => this.c.silently(() => this.declaredObjectMethod(literal, member, key)),
         before
       );
+      if (getter) this.c.functions.propagateLatentYields(member.id);
       return resolved;
     };
     const property = this.literalProperty(name, anyType, literal.isConstContext, member, key);
@@ -730,12 +749,10 @@ export class LiteralChecker {
     const isGetter = hasToken(member, 'get');
     const signature = this.c.signaturesOf(methodType, 'call')[0];
     const existing = properties.get(name);
-    const accessorType = isGetter ? (signature?.returnType() ?? anyType) : (signature?.parameters[0]?.type ?? anyType);
-    const property = this.literalProperty(name, accessorType, false, member, key);
-    properties.set(
-      name,
-      accessorProperty(property, existing, isGetter, () => accessorType)
-    );
+    const resolveAccessorType = (): Type =>
+      isGetter ? (signature?.returnType() ?? anyType) : (signature?.parameters[0]?.type ?? anyType);
+    const property = this.literalProperty(name, anyType, false, member, key);
+    properties.set(name, accessorProperty(property, existing, isGetter, resolveAccessorType));
   }
 
   private spreadOperand(member: TreeNode, contextual: Type | undefined): Type {
@@ -1182,14 +1199,31 @@ export class LiteralChecker {
       for (const [name, property] of this.c.structureOf(member).properties) {
         if (!isSpreadableProperty(property) || (property.isMethod && member.kind === 'object' && member.classInfo))
           continue;
+        this.touchSpreadGetter(property);
         result.set(name, spreadCopy(property, readonly));
       }
     }
     return result;
   }
 
+  private touchSpreadGetter(property: Property): void {
+    if (
+      this.c.functions.isTrackingReturnYields() &&
+      property.declaration?.type === 'method_definition' &&
+      hasToken(property.declaration, 'get')
+    ) {
+      property.type();
+    }
+  }
+
   /** The type the contextual type gives a property of an object literal. */
   contextualPropertyType(contextual: Type, name: string, key: Type = literalType(name)): Type | undefined {
+    return this.c.functions.withoutLatentYieldPropagation(() =>
+      this.resolveContextualPropertyType(contextual, name, key)
+    );
+  }
+
+  private resolveContextualPropertyType(contextual: Type, name: string, key: Type): Type | undefined {
     const members = (contextual.kind === 'union' ? contextual.types : [contextual]).filter(
       (member) => member.kind === 'object' || member.kind === 'intersection' || member.kind === 'typeParameter'
     );
@@ -1198,7 +1232,7 @@ export class LiteralChecker {
       const apparent = member.kind === 'typeParameter' ? (this.c.constraintOf(member) ?? unknownType) : member;
       const property = this.c.propertyOf(apparent, name);
       if (property) {
-        types.push(property.type());
+        types.push(propertyAccessType(property));
         continue;
       }
       const index = namedPropertyIndex(this.c, this.c.structureOf(apparent), name, key);
@@ -1215,13 +1249,13 @@ export class LiteralChecker {
     if (type.kind === 'union') {
       const widened = mapType(type, (member) => this.widenDeclared(member, isConst, keepFresh));
       return widened.kind === 'union'
-        ? unionOf(this.normalizeObjectLiterals(widened.types, { keepFresh }), keepFresh)
+        ? unionOf(this.normalizeObjectLiterals(widened.types, { keepFresh }), isConst || keepFresh)
         : widened;
     }
     if (type.kind === 'object') {
-      // Only an array literal holds fresh literals; another array, as one of a recursive alias, is left as it is.
+      // Direct primitive literals in an array literal are widened when checked; declaration widening widens only object literals in it.
       if (this.isArrayLiteral(type))
-        return this.c.arrayType(this.widenDeclared(this.c.elementTypeOf(type), false, keepFresh));
+        return this.c.arrayType(this.widenDeclared(this.c.elementTypeOf(type), true, keepFresh));
       if (isObjectLiteral(type)) return this.widenObjectLiteral(type, keepFresh);
     }
     return regularOf(type);

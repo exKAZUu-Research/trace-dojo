@@ -1,23 +1,45 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
+import { nameOf } from '../../javascript/convertNodes';
 import type { ClassInfo, Type, TypeParameter, UnionType } from './types';
 
-export type ValueKind = 'let' | 'const' | 'var' | 'parameter' | 'function' | 'class' | 'catch' | 'declared';
-export type TypeKind = 'interface' | 'alias' | 'class' | 'typeParameter';
+export type ValueKind =
+  | 'let'
+  | 'const'
+  | 'var'
+  | 'parameter'
+  | 'function'
+  | 'class'
+  | 'catch'
+  | 'declared'
+  | 'enum'
+  | 'enumMember'
+  | 'namespace'
+  | 'importAlias'
+  | 'import';
+export type TypeKind = 'interface' | 'alias' | 'class' | 'typeParameter' | 'enum' | 'importAlias' | 'import';
+export type NamespaceKind = 'namespace' | 'importAlias' | 'import';
+export type MeaningSpace = 'value' | 'type' | 'namespace';
 
 let nextSymbolId = 1;
 
-/** A name a program or the library declares, as a value, a type, or both. */
+const mergesIntoNamespace = new Set<ValueKind>(['enum', 'function', 'class']);
+const sharesNamespaceSymbol = new Set<ValueKind>(['namespace', 'enum', 'function', 'class']);
+
+/** A name a program or the library declares, as a value, a type, a namespace, or a combination of them. */
 export class Sym {
   readonly id = nextSymbolId++;
   valueKind?: ValueKind;
   typeKind?: TypeKind;
+  namespaceKind?: NamespaceKind;
   valueDeclarations: TreeNode[] = [];
   typeDeclarations: TreeNode[] = [];
+  namespaceDeclarations: TreeNode[] = [];
   /** Each value declaration's kind and the name it declares, which duplicate declarations are reported at. */
   readonly valueEntries: { kind: ValueKind; name: TreeNode }[] = [];
   readonly typeEntries: { kind: TypeKind; name: TreeNode }[] = [];
+  readonly namespaceEntries: { kind: NamespaceKind; name: TreeNode }[] = [];
   /** The type of the value, once resolved. */
   valueType?: Type;
   /** The type the name stands for, once resolved. */
@@ -45,6 +67,16 @@ export class Sym {
   unsupportedCallOnly?: boolean;
   /** For a value whose declaration has no annotation, whose type the initializer gives. */
   isLibrary = false;
+  /** For an enum, the scope its members are declared in, which every declaration of it shares. */
+  enumMembers?: Scope;
+  /** For a namespace, the names its declarations export, which every declaration of it sees. */
+  namespaceExports?: Scope;
+  /** For an ambient module with `export = X`, the target entity `X` that stands for the module. */
+  exportEquals?: TreeNode;
+  /** The namespace that exports this name, which its declarations refer to it through. */
+  exportedFrom?: Sym;
+  /** For a name an `import` declares, the module and the export it names: `*` for the module, `default` for its default. */
+  importTarget?: { module: string; name: string; typeOnly?: boolean };
 
   constructor(
     readonly name: string,
@@ -59,11 +91,33 @@ export class Sym {
 export class Scope {
   readonly values = new Map<string, Sym>();
   readonly types = new Map<string, Sym>();
+  readonly namespaces = new Map<string, Sym>();
+  readonly typeOnlyValues = new Map<string, Sym>();
+  defaultTypeSymbol?: Sym;
+  readonly defaultDeclaredNames: {
+    name: string;
+    kind: 'interface' | 'class';
+    declaration: TreeNode;
+    nameNode: TreeNode;
+  }[] = [];
+  private hasDefaultTypeLocalName = false;
 
+  private readonly clauseOnlyValues = new Set<string>();
+  private readonly clauseOnlyTypes = new Set<string>();
+  private readonly clauseOnlyNamespaces = new Set<string>();
+  private readonly declarationExportedValues = new Set<string>();
+  private readonly declarationExportedTypes = new Set<string>();
+  private readonly declarationExportedNamespaces = new Set<string>();
+  readonly clauseExportSpecifiers: { name: string; site: TreeNode; value?: Sym; type?: Sym; namespace?: Sym }[] = [];
+  readonly ambiguousStarExports: { site: TreeNode; firstModule: string; name: string }[] = [];
   /** The names a `declare global` block declares, which inside it stand for the global symbols of those names. */
   private readonly augmentedNames = new Set<string>();
   /** The nearest function or module scope, where `var` and function declarations live. */
   readonly functionScope: Scope;
+  /** For the body of a namespace declaration, the namespace, to which its `export` declarations add names. */
+  namespace?: Sym;
+  /** Whether the declarations in it are ambient, as in a `declare namespace`, where every declaration is exported. */
+  isAmbient = false;
 
   /** @param augments For a `declare global` block, the global scope its declarations go to. */
   constructor(
@@ -77,11 +131,127 @@ export class Scope {
 
   lookupValue(name: string, budget?: ExecutionBudget): Sym | undefined {
     budget?.spend();
-    return this.values.get(name) ?? this.augmented(name)?.values.get(name) ?? this.parent?.lookupValue(name, budget);
+    const own = this.clauseOnlyValues.has(name) ? undefined : this.values.get(name);
+    return own ?? this.augmented(name)?.values.get(name) ?? this.parent?.lookupValue(name, budget);
   }
 
   lookupType(name: string): Sym | undefined {
-    return this.types.get(name) ?? this.augmented(name)?.types.get(name) ?? this.parent?.lookupType(name);
+    const own = this.clauseOnlyTypes.has(name) ? undefined : this.types.get(name);
+    return own ?? this.augmented(name)?.types.get(name) ?? this.parent?.lookupType(name);
+  }
+
+  lookupNamespace(name: string, budget?: ExecutionBudget): Sym | undefined {
+    budget?.spend();
+    const own = this.clauseOnlyNamespaces.has(name) ? undefined : this.namespaces.get(name);
+    return own ?? this.augmented(name)?.namespaces.get(name) ?? this.parent?.lookupNamespace(name, budget);
+  }
+
+  /** Finds the innermost namespace, enum, or import container named `name` along the lexical scope chain. */
+  lookupContainer(name: string, budget?: ExecutionBudget): Sym | undefined {
+    budget?.spend();
+    const ownNamespace = this.clauseOnlyNamespaces.has(name) ? undefined : this.namespaces.get(name);
+    if (ownNamespace) return ownNamespace;
+    const ownValue = this.clauseOnlyValues.has(name) ? undefined : this.values.get(name);
+    if (ownValue && isContainerValueKind(ownValue.valueKind)) return ownValue;
+    const augmented = this.augmented(name);
+    if (augmented) {
+      const augNamespace = augmented.namespaces.get(name);
+      if (augNamespace) return augNamespace;
+      const augValue = augmented.values.get(name);
+      if (augValue && isContainerValueKind(augValue.valueKind)) return augValue;
+    }
+    return this.parent?.lookupContainer(name, budget);
+  }
+
+  exportViaDeclaration(name: string, symbol: Sym, meaning: MeaningSpace): void {
+    const { table, clauseOnly, declarationExported } = this.spaceSets(meaning);
+    declarationExported.add(name);
+    if (!clauseOnly.has(name)) table.set(name, symbol);
+  }
+
+  exportViaClause(name: string, symbol: Sym, meaning: MeaningSpace): void {
+    const { table, clauseOnly } = this.spaceSets(meaning);
+    if (table.has(name)) return;
+    clauseOnly.add(name);
+    table.set(name, symbol);
+  }
+
+  recordClauseExport(name: string, site: TreeNode, symbols: { value?: Sym; type?: Sym; namespace?: Sym }): void {
+    const existing = this.clauseExportSpecifiers.find((entry) => entry.site.id === site.id);
+    if (existing) {
+      existing.value ??= symbols.value;
+      existing.type ??= symbols.type;
+      existing.namespace ??= symbols.namespace;
+      return;
+    }
+    this.clauseExportSpecifiers.push({ name, site, ...symbols });
+  }
+
+  exportTypeOnlyValue(name: string, symbol: Sym): void {
+    if (!this.values.has(name) && !this.typeOnlyValues.has(name)) this.typeOnlyValues.set(name, symbol);
+  }
+
+  removeStarExport(name: string): void {
+    for (const meaning of ['value', 'type', 'namespace'] as const) {
+      const { table, clauseOnly, declarationExported } = this.spaceSets(meaning);
+      if (!declarationExported.has(name)) {
+        table.delete(name);
+        clauseOnly.delete(name);
+      }
+    }
+    this.typeOnlyValues.delete(name);
+  }
+
+  recordAmbiguousStarExport(site: TreeNode, firstModule: string, name: string): void {
+    if (this.ambiguousStarExports.some((entry) => entry.site.id === site.id && entry.name === name)) return;
+    this.ambiguousStarExports.push({ site, firstModule, name });
+  }
+
+  hasDeclarationExport(name: string, meaning: MeaningSpace): boolean {
+    return this.spaceSets(meaning).declarationExported.has(name);
+  }
+
+  deleteClauseExportSymbol(symbol: Sym, meaning: MeaningSpace): void {
+    const { table, clauseOnly } = this.spaceSets(meaning);
+    for (const [exportName, exported] of table) {
+      if (exported !== symbol) continue;
+      table.delete(exportName);
+      clauseOnly.delete(exportName);
+    }
+  }
+
+  isClauseOnlyExport(name: string, meaning: MeaningSpace): boolean {
+    return this.spaceSets(meaning).clauseOnly.has(name);
+  }
+
+  tableOf(meaning: MeaningSpace): Map<string, Sym> {
+    return meaning === 'value' ? this.values : meaning === 'type' ? this.types : this.namespaces;
+  }
+
+  private spaceSets(meaning: MeaningSpace): {
+    table: Map<string, Sym>;
+    clauseOnly: Set<string>;
+    declarationExported: Set<string>;
+  } {
+    if (meaning === 'value') {
+      return {
+        table: this.values,
+        clauseOnly: this.clauseOnlyValues,
+        declarationExported: this.declarationExportedValues,
+      };
+    }
+    if (meaning === 'type') {
+      return {
+        table: this.types,
+        clauseOnly: this.clauseOnlyTypes,
+        declarationExported: this.declarationExportedTypes,
+      };
+    }
+    return {
+      table: this.namespaces,
+      clauseOnly: this.clauseOnlyNamespaces,
+      declarationExported: this.declarationExportedNamespaces,
+    };
   }
 
   private augmented(name: string): Scope | undefined {
@@ -93,38 +263,175 @@ export class Scope {
     symbol.valueEntries.at(-1)!.kind = kind;
   }
 
-  declareValue(name: string, kind: ValueKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
-    if (this.augments) {
-      this.augmentedNames.add(name);
-      return this.augments.declareValue(name, kind, declaration, nameNode);
-    }
-    let symbol = this.values.get(name);
-    if (!symbol) {
-      symbol = new Sym(name, this);
-      this.values.set(name, symbol);
-    }
-    symbol.valueKind ??= kind;
+  declareValue(rawName: string, kind: ValueKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
+    const name = canonicalIdentifier(rawName, nameNode);
+    if (this.augments)
+      return this.forwardAugmented(name, (augments) => augments.declareValue(name, kind, declaration, nameNode));
+    const symbol = this.resolveDeclaredSymbol(name, 'value', declaration, () => {
+      const existing = sharesNamespaceSymbol.has(kind) ? this.namespaces.get(name) : undefined;
+      return existing?.namespaceKind === 'namespace' ? existing : undefined;
+    });
+    // An enum, a function, or a class merges into a namespace declared before it, whose exports it then holds too.
+    if (symbol.valueKind === undefined || (symbol.valueKind === 'namespace' && mergesIntoNamespace.has(kind)))
+      symbol.valueKind = kind;
     symbol.valueDeclarations.push(declaration);
     symbol.valueEntries.push({ kind, name: nameNode });
     return symbol;
   }
 
-  declareType(name: string, kind: TypeKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
-    if (this.augments) {
-      this.augmentedNames.add(name);
-      return this.augments.declareType(name, kind, declaration, nameNode);
+  declareNamespace(rawName: string, kind: NamespaceKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
+    const name = canonicalIdentifier(rawName, nameNode);
+    if (this.augments)
+      return this.forwardAugmented(name, (augments) => augments.declareNamespace(name, kind, declaration, nameNode));
+    const symbol = this.resolveDeclaredSymbol(name, 'namespace', declaration, () => {
+      const existing = kind === 'namespace' ? this.values.get(name) : undefined;
+      return existing && (!existing.valueKind || sharesNamespaceSymbol.has(existing.valueKind)) ? existing : undefined;
+    });
+    symbol.namespaceKind ??= kind;
+    symbol.namespaceDeclarations.push(declaration);
+    symbol.namespaceEntries.push({ kind, name: nameNode });
+    return symbol;
+  }
+
+  declareType(rawName: string, kind: TypeKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
+    const name = canonicalIdentifier(rawName, nameNode);
+    if (this.augments)
+      return this.forwardAugmented(name, (augments) => augments.declareType(name, kind, declaration, nameNode));
+    if (this.defaultTypeSymbol && this.types.get(name) === this.defaultTypeSymbol) {
+      this.types.delete(name);
     }
-    let symbol = this.types.get(name);
-    if (!symbol) {
-      // A class is a value and a type of the same name.
-      symbol = kind === 'class' ? (this.values.get(name) ?? new Sym(name, this)) : new Sym(name, this);
-      this.types.set(name, symbol);
-    }
+    // A class or an enum is a value and a type of the same name.
+    const symbol = this.resolveDeclaredSymbol(name, 'type', declaration, () =>
+      kind === 'class' || kind === 'enum' ? this.values.get(name) : undefined
+    );
     // An interface declared before the class of its name merges into the class.
-    if (kind === 'class' && symbol.typeKind === 'interface') symbol.typeKind = 'class';
-    else symbol.typeKind ??= kind;
+    symbol.typeKind = kind === 'class' && symbol.typeKind === 'interface' ? 'class' : (symbol.typeKind ?? kind);
     symbol.typeDeclarations.push(declaration);
     symbol.typeEntries.push({ kind, name: nameNode });
     return symbol;
   }
+
+  declareDefaultType(
+    rawName: string | undefined,
+    kind: 'interface' | 'class',
+    declaration: TreeNode,
+    nameNode: TreeNode
+  ): Sym {
+    if (rawName) {
+      this.defaultDeclaredNames.push({
+        name: canonicalIdentifier(rawName, nameNode),
+        kind,
+        declaration,
+        nameNode,
+      });
+    }
+    const shared = this.defaultTypeSymbol;
+    const canMerge =
+      shared !== undefined &&
+      (shared.typeKind === 'interface' || (shared.typeKind === 'class' && kind === 'interface'));
+    if (!canMerge) {
+      const symbol = rawName
+        ? this.declareFirstNamedDefaultType(rawName, kind, declaration, nameNode)
+        : this.newAnonymousDefaultType(kind, declaration, nameNode);
+      this.defaultTypeSymbol ??= symbol;
+      return symbol;
+    }
+    this.mergeIntoDefaultType(shared, rawName, kind, declaration, nameNode);
+    return shared;
+  }
+
+  private declareFirstNamedDefaultType(
+    rawName: string,
+    kind: 'interface' | 'class',
+    declaration: TreeNode,
+    nameNode: TreeNode
+  ): Sym {
+    const name = canonicalIdentifier(rawName, nameNode);
+    this.hasDefaultTypeLocalName = true;
+    if (this.types.has(name)) {
+      const symbol = new Sym(name, this);
+      symbol.typeKind = kind;
+      symbol.typeDeclarations.push(declaration);
+      symbol.typeEntries.push({ kind, name: nameNode });
+      return symbol;
+    }
+    return this.declareType(rawName, kind, declaration, nameNode);
+  }
+
+  private newAnonymousDefaultType(kind: 'interface' | 'class', declaration: TreeNode, nameNode: TreeNode): Sym {
+    const symbol = new Sym('default', this);
+    symbol.typeKind = kind;
+    symbol.typeDeclarations.push(declaration);
+    symbol.typeEntries.push({ kind, name: nameNode });
+    return symbol;
+  }
+
+  private mergeIntoDefaultType(
+    shared: Sym,
+    rawName: string | undefined,
+    kind: 'interface' | 'class',
+    declaration: TreeNode,
+    nameNode: TreeNode
+  ): void {
+    if (rawName && !this.hasDefaultTypeLocalName) {
+      const name = canonicalIdentifier(rawName, nameNode);
+      if (!this.types.has(name)) this.types.set(name, shared);
+      this.hasDefaultTypeLocalName = true;
+    }
+    if (kind === 'class' && shared.typeKind === 'interface') shared.typeKind = 'class';
+    shared.typeDeclarations.push(declaration);
+    shared.typeEntries.push({ kind, name: nameNode });
+  }
+
+  private forwardAugmented(name: string, declare: (augments: Scope) => Sym): Sym {
+    this.augmentedNames.add(name);
+    return declare(this.augments as Scope);
+  }
+
+  private resolveDeclaredSymbol(
+    name: string,
+    meaning: MeaningSpace,
+    declaration: TreeNode,
+    reuseShared: () => Sym | undefined
+  ): Sym {
+    const table = this.tableOf(meaning);
+    let symbol = table.get(name) ?? this.exportedNamespaceSymbol(name, declaration, meaning);
+    if (!symbol) {
+      symbol = reuseShared() ?? new Sym(name, this);
+      table.set(name, symbol);
+    }
+    return symbol;
+  }
+
+  /** The symbol another body of this namespace already exported under `name`, when `declaration` is exported too. */
+  private exportedNamespaceSymbol(name: string, declaration: TreeNode, meaning: MeaningSpace): Sym | undefined {
+    if (!this.namespace || !isExportedFromNamespace(this.isAmbient, declaration)) return undefined;
+    const exports = this.namespace.namespaceExports;
+    if (!exports || exports.isClauseOnlyExport(name, meaning)) return undefined;
+    const exported = exports.tableOf(meaning).get(name);
+    if (!exported) return undefined;
+    this.tableOf(meaning).set(name, exported);
+    return exported;
+  }
+}
+
+function isContainerValueKind(kind: ValueKind | undefined): boolean {
+  return kind === 'enum' || kind === 'import' || kind === 'importAlias';
+}
+
+export function canonicalIdentifier(name: string, nameNode: TreeNode): string {
+  if (!name.includes('\\')) return name;
+  try {
+    return nameOf(nameNode);
+  } catch {
+    return name;
+  }
+}
+
+function isExportedFromNamespace(isAmbientScope: boolean, declaration: TreeNode): boolean {
+  if (isAmbientScope) return true;
+  let current: TreeNode | null = declaration;
+  if (current.type === 'variable_declarator') current = current.parent;
+  if (current?.type === 'expression_statement' || current?.type === 'ambient_declaration') current = current.parent;
+  return current?.parent?.type === 'export_statement';
 }

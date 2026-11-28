@@ -41,7 +41,9 @@ export class ExpressionListFlow {
   }
 
   private position(node: TreeNode): ArgumentPosition | undefined {
-    this.positions ??= this.c.flow.probe(() => this.c.silently(() => this.collectPositions()));
+    this.positions ??= this.c.overloadContexts.withoutPreview(() =>
+      this.c.flow.probe(() => this.c.silently(() => this.collectPositions()))
+    );
     return this.positions.get(node.id);
   }
 
@@ -130,15 +132,20 @@ export class CallArity {
 }
 
 /**
+ * Whether every signature takes no argument, so a call that always passes one, as a decorator passes the value it
+ * decorates, fits none of them.
+ */
+export function takesNoArguments(signatures: Signature[]): boolean {
+  return signatures.length > 0 && signatures.every((signature) => signature.parameters.length === 0);
+}
+
+/**
  * The type an argument passed at an offset into a rest parameter of a tuple type takes: the element at that position,
  * or the rest element's element type at or after a rest element.
  */
 export function tupleTypeAt(c: Checker, elements: TupleElement[], offset: number): Type | undefined {
   const restIndex = elements.findIndex((element) => element.rest);
-  if (restIndex === -1 || offset < restIndex) {
-    const element = elements[offset];
-    return element && (element.optional ? unionOf([element.type, undefinedType]) : element.type);
-  }
+  if (restIndex === -1 || offset < restIndex) return tupleElementContextType(elements[offset]);
   return c.restElementType(elements[restIndex].type);
 }
 
@@ -189,12 +196,16 @@ export function tupleArgumentContexts(
   const fromEnd = offsets(lengths.toReversed()).toReversed();
   return lengths.map((_, index) => {
     const start = fromStart[index];
-    if (start !== undefined && (restIndex === -1 || start < restIndex)) return elements[start]?.type;
+    if (start !== undefined && (restIndex === -1 || start < restIndex)) return tupleElementContextType(elements[start]);
     const end = fromEnd[index];
-    if (end !== undefined && end < trailing) return elements[elements.length - 1 - end].type;
+    if (end !== undefined && end < trailing) return tupleElementContextType(elements[elements.length - 1 - end]);
     if (restIndex === -1) return;
     return c.restElementType(elements[restIndex].type);
   });
+}
+
+function tupleElementContextType(element: TupleElement | undefined): Type | undefined {
+  return element && (element.optional ? unionOf([element.type, undefinedType]) : element.type);
 }
 
 /** How many values precede each argument, until a spread of unknown length. */

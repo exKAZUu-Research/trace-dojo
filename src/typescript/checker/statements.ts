@@ -2,6 +2,12 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { assert } from 'es-toolkit';
 
+import { isAmbient, isCheckedAmbientDeclaration } from '../namespaceInstantiation';
+import { checkAmbientInitializer } from './ambientDeclarations';
+import { checkAmbientExportAssignment } from './ambientExportAssignment';
+import { checkAmbientExportTarget } from './ambientModuleExports';
+import { checkAwaitPlace } from './awaited';
+import { declaredNames } from './binder';
 import type { Checker } from './checker';
 import { checkConstraintDeclarations } from './circularConstraints';
 import {
@@ -12,8 +18,21 @@ import {
 import { FlowState, isUnit, type State } from './flow';
 import type { FunctionContext } from './functions';
 import { baseIndexMismatch, checkDuplicateIndexSignatures, checkIndexConformance } from './indexConformance';
-import type { Scope, Sym } from './scopes';
-import { hasToken, isDirectEmptyArray, named, skipParentheses, stringValue, templateFragmentText } from './syntax';
+import { canonicalIdentifier, type Scope, type Sym } from './scopes';
+import {
+  hasToken,
+  isAmbientModuleBody,
+  isDirectEmptyArray,
+  isDirectGlobalAugmentationContainer,
+  isNamespaceBody,
+  jumpLabel,
+  labeledBody,
+  loopStatementTypes,
+  named,
+  skipParentheses,
+  stringValue,
+  templateFragmentText,
+} from './syntax';
 import {
   anyType,
   errorType,
@@ -31,10 +50,13 @@ import {
   unknownType,
 } from './types';
 import { unionStructure } from './unionMembers';
+import { checkVarianceAnnotations } from './varianceAnnotations';
 import { checkWrittenType } from './writtenTypes';
 
 interface JumpTarget {
   isLoop: boolean;
+  /** The labels naming the statement, which `break` and `continue` with a label jump to. */
+  labels: string[];
   breaks: State[];
   continues: State[];
 }
@@ -50,6 +72,12 @@ export class StatementChecker {
   /** Where each loop checked silently exits, by the loop and its entry state. */
   private readonly silentLoopExits = new Map<string, State[]>();
   private readonly jumpTargets: JumpTarget[] = [];
+  /**
+   * The labels of the loop about to be checked, by the loop, which its jump target takes: a loop its header contains
+   * must not take them.
+   */
+  private readonly pendingLabels = new Map<number, string[]>();
+  private readonly reportedMissingTypes = new Set<string>();
   /** The types of the objects `for...in` loops iterate, by loop. */
   private readonly forInObjectTypes = new Map<number, Type>();
   /** How each kind of statement is checked; the others need no checks. */
@@ -67,14 +95,25 @@ export class StatementChecker {
     ['try_statement', (node) => this.tryStatement(node)],
     ['return_statement', (node) => this.returnStatement(node)],
     ['throw_statement', (node) => this.throwStatement(node)],
-    ['break_statement', () => this.breakStatement()],
-    ['continue_statement', () => this.continueStatement()],
+    ['break_statement', (node) => this.breakStatement(node)],
+    ['continue_statement', (node) => this.continueStatement(node)],
+    ['labeled_statement', (node) => this.labeledStatement(node)],
+    ['with_statement', (node) => this.withStatement(node)],
     ['function_signature', (node) => this.c.functions.checkOverloadImplementation(node)],
     ['function_declaration', (node) => this.c.functions.functionDeclaration(node)],
+    ['generator_function_declaration', (node) => this.c.functions.functionDeclaration(node)],
     ['class_declaration', (node) => this.c.classDeclarations.checkClass(node)],
     ['abstract_class_declaration', (node) => this.c.classDeclarations.checkClass(node)],
     ['interface_declaration', (node) => this.interfaceDeclaration(node)],
     ['type_alias_declaration', (node) => this.typeAliasDeclaration(node)],
+    ['enum_declaration', (node) => this.c.enums.checkDeclaration(node)],
+    ['internal_module', (node) => this.c.namespaces.checkDeclaration(node)],
+    ['module', (node) => this.c.namespaces.checkDeclaration(node)],
+    ['export_statement', (node) => this.exportStatement(node)],
+    ['ambient_declaration', (node) => this.ambientDeclaration(node)],
+    ['import_alias', (node) => this.c.namespaces.checkImportAlias(node)],
+    ['import_statement', (node) => this.c.namespaces.checkImport(node)],
+    ['using_declaration', (node) => this.usingDeclaration(node)],
   ]);
 
   constructor(private readonly c: Checker) {}
@@ -121,10 +160,212 @@ export class StatementChecker {
   private expressionStatement(node: TreeNode): void {
     const expression = named(node)[0];
     if (!expression) return;
+    if (expression.type === 'internal_module') {
+      this.check(expression);
+      return;
+    }
     const type = this.c.expressions.check(expression);
     const call = skipParentheses(expression);
-    if (call.type === 'call_expression' && this.c.expressions.calls.endsFlow(call, type))
-      this.c.flow.current = undefined;
+    if (call.type !== 'call_expression') return;
+    if (this.c.expressions.calls.endsFlow(call, type)) this.c.flow.current = undefined;
+    else this.c.conditions.applyAssertion(call);
+  }
+
+  /**
+   * `using` and `await using`, which need the `Disposable` and `AsyncDisposable` types that the ES2025 library the
+   * reference checks with lacks: tsc reports each missing type once, without a location, here the first declaration's.
+   */
+  private usingDeclaration(node: TreeNode): void {
+    const name = hasToken(node, 'await') ? 'AsyncDisposable' : 'Disposable';
+    if (this.c.silent === 0 && !this.reportedMissingTypes.has(name)) {
+      this.reportedMissingTypes.add(name);
+      this.c.error(node, `グローバル型 '${name}' が見つかりません。`);
+    }
+    for (const declarator of named(node)) {
+      const value = declarator.childForFieldName('value');
+      if (value) this.c.expressions.check(value);
+    }
+  }
+
+  /**
+   * `export`, which checks the declaration or the default value it exports, and that each name `export { ... }`
+   * exports is declared. `export =` is CommonJS's, which tsc rejects in a module of ECMAScript syntax.
+   */
+  private exportStatement(node: TreeNode): void {
+    const declaration = node.childForFieldName('declaration');
+    if (declaration) this.check(declaration);
+    const value = node.childForFieldName('value');
+    const clause = named(node).find((child) => child.type === 'export_clause');
+    const source = node.childForFieldName('source');
+    const assigned = named(node).find((child) => child.type !== 'export_clause' && child.type !== 'comment');
+    this.checkExportTargets(node, { declaration, value, assigned, source });
+    this.checkExportPlacement(node, { declaration, value, clause, source, assigned });
+    this.checkDuplicateExports(node);
+    if (source) {
+      if (!isNamespaceBody(node.parent)) this.c.namespaces.checkReExport(clause, source);
+      return;
+    }
+    if (clause) this.checkLocalExportClause(clause);
+  }
+
+  private checkExportTargets(
+    node: TreeNode,
+    {
+      declaration,
+      value,
+      assigned,
+      source,
+    }: { declaration: TreeNode | null; value: TreeNode | null; assigned: TreeNode | undefined; source: TreeNode | null }
+  ): void {
+    if (value) {
+      if (isInAmbientContext(node)) checkAmbientExportTarget(this.c, value);
+      else this.checkDefaultExportValue(value);
+    }
+    if (!declaration && !value && assigned && !source && !this.c.isModule && isAmbientModuleBody(node.parent)) {
+      checkAmbientExportAssignment(this.c, node, assigned);
+    }
+  }
+
+  private checkDefaultExportValue(value: TreeNode): void {
+    if (value.type === 'identifier' && this.isNonRuntimeDefaultIdentifier(value)) return;
+    this.c.expressions.check(value);
+  }
+
+  private isNonRuntimeDefaultIdentifier(ident: TreeNode): boolean {
+    const scope = this.c.scopeOf(ident);
+    const name = canonicalIdentifier(ident.text, ident);
+    const valueSymbol = scope.lookupValue(name, this.c.budget);
+    if (!valueSymbol) {
+      return Boolean(scope.lookupType(name) ?? scope.lookupNamespace(name, this.c.budget));
+    }
+    if (valueSymbol.unsupported) return false;
+    if (valueSymbol.importTarget?.typeOnly) return true;
+    if (valueSymbol.valueKind === 'import' && this.c.namespaces.isExportedTypeOnlyValue(valueSymbol)) return true;
+    if (valueSymbol.valueKind === 'namespace') return !this.hasRuntimeNamespaceValue(valueSymbol);
+    if (valueSymbol.valueKind === 'importAlias') {
+      const target = this.c.namespaces.imported(valueSymbol, 'value');
+      return !target || (target.valueKind === 'namespace' && !this.hasRuntimeNamespaceValue(target));
+    }
+    return false;
+  }
+
+  private hasRuntimeNamespaceValue(symbol: Sym): boolean {
+    return symbol.valueEntries.some((entry) => entry.kind !== 'namespace') || this.c.namespaces.isInstantiated(symbol);
+  }
+
+  private checkLocalExportClause(clause: TreeNode): void {
+    for (const specifier of named(clause)) {
+      const name = specifier.childForFieldName('name');
+      const scope = name && this.c.scopeOf(name);
+      const localName = name && decodedExportSpecifier(name);
+      if (
+        name &&
+        localName &&
+        !scope?.lookupValue(localName, this.c.budget) &&
+        !scope?.lookupType(localName) &&
+        !scope?.lookupNamespace(localName, this.c.budget)
+      )
+        this.c.error(name, `名前 ${localName} が見つかりません。`);
+    }
+  }
+
+  private checkExportPlacement(
+    node: TreeNode,
+    {
+      declaration,
+      value,
+      clause,
+      source,
+      assigned,
+    }: {
+      declaration: TreeNode | null;
+      value: TreeNode | null;
+      clause: TreeNode | undefined;
+      source: TreeNode | null;
+      assigned: TreeNode | undefined;
+    }
+  ): void {
+    const inNamespace = isNamespaceBody(node.parent);
+    if (this.c.isModule && isAmbientModuleBody(node.parent) && (!declaration || hasToken(node, 'default'))) {
+      this.c.error(node, 'エクスポートとエクスポートの代入はモジュールの拡張では許可されていません。');
+      return;
+    }
+    if (node.parent?.type !== 'program' && !isAmbientModuleBody(node.parent) && !inNamespace) {
+      this.c.error(node, 'エクスポート宣言は、名前空間またはモジュールの最上位レベルでのみ使用できます。');
+      return;
+    }
+    if (!declaration && !value && assigned && !source && !isAmbientModuleBody(node.parent)) {
+      this.c.error(
+        node,
+        inNamespace
+          ? 'エクスポートの代入は、名前空間では使用できません。'
+          : "ECMAScript モジュールを対象にするときは、エクスポートの代入は使えません。'export default' か別のモジュール形式を使ってください。"
+      );
+      return;
+    }
+    if (inNamespace) this.checkNamespaceExportForm(node, clause, source);
+  }
+
+  private checkNamespaceExportForm(node: TreeNode, clause: TreeNode | undefined, source: TreeNode | null): void {
+    if (hasToken(node, 'default'))
+      this.c.error(node, '既定のエクスポートは、ECMAScript スタイルのモジュールでのみ使用できます。');
+    else if ((clause && (!isAmbient(node) || source !== null)) || (!clause && source !== null))
+      this.c.error(node, 'エクスポート宣言は名前空間でサポートされません。');
+  }
+
+  /**
+   * Reports a name that the module exports more than once, as tsc does, where a default or an `export { ... }` name
+   * takes part: declarations exported twice are reported as redeclarations, and a clause that names a type, enum,
+   * or namespace exported by its declaration only at the clause.
+   */
+  private checkDuplicateExports(node: TreeNode): void {
+    if (node.parent?.type !== 'program') return;
+    const all = named(node.parent)
+      .filter((child) => child.type === 'export_statement')
+      .flatMap(exportedNames);
+    const scope = this.c.scopeOf(node);
+    for (const own of exportedNames(node)) {
+      const others = all.filter((other) => other.name === own.name && other.site.id !== own.site.id);
+      const message = duplicateExportMessage(this.c, scope, own, others);
+      if (message) this.c.error(own.site, message);
+    }
+  }
+
+  /** `declare global` augments the globals only directly inside an external or ambient module. */
+  private ambientDeclaration(node: TreeNode): void {
+    const alreadyAmbient = this.reportRedundantAmbientModifier(node);
+    const validContainer = isValidAmbientDeclarationContainer(node);
+    for (const child of named(node)) {
+      if (child.type === 'statement_block') {
+        if (!isDirectGlobalAugmentationContainer(node, this.c.isModule))
+          this.c.error(node, globalAugmentationPlacementMessage(node));
+        else this.checkAmbientBodyStatements(child);
+      } else if (isCheckedAmbientDeclaration(child)) {
+        if (!alreadyAmbient && !validContainer && !isModuleOrNamespaceDeclaration(child))
+          this.c.error(node, 'ここで修飾子を使用することはできません。');
+        this.check(child);
+      }
+    }
+  }
+
+  private reportRedundantAmbientModifier(node: TreeNode): boolean {
+    if (!isInAmbientContext(node)) return false;
+    this.c.error(
+      node,
+      node.parent?.type === 'ambient_declaration'
+        ? "'declare' 修飾子は既に存在します。"
+        : "'declare' 修飾子は、環境コンテキストでは使用できません。"
+    );
+    return true;
+  }
+
+  checkAmbientBodyStatements(body: TreeNode): void {
+    const valid: TreeNode[] = [];
+    for (const child of named(body)) {
+      if (isCheckedAmbientDeclaration(child)) valid.push(child);
+      else this.c.error(child, 'ステートメントは環境コンテキストでは使用できません。');
+    }
+    this.checkBlockStatements(valid);
   }
 
   private throwStatement(node: TreeNode): void {
@@ -133,16 +374,51 @@ export class StatementChecker {
     this.c.flow.current = undefined;
   }
 
-  private breakStatement(): void {
-    const target = this.jumpTargets.at(-1);
+  private breakStatement(node: TreeNode): void {
+    const label = jumpLabel(node);
+    const target =
+      label === undefined
+        ? this.jumpTargets.findLast((candidate) => candidate.isLoop || candidate.labels.length === 0)
+        : this.jumpTargets.findLast((candidate) => candidate.labels.includes(label));
     target?.breaks.push(this.c.flow.current?.clone());
     this.c.flow.current = undefined;
   }
 
-  private continueStatement(): void {
-    const target = this.jumpTargets.findLast((candidate) => candidate.isLoop);
+  private continueStatement(node: TreeNode): void {
+    const label = jumpLabel(node);
+    const target = this.jumpTargets.findLast(
+      (candidate) => candidate.isLoop && (label === undefined || candidate.labels.includes(label))
+    );
     target?.continues.push(this.c.flow.current?.clone());
     this.c.flow.current = undefined;
+  }
+
+  /** tsc rejects `with` in strict mode code, and leaves its body unchecked, as every name there has type `any`. */
+  private withStatement(node: TreeNode): void {
+    this.c.error(node, "'with' 文は Strict モードでは使えません。");
+    this.c.error(
+      node,
+      "'with' 文はサポートされていません。'with' ブロック内のすべてのシンボルの型は 'any' になります。"
+    );
+  }
+
+  /** A labeled loop takes its labels; any other labeled statement is a target that only `break` jumps out of. */
+  private labeledStatement(node: TreeNode): void {
+    const { labels, body } = labeledBody(node);
+    if (!body) return;
+    if (loopStatementTypes.has(body.type)) {
+      this.pendingLabels.set(body.id, labels);
+      this.checkSubstatement(body);
+      return;
+    }
+    const target: JumpTarget = { isLoop: false, labels, breaks: [], continues: [] };
+    this.jumpTargets.push(target);
+    try {
+      this.checkSubstatement(body);
+    } finally {
+      this.jumpTargets.pop();
+    }
+    this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.breaks]);
   }
 
   private typeAliasDeclaration(node: TreeNode): void {
@@ -151,6 +427,7 @@ export class StatementChecker {
     this.c.signatures.typeParametersOf(node);
     if (symbol) this.c.typeNodes.declaredTypeOf(symbol);
     checkWrittenType(this.c, node.childForFieldName('value'));
+    checkVarianceAnnotations(this.c, node);
   }
 
   private interfaceDeclaration(node: TreeNode): void {
@@ -167,6 +444,7 @@ export class StatementChecker {
     if (type.kind === 'object') this.checkInterfaceMembers(node, symbol, type.resolve());
     for (const child of named(node)) if (child.type === 'extends_type_clause') checkWrittenType(this.c, child);
     checkWrittenType(this.c, node.childForFieldName('body'));
+    checkVarianceAnnotations(this.c, node);
   }
 
   private checkInterfaceMembers(node: TreeNode, symbol: Sym, structure: Structure): void {
@@ -261,6 +539,8 @@ export class StatementChecker {
       if (declarator.type !== 'variable_declarator') continue;
       checkWrittenType(this.c, declarator.childForFieldName('type'));
       const nameNode = declarator.childForFieldName('name') as TreeNode;
+      if (isAmbient(declarator))
+        checkAmbientInitializer(this.c, declarator, kind === 'const' && nameNode.type === 'identifier');
       if (nameNode.type === 'identifier') this.variableDeclarator(declarator, nameNode, kind);
       else this.patternDeclarator(declarator, nameNode, kind === 'const');
     }
@@ -280,7 +560,10 @@ export class StatementChecker {
       return;
     }
     const key = `s${symbol.id}`;
-    const valueType = this.c.expressions.checkAssignedValue(value, annotation);
+    const { result: valueType, yields } = this.c.functions.collectImplicitYields(() =>
+      this.c.expressions.checkAssignedValue(value, annotation)
+    );
+    this.c.functions.recordDeclaredVariableYields(symbol, annotation !== undefined, yields);
     if (annotation) this.c.expressions.checkAssignable(nameNode, valueType, annotation, value);
     if (!annotation && isDirectEmptyArray(value)) {
       // `const a = []` evolves as elements are pushed.
@@ -293,7 +576,10 @@ export class StatementChecker {
     const type =
       !annotation && isConst ? this.c.expressions.expandos.constType(declarator, symbol, declared) : declared;
     this.c.expressions.setVariableType(symbol, this.c.assignments.isAutoTyped(symbol) ? anyType : type);
-    const flowType = annotation || valueType.kind === 'literal' ? this.c.flow.assignmentReduced(type, valueType) : type;
+    // A `let` starts as the members of its declared type that its initializer can be, as tsc reduces it.
+    const isReduced =
+      annotation !== undefined || valueType.kind === 'literal' || (valueType.kind === 'union' && !isConst);
+    const flowType = isReduced ? this.c.flow.assignmentReduced(type, valueType) : type;
     this.c.flow.set(key, { type: flowType, assigned: true });
   }
 
@@ -301,7 +587,9 @@ export class StatementChecker {
   private redeclaredVariable(declarator: TreeNode, symbol: Sym, annotation: Type | undefined): void {
     const value = declarator.childForFieldName('value');
     if (!value) return;
-    const valueType = this.c.expressions.check(value, annotation);
+    const { result: valueType, yields } = this.c.functions.collectImplicitYields(() =>
+      this.c.expressions.check(value, annotation)
+    );
     if (annotation)
       this.c.expressions.checkAssignable(
         declarator.childForFieldName('name') as TreeNode,
@@ -310,15 +598,26 @@ export class StatementChecker {
         value
       );
     const declared = this.c.expressions.valueTypeOf(symbol);
-    this.c.assignments.assignReference(declarator.childForFieldName('name') as TreeNode, declared, valueType);
+    this.c.assignments.assignReference(
+      declarator.childForFieldName('name') as TreeNode,
+      declared,
+      valueType,
+      true,
+      yields
+    );
   }
 
   private uninitializedVariable(declarator: TreeNode, symbol: Sym, kind: string, annotation: Type | undefined): void {
     if (kind === 'const') return;
     const key = `s${symbol.id}`;
     if (!annotation) {
-      // `let x;` follows the types assigned to it, starting as `undefined`.
       this.c.expressions.setVariableType(symbol, anyType);
+      if (!this.c.assignments.isAutoTyped(symbol)) {
+        const name = declarator.childForFieldName('name') as TreeNode;
+        this.c.error(name, `変数 ${symbol.name} の型が暗黙に any になります。`);
+        return;
+      }
+      // `let x;` follows the types assigned to it, starting as `undefined`.
       this.c.flow.set(key, { type: undefinedType, assigned: kind === 'var' });
       return;
     }
@@ -332,7 +631,10 @@ export class StatementChecker {
     const value = declarator.childForFieldName('value');
     const annotation = this.c.typeNodes.annotationType(declarator.childForFieldName('type'));
     const implied = annotation ? undefined : this.c.patterns.impliedBindingType(pattern, isConst);
-    const valueType = value ? this.c.expressions.check(value, annotation ?? implied) : (annotation ?? anyType);
+    const collected = value
+      ? this.c.functions.collectImplicitYields(() => this.c.expressions.check(value, annotation ?? implied))
+      : undefined;
+    const valueType = collected ? collected.result : (annotation ?? anyType);
     if (annotation && value) this.c.expressions.checkAssignable(pattern, valueType, annotation);
     const sourceType = annotation ?? valueType;
     if (isConst) this.c.patterns.correlatedSources.set(pattern.id, sourceType);
@@ -342,7 +644,8 @@ export class StatementChecker {
       (identifier, type, assigned = type) => {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (!symbol) return;
-        const declared = this.c.literals.widenDeclared(type, isConst);
+        this.c.functions.recordDeclaredVariableYields(symbol, annotation !== undefined, collected?.yields);
+        const declared = this.c.literals.widenDeclared(type, true);
         this.c.expressions.setVariableType(symbol, declared);
         this.c.flow.set(`s${symbol.id}`, { type: this.c.flow.assignmentReduced(declared, assigned), assigned: true });
       },
@@ -354,6 +657,10 @@ export class StatementChecker {
   /** The type of a variable from its declaration, computed ahead of its statement when used earlier. */
   declaredVariableType(symbol: Sym, declaration: TreeNode): Type {
     if (declaration.type === 'for_in_statement') return this.loopVariableType(declaration, symbol);
+    if (declaration.type === 'export_statement') {
+      const exportedValue = declaration.childForFieldName('value');
+      return exportedValue ? this.c.expressions.check(exportedValue) : anyType;
+    }
     if (declaration.type !== 'variable_declarator') return anyType;
     const nameNode = declaration.childForFieldName('name') as TreeNode;
     const annotation = this.c.typeNodes.annotationType(declaration.childForFieldName('type'));
@@ -375,7 +682,7 @@ export class StatementChecker {
       annotation ??
       (value ? this.c.expressions.check(value, this.c.patterns.impliedBindingType(nameNode, isConst)) : anyType);
     const type = this.c.patterns.patternType(nameNode, source, symbol, { isConst, annotated: !!annotation });
-    return this.c.literals.widenDeclared(type, isConst);
+    return this.c.literals.widenDeclared(type, true);
   }
 
   private loopVariableType(node: TreeNode, symbol: Sym): Type {
@@ -385,12 +692,15 @@ export class StatementChecker {
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const isConst = header.childForFieldName('kind')?.text === 'const';
     const rightType = this.c.expressions.check(right);
-    const elementType = isOf ? this.iteratedLoopType(right, rightType, false) : stringType;
-    if (left.type === 'identifier') return elementType;
-    return this.c.patterns.patternType(left, elementType, symbol, {
-      isConst,
-      literalSource: isOf ? right : undefined,
-    });
+    const elementType = isOf ? this.iteratedLoopType(node, right, rightType, false) : stringType;
+    if (left.type === 'identifier') return this.c.literals.widenDeclared(elementType, true);
+    return this.c.literals.widenDeclared(
+      this.c.patterns.patternType(left, elementType, symbol, {
+        isConst,
+        literalSource: isOf ? right : undefined,
+      }),
+      true
+    );
   }
 
   // Control flow -------------------------------------------------------------------------------------------------
@@ -427,10 +737,12 @@ export class StatementChecker {
    * @param iterate Runs one iteration from the current state and returns the state where the loop exits from it.
    */
   private loop(node: TreeNode, iterate: (target: JumpTarget) => State): void {
+    const labels = this.pendingLabels.get(node.id) ?? [];
+    this.pendingLabels.delete(node.id);
     const entry = this.c.flow.current;
     let stateKey = this.stateKey(entry);
     // An enclosing loop's silent passes check this loop once each; the same entry state leaves it the same way.
-    const key = this.c.silent > 0 ? `${node.id}:${stateKey}` : undefined;
+    const key = this.c.silent > 0 && !this.c.functions.isTrackingReturnYields() ? `${node.id}:${stateKey}` : undefined;
     const known = key === undefined ? undefined : this.silentLoopExits.get(key);
     if (known) {
       this.c.flow.current = this.c.flow.merge(known);
@@ -439,7 +751,7 @@ export class StatementChecker {
     let state = entry?.clone();
     let settled: State[] | undefined;
     for (let pass = 1; ; pass++) {
-      const { exits, backEdge } = this.c.silently(() => this.loopPass(state, iterate));
+      const { exits, backEdge } = this.c.silently(() => this.loopPass(state, iterate, labels));
       const next = this.c.flow.merge([entry, backEdge]);
       const nextKey = this.stateKey(next);
       if (nextKey === stateKey) {
@@ -454,14 +766,18 @@ export class StatementChecker {
       stateKey = nextKey;
     }
     // Checking silently already, the pass that settled the loop is the one that would report errors.
-    const exits = settled && this.c.silent > 0 ? settled : this.loopPass(state, iterate).exits;
+    const exits = settled && this.c.silent > 0 ? settled : this.loopPass(state, iterate, labels).exits;
     if (key !== undefined) this.silentLoopExits.set(key, exits);
     this.c.flow.current = this.c.flow.merge(exits);
   }
 
   /** Runs a loop's iteration once from `state`, and returns where it exits and the state its back edge brings. */
-  private loopPass(state: State, iterate: (target: JumpTarget) => State): { exits: State[]; backEdge: State } {
-    const target: JumpTarget = { isLoop: true, breaks: [], continues: [] };
+  private loopPass(
+    state: State,
+    iterate: (target: JumpTarget) => State,
+    labels: string[]
+  ): { exits: State[]; backEdge: State } {
+    const target: JumpTarget = { isLoop: true, labels, breaks: [], continues: [] };
     this.c.flow.current = state?.clone();
     this.jumpTargets.push(target);
     try {
@@ -474,8 +790,17 @@ export class StatementChecker {
 
   private stateKey(state: State): string {
     if (!state) return '-';
-    const entries = [...state.entries].map(([reference, { type, writeType, assigned, constraint, evolving }]) =>
-      JSON.stringify([reference, type.id, writeType?.id, assigned, constraint?.id, evolving === true])
+    const entries = [...state.entries].map(
+      ([reference, { type, writeType, assigned, constraint, evolving, yieldDeps }]) =>
+        JSON.stringify([
+          reference,
+          type.id,
+          writeType?.id,
+          assigned,
+          constraint?.id,
+          evolving === true,
+          yieldDeps ? [...yieldDeps].toSorted((a, b) => a - b) : undefined,
+        ])
     );
     return JSON.stringify([entries.toSorted(), [...state.assignedFields].toSorted(), state.superCalled, state.dead]);
   }
@@ -543,14 +868,17 @@ export class StatementChecker {
     const right = header.childForFieldName('right') as TreeNode;
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const kind = header.childForFieldName('kind')?.text;
-    const rightType = this.c.expressions.check(right);
+    const { result: rightType, yields: rightYields } = this.c.functions.collectImplicitYields(() =>
+      this.c.expressions.check(right)
+    );
+    if (hasToken(node, 'await')) checkAwaitPlace(this.c, node, true);
     const elementType = this.loopElementType(node, rightType);
     if (!isOf) this.forInObjectTypes.set(node.id, rightType);
     const body = node.childForFieldName('body') as TreeNode;
     this.loop(node, (target) => {
       const head = this.c.flow.current?.clone();
-      if (kind) this.bindLoopVariables(left, kind, elementType, isOf ? right : undefined);
-      else this.assignLoopVariables(left, elementType);
+      if (kind) this.bindLoopVariables(left, kind, elementType, isOf ? right : undefined, rightYields);
+      else this.assignLoopVariables(left, elementType, rightYields);
       this.checkSubstatement(body);
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
       return this.c.flow.merge([head, this.c.flow.current]);
@@ -561,12 +889,14 @@ export class StatementChecker {
     const header = node.childForFieldName('header') ?? node;
     const right = header.childForFieldName('right') as TreeNode;
     return header.childForFieldName('operator')?.text === 'of'
-      ? this.iteratedLoopType(right, rightType, true)
+      ? this.iteratedLoopType(node, right, rightType, true)
       : this.forInKeyType(right, rightType);
   }
 
-  private iteratedLoopType(right: TreeNode, rightType: Type, reportErrors: boolean): Type {
-    const element = this.c.patterns.iteratedType(reportErrors ? right : undefined, rightType);
+  private iteratedLoopType(loop: TreeNode, right: TreeNode, rightType: Type, reportErrors: boolean): Type {
+    const element = hasToken(loop, 'await')
+      ? this.c.patterns.asyncIteratedType(reportErrors ? right : undefined, rightType, 'loop')
+      : this.c.patterns.iteratedType(reportErrors ? right : undefined, rightType, 'loop');
     return this.c.literals.inlineBindingType(element, right);
   }
 
@@ -646,30 +976,38 @@ export class StatementChecker {
   }
 
   /** Declares the variables of a loop's `const`, `let`, or `var` head. */
-  private bindLoopVariables(left: TreeNode, kind: string, elementType: Type, literalSource?: TreeNode): void {
+  private bindLoopVariables(
+    left: TreeNode,
+    kind: string,
+    elementType: Type,
+    literalSource?: TreeNode,
+    yieldDeps?: Set<number>
+  ): void {
     const isConst = kind === 'const';
     this.c.patterns.bindPattern(
       left,
       elementType,
-      (identifier, type) => {
+      (identifier, type, assigned = type) => {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (!symbol) return;
-        this.c.expressions.setVariableType(symbol, isConst ? type : this.c.widen(type));
-        this.c.flow.set(`s${symbol.id}`, { type, assigned: true });
+        this.c.functions.recordDeclaredVariableYields(symbol, false, yieldDeps);
+        const declared = this.c.literals.widenDeclared(type, true);
+        this.c.expressions.setVariableType(symbol, declared);
+        this.c.flow.set(`s${symbol.id}`, { type: this.c.flow.assignmentReduced(declared, assigned), assigned: true });
       },
       { isConst, literalSource }
     );
   }
 
   /** Assigns the existing variables a loop's head without a declaration names. */
-  private assignLoopVariables(left: TreeNode, elementType: Type): void {
+  private assignLoopVariables(left: TreeNode, elementType: Type, yieldDeps?: ReadonlySet<number>): void {
     if (left.type === 'array_pattern' || left.type === 'object_pattern') {
-      this.c.assignments.destructuringAssignment(left, elementType);
+      this.c.assignments.destructuringAssignment(left, elementType, undefined, yieldDeps);
       return;
     }
     const declared = this.c.assignments.targetType(left, false);
     if (declared !== errorType) this.c.expressions.checkAssignable(left, elementType, declared);
-    this.c.assignments.assignReference(left, declared, elementType);
+    this.c.assignments.assignReference(left, declared, elementType, true, yieldDeps);
   }
 
   private switchStatement(node: TreeNode): void {
@@ -677,7 +1015,7 @@ export class StatementChecker {
     const body = node.childForFieldName('body') as TreeNode;
     const cases = named(body).filter((child) => child.type === 'switch_case' || child.type === 'switch_default');
     const { caseEntries, noMatch, exhaustive } = this.switchCaseEntries(discriminant, cases);
-    const target: JumpTarget = { isLoop: false, breaks: [], continues: [] };
+    const target: JumpTarget = { isLoop: false, labels: [], breaks: [], continues: [] };
     this.jumpTargets.push(target);
     let fallthrough: State;
     try {
@@ -853,6 +1191,7 @@ export class StatementChecker {
     const context = this.c.functions.contexts.at(-1);
     const expression = named(node)[0];
     if (!context) {
+      this.c.error(node, "'return' ステートメントは、関数本体でのみ使用できます。");
       if (expression) this.c.expressions.check(expression);
       this.c.flow.current = undefined;
       return;
@@ -860,7 +1199,7 @@ export class StatementChecker {
     if (expression) {
       const declared = context.isConstructor ? this.constructorInstanceType(context.node) : context.declaredReturn;
       context.inReturn = true;
-      const type = this.c.expressions.check(expression, declared ?? context.contextualReturn);
+      const type = this.returnedType(node, expression, context, declared);
       context.inReturn = false;
       if (hasToken(context.node, 'set')) {
         this.c.error(node, 'set アクセサーは値を返せません。');
@@ -873,6 +1212,18 @@ export class StatementChecker {
     } else this.returnWithoutValue(node, context);
     context.returnStates.push(this.c.flow.current?.clone());
     this.c.flow.current = undefined;
+  }
+
+  /** The type a `return` gives, where an async function returns what a promise it returns fulfills with. */
+  private returnedType(
+    returnNode: TreeNode,
+    expression: TreeNode,
+    context: FunctionContext,
+    declared: Type | undefined
+  ): Type {
+    const contextual = this.c.functions.returnExpressionContext(context, declared ?? context.contextualReturn);
+    const checked = this.c.expressions.check(expression, contextual);
+    return context.isAsync ? this.c.functions.awaitedReturnExpression(returnNode, checked, context) : checked;
   }
 
   private returnWithoutValue(node: TreeNode, context: FunctionContext): void {
@@ -953,4 +1304,218 @@ function literalTypeofName(node: TreeNode): string | undefined {
   const parts = named(node);
   if (parts.some((part) => part.type === 'template_substitution')) return undefined;
   return parts.map((part) => templateFragmentText(part)).join('');
+}
+
+/** The declarations whose own row tsc reports when an `export { ... }` exports their name again. */
+const valueDeclarationTypes = new Set([
+  'lexical_declaration',
+  'variable_declaration',
+  'function_declaration',
+  'generator_function_declaration',
+  'class_declaration',
+  'abstract_class_declaration',
+]);
+
+interface ExportedNameEntry {
+  name: string;
+  site: TreeNode;
+  declaration?: TreeNode;
+  specifier?: TreeNode;
+  namespaceExport?: TreeNode;
+  source?: TreeNode;
+  stmtTypeOnly?: boolean;
+}
+
+const defaultMergeableTypes = new Set([
+  'interface_declaration',
+  'class_declaration',
+  'abstract_class_declaration',
+  'function_declaration',
+  'generator_function_declaration',
+]);
+
+function duplicateExportMessage(
+  c: Checker,
+  scope: Scope,
+  own: ExportedNameEntry,
+  others: ExportedNameEntry[]
+): string | undefined {
+  if (others.length === 0) return undefined;
+  if (own.name === 'default') {
+    return canMergeDefaultExports(c, scope, [own, ...others])
+      ? undefined
+      : 'モジュールに複数の既定のエクスポートを含めることはできません。';
+  }
+  const conflicting = others.filter((other) => exportEntriesConflict(c, scope, own, other));
+  if (conflicting.length === 0) return undefined;
+  if (own.declaration && !valueDeclarationTypes.has(own.declaration.type)) return undefined;
+  return own.declaration || conflicting.some((other) => other.declaration)
+    ? `エクスポートされた変数 '${own.name}' を再宣言することはできません。`
+    : `識別子 '${own.name}' が重複しています。`;
+}
+
+function exportEntriesConflict(c: Checker, scope: Scope, a: ExportedNameEntry, b: ExportedNameEntry): boolean {
+  if (a.declaration && b.declaration) return false;
+  if (!a.declaration && !b.declaration) return true;
+  const decl = (a.declaration ?? b.declaration) as TreeNode;
+  const clause = a.declaration ? b : a;
+  if (decl.type === 'interface_declaration' || decl.type === 'type_alias_declaration') {
+    return clauseExportsType(c, scope, clause);
+  }
+  if ((decl.type === 'internal_module' || decl.type === 'module') && !isInstantiatedExportedNamespace(c, scope, decl)) {
+    return Boolean(clause.namespaceExport) || clauseExportsNamespace(c, scope, clause);
+  }
+  return true;
+}
+
+function isInstantiatedExportedNamespace(c: Checker, scope: Scope, decl: TreeNode): boolean {
+  const name = decl.childForFieldName('name');
+  if (!name || name.type === 'string') return true;
+  const symbol = scope.lookupNamespace(canonicalIdentifier(name.text, name), c.budget);
+  return Boolean(
+    symbol && (symbol.valueEntries.some((entry) => entry.kind !== 'namespace') || c.namespaces.isInstantiated(symbol))
+  );
+}
+
+function clauseExportsType(c: Checker, scope: Scope, clause: ExportedNameEntry): boolean {
+  if (clause.namespaceExport) return false;
+  const nameNode = clause.specifier?.childForFieldName('name');
+  if (!nameNode) return false;
+  const sourceName = decodedExportSpecifier(nameNode);
+  if (!clause.source) return Boolean(scope.lookupType(sourceName));
+  const exports = reExportTargetExports(c, clause.source);
+  return Boolean(exports?.types.has(sourceName));
+}
+
+function clauseExportsNamespace(c: Checker, scope: Scope, clause: ExportedNameEntry): boolean {
+  if (clause.namespaceExport) return true;
+  const nameNode = clause.specifier?.childForFieldName('name');
+  if (!nameNode) return false;
+  const sourceName = decodedExportSpecifier(nameNode);
+  if (!clause.source) return Boolean(scope.lookupNamespace(sourceName, c.budget));
+  const exports = reExportTargetExports(c, clause.source);
+  return Boolean(exports?.namespaces.has(sourceName));
+}
+
+function canMergeDefaultExports(c: Checker, scope: Scope, entries: ExportedNameEntry[]): boolean {
+  let inlineValueCount = 0;
+  const clauses: ExportedNameEntry[] = [];
+  for (const entry of entries) {
+    if (entry.specifier || entry.namespaceExport) {
+      clauses.push(entry);
+      continue;
+    }
+    if (!entry.declaration || !defaultMergeableTypes.has(entry.declaration.type)) return false;
+    if (entry.declaration.type !== 'interface_declaration') inlineValueCount++;
+  }
+  if (clauses.length === 0) return inlineValueCount <= 1;
+  return clauses.length === 1 && inlineValueCount === 0 && isPureValueDefaultClause(c, scope, clauses[0]);
+}
+
+function isPureValueDefaultClause(c: Checker, scope: Scope, clause: ExportedNameEntry): boolean {
+  if (clause.stmtTypeOnly) return false;
+  if (clause.namespaceExport) return true;
+  const specifier = clause.specifier;
+  if (!specifier || hasToken(specifier, 'type')) return false;
+  const nameNode = specifier.childForFieldName('name');
+  if (!nameNode) return false;
+  const sourceName = decodedExportSpecifier(nameNode);
+  if (!clause.source) {
+    if (scope.lookupType(sourceName)) return false;
+    return Boolean(scope.lookupValue(sourceName) ?? scope.lookupNamespace(sourceName));
+  }
+  const module = c.namespaces.moduleNamed(stringValue(clause.source));
+  if (!module) return false;
+  const exports = reExportTargetExports(c, clause.source);
+  if (exports?.types.has(sourceName)) return false;
+  if (sourceName === 'default' && c.libraryBinder.ambientModules.get(module.name) === module) return true;
+  return Boolean(exports?.values.has(sourceName) || exports?.namespaces.has(sourceName));
+}
+
+function reExportTargetExports(c: Checker, source: TreeNode): Scope | undefined {
+  const module = c.namespaces.moduleNamed(stringValue(source));
+  if (!module) return undefined;
+  const target = module.exportEquals ? c.namespaces.exportEqualsContainerOf(module) : module;
+  return target?.namespaceExports;
+}
+
+export function globalAugmentationPlacementMessage(node: TreeNode): string {
+  const owner = node.parent?.type === 'statement_block' ? node.parent.parent : undefined;
+  return node.parent?.type === 'program' || owner?.type === 'internal_module' || owner?.type === 'module'
+    ? 'グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。'
+    : 'アンビエント モジュール宣言は、ファイルの最上位にのみ使用できます。';
+}
+
+function isValidAmbientDeclarationContainer(node: TreeNode): boolean {
+  const container = node.parent?.type === 'export_statement' ? node.parent.parent : node.parent;
+  return (
+    container?.type === 'program' ||
+    isNamespaceBody(container) ||
+    isAmbientModuleBody(container) ||
+    (container?.type === 'statement_block' && isAmbient(container))
+  );
+}
+
+function isModuleOrNamespaceDeclaration(node: TreeNode): boolean {
+  const inner = node.type === 'expression_statement' ? named(node)[0] : node;
+  return inner?.type === 'internal_module' || inner?.type === 'module';
+}
+
+function isInAmbientContext(node: TreeNode): boolean {
+  for (let current = node.parent; current; current = current.parent) {
+    if (current.type === 'ambient_declaration') return true;
+    if (
+      (current.type === 'module' || current.type === 'internal_module') &&
+      current.childForFieldName('name')?.type === 'string'
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The names an export statement exports, with the node naming each and the declaration declaring it, if any. An
+ * overload signature exports nothing of its own: its implementation exports the name.
+ */
+function exportedNames(node: TreeNode): ExportedNameEntry[] {
+  const declaration = node.childForFieldName('declaration') ?? undefined;
+  if (declaration?.type === 'function_signature') return [];
+  const source = node.childForFieldName('source') ?? undefined;
+  const stmtTypeOnly = hasToken(node, 'type');
+  if (source) return reExportedNames(node, source, stmtTypeOnly);
+  if (node.children.some((child) => child?.type === 'default'))
+    return [{ name: 'default', site: node.childForFieldName('value') ?? declaration ?? node, declaration }];
+  if (declaration)
+    return declaredNames(declaration).map((name) => ({
+      name: canonicalIdentifier(name.text, name),
+      site: name,
+      declaration,
+    }));
+  const clause = named(node).find((child) => child.type === 'export_clause');
+  return (clause ? named(clause) : []).flatMap((specifier) => {
+    const exported = specifier.childForFieldName('alias') ?? specifier.childForFieldName('name');
+    return exported ? [{ name: decodedExportSpecifier(exported), site: exported, specifier, stmtTypeOnly }] : [];
+  });
+}
+
+function reExportedNames(node: TreeNode, source: TreeNode, stmtTypeOnly: boolean): ExportedNameEntry[] {
+  const nsExport = named(node).find((child) => child.type === 'namespace_export');
+  if (nsExport) {
+    const alias = named(nsExport)[0];
+    return alias
+      ? [{ name: decodedExportSpecifier(alias), site: alias, namespaceExport: nsExport, source, stmtTypeOnly }]
+      : [];
+  }
+  const clause = named(node).find((child) => child.type === 'export_clause');
+  return (clause ? named(clause) : []).flatMap((specifier) => {
+    const exported = specifier.childForFieldName('alias') ?? specifier.childForFieldName('name');
+    return exported
+      ? [{ name: decodedExportSpecifier(exported), site: exported, specifier, source, stmtTypeOnly }]
+      : [];
+  });
+}
+
+function decodedExportSpecifier(node: TreeNode): string {
+  return node.type === 'string' ? stringValue(node) : canonicalIdentifier(node.text, node);
 }

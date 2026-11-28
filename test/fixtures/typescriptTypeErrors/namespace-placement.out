@@ -1,0 +1,2 @@
+(1,16): error TS1235: A namespace declaration is only allowed at the top level of a namespace or module.
+(2,13): error TS1235: A namespace declaration is only allowed at the top level of a namespace or module.

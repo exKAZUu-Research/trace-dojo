@@ -1,0 +1,5 @@
+const total = 1;
+export { total };
+export { total };
+export default total;
+export default 2;

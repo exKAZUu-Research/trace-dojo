@@ -1,0 +1,5 @@
+(1,10): error TS2452: An enum member cannot have a numeric name.
+(2,10): error TS2452: An enum member cannot have a numeric name.
+(2,22): error TS1061: Enum member must have initializer.
+(3,10): error TS2452: An enum member cannot have a numeric name.
+(5,37): error TS2452: An enum member cannot have a numeric name.

@@ -1,5 +1,5 @@
-// Declarations from the ECMAScript library files of TypeScript 7.0.2 (`lib.es5.d.ts` through `lib.es2025.*.d.ts`), with
-// comments, typed arrays, and `Intl` removed.
+// Declarations from the ECMAScript library files of TypeScript 7.0.2 (`lib.es5.d.ts` through `lib.es2025.*.d.ts`, and
+// `lib.decorators*.d.ts`), with comments, typed arrays, `Intl`, and `Proxy` removed.
 // Copyright (c) Microsoft Corporation. Licensed under the Apache License, Version 2.0.
 // oxfmt-ignore
 export const ECMASCRIPT_LIBRARY = `
@@ -244,7 +244,7 @@ interface DateConstructor {
     (): string;
     readonly prototype: Date;
     parse(s: string): number;
-    UTC(year: number, monthIndex: number, date?: number, hours?: number, minutes?: number, seconds?: number, ms?: number): number;
+    UTC(year: number, monthIndex?: number, date?: number, hours?: number, minutes?: number, seconds?: number, ms?: number): number;
     now(): number;
 }
 declare var Date: DateConstructor;
@@ -1239,6 +1239,157 @@ interface IteratorObject<T, TReturn, TNext> {
         find(predicate: (value: T, index: number) => unknown): T | undefined;
         readonly [Symbol.toStringTag]: string;
     }
+interface AsyncIterator<T, TReturn = any, TNext = any> {
+    next(...[value]: [] | [TNext]): Promise<IteratorResult<T, TReturn>>;
+    return?(value?: TReturn | PromiseLike<TReturn>): Promise<IteratorResult<T, TReturn>>;
+    throw?(e?: any): Promise<IteratorResult<T, TReturn>>;
+}
+interface AsyncIterable<T, TReturn = any, TNext = any> {
+    [Symbol.asyncIterator](): AsyncIterator<T, TReturn, TNext>;
+}
+interface AsyncIterableIterator<T, TReturn = any, TNext = any> extends AsyncIterator<T, TReturn, TNext> {
+    [Symbol.asyncIterator](): AsyncIterableIterator<T, TReturn, TNext>;
+}
+interface AsyncIteratorObject<T, TReturn = unknown, TNext = unknown> extends AsyncIterator<T, TReturn, TNext> {
+    [Symbol.asyncIterator](): AsyncIteratorObject<T, TReturn, TNext>;
+}
+interface AsyncGenerator<T = unknown, TReturn = any, TNext = any> extends AsyncIteratorObject<T, TReturn, TNext> {
+    next(...[value]: [] | [TNext]): Promise<IteratorResult<T, TReturn>>;
+    return(value: TReturn | PromiseLike<TReturn>): Promise<IteratorResult<T, TReturn>>;
+    throw(e: any): Promise<IteratorResult<T, TReturn>>;
+    [Symbol.asyncIterator](): AsyncGenerator<T, TReturn, TNext>;
+}
+interface AsyncGeneratorFunction {
+    new (...args: any[]): AsyncGenerator;
+    (...args: any[]): AsyncGenerator;
+    readonly length: number;
+    readonly name: string;
+    readonly prototype: AsyncGenerator;
+}
+interface AsyncGeneratorFunctionConstructor {
+    new (...args: string[]): AsyncGeneratorFunction;
+    (...args: string[]): AsyncGeneratorFunction;
+    readonly length: number;
+    readonly name: string;
+    readonly prototype: AsyncGeneratorFunction;
+}
+interface PromiseWithResolvers<T> {
+    promise: Promise<T>;
+    resolve: (value: T | PromiseLike<T>) => void;
+    reject: (reason?: any) => void;
+}
+interface PromiseConstructor {
+    withResolvers<T>(): PromiseWithResolvers<T>;
+}
+type ClassMemberDecoratorContext =
+    | ClassMethodDecoratorContext
+    | ClassGetterDecoratorContext
+    | ClassSetterDecoratorContext
+    | ClassFieldDecoratorContext
+    | ClassAccessorDecoratorContext;
+type DecoratorContext =
+    | ClassDecoratorContext
+    | ClassMemberDecoratorContext;
+type DecoratorMetadataObject = Record<PropertyKey, unknown> & object;
+type DecoratorMetadata = typeof globalThis extends { Symbol: { readonly metadata: symbol; }; } ? DecoratorMetadataObject : DecoratorMetadataObject | undefined;
+interface ClassDecoratorContext<
+    Class extends abstract new (...args: any) => any = abstract new (...args: any) => any,
+> {
+    readonly kind: "class";
+    readonly name: string | undefined;
+    addInitializer(initializer: (this: Class) => void): void;
+    readonly metadata: DecoratorMetadata;
+}
+interface ClassMethodDecoratorContext<
+    This = unknown,
+    Value extends (this: This, ...args: any) => any = (this: This, ...args: any) => any,
+> {
+    readonly kind: "method";
+    readonly name: string | symbol;
+    readonly static: boolean;
+    readonly private: boolean;
+    readonly access: {
+        has(object: This): boolean;
+        get(object: This): Value;
+    };
+    addInitializer(initializer: (this: This) => void): void;
+    readonly metadata: DecoratorMetadata;
+}
+interface ClassGetterDecoratorContext<
+    This = unknown,
+    Value = unknown,
+> {
+    readonly kind: "getter";
+    readonly name: string | symbol;
+    readonly static: boolean;
+    readonly private: boolean;
+    readonly access: {
+        has(object: This): boolean;
+        get(object: This): Value;
+    };
+    addInitializer(initializer: (this: This) => void): void;
+    readonly metadata: DecoratorMetadata;
+}
+interface ClassSetterDecoratorContext<
+    This = unknown,
+    Value = unknown,
+> {
+    readonly kind: "setter";
+    readonly name: string | symbol;
+    readonly static: boolean;
+    readonly private: boolean;
+    readonly access: {
+        has(object: This): boolean;
+        set(object: This, value: Value): void;
+    };
+    addInitializer(initializer: (this: This) => void): void;
+    readonly metadata: DecoratorMetadata;
+}
+interface ClassAccessorDecoratorContext<
+    This = unknown,
+    Value = unknown,
+> {
+    readonly kind: "accessor";
+    readonly name: string | symbol;
+    readonly static: boolean;
+    readonly private: boolean;
+    readonly access: {
+        has(object: This): boolean;
+        get(object: This): Value;
+        set(object: This, value: Value): void;
+    };
+    addInitializer(initializer: (this: This) => void): void;
+    readonly metadata: DecoratorMetadata;
+}
+interface ClassAccessorDecoratorTarget<This, Value> {
+    get(this: This): Value;
+    set(this: This, value: Value): void;
+}
+interface ClassAccessorDecoratorResult<This, Value> {
+    get?(this: This): Value;
+    set?(this: This, value: Value): void;
+    init?(this: This, value: Value): Value;
+}
+interface ClassFieldDecoratorContext<
+    This = unknown,
+    Value = unknown,
+> {
+    readonly kind: "field";
+    readonly name: string | symbol;
+    readonly static: boolean;
+    readonly private: boolean;
+    readonly access: {
+        has(object: This): boolean;
+        get(object: This): Value;
+        set(object: This, value: Value): void;
+    };
+    addInitializer(initializer: (this: This) => void): void;
+    readonly metadata: DecoratorMetadata;
+}
+declare type ClassDecorator = <TFunction extends Function>(target: TFunction) => TFunction | void;
+declare type PropertyDecorator = (target: Object, propertyKey: string | symbol) => void;
+declare type MethodDecorator = <T>(target: Object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<T>) => TypedPropertyDescriptor<T> | void;
+declare type ParameterDecorator = (target: Object, propertyKey: string | symbol | undefined, parameterIndex: number) => void;
 // The reference library declares the abstract class in a module of its own, which this block stands for.
 {
     declare abstract class Iterator<T, TResult = undefined, TNext = unknown> {

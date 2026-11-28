@@ -1,0 +1,6 @@
+function f(): boolean { console.log("f"); return true; }
+const x = (!f(), 1);
+const y = (-f(), 2);
+const z = (typeof f(), 3);
+const w = (void f(), 4);
+console.log(x, y, z, w);

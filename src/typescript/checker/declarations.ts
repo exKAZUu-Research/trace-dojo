@@ -1,6 +1,9 @@
+// code-gauge-allow-file fileNcss -- Keeps duplicate-declaration, overload, index-conformance, and merged-export checks together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { blockHasRuntimeCode, isAmbient } from '../namespaceInstantiation';
 import type { Checker } from './checker';
+import { ENUM_MERGE_MESSAGE } from './enums';
 import { checkDuplicateIndexSignatures } from './indexConformance';
 import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
 import type { Scope, Sym } from './scopes';
@@ -10,15 +13,172 @@ import { isAnyLike, isIntrinsic, type Property, type Type, undefinedType, unionO
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
 export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
   checkBuiltinUndefinedDeclaration(c);
+  checkNamespaceClauseExportConflicts(c, scopes);
+  const reportedExportMix = new Set<number>();
+  checkDefaultDeclarationNameConflicts(c, scopes, reportedExportMix);
+  for (const symbol of uniqueSymbols(scopes, (scope) => scope.values.values())) {
+    if (!symbol.valueEntries.some((entry) => !c.isLibrary(entry.name))) continue;
+    checkValueDuplicates(c, symbol);
+    checkMergedValueExportConsistency(c, symbol, reportedExportMix);
+  }
+  for (const symbol of uniqueSymbols(scopes, (scope) => [
+    ...scope.types.values(),
+    ...(scope.defaultTypeSymbol ? [scope.defaultTypeSymbol] : []),
+  ])) {
+    if (!symbol.typeEntries.some((entry) => !c.isLibrary(entry.name))) continue;
+    checkTypeDuplicates(c, symbol);
+    checkMergedTypeExportConsistency(c, symbol, reportedExportMix);
+    checkReservedTypeName(c, symbol);
+  }
+  for (const symbol of uniqueSymbols(scopes, (scope) => scope.namespaces.values())) {
+    if (!symbol.namespaceEntries.some((entry) => !c.isLibrary(entry.name))) continue;
+    checkNamespaceDuplicates(c, symbol);
+    checkMergedNamespaceExportConsistency(c, symbol, reportedExportMix);
+  }
+}
+
+function checkDefaultDeclarationNameConflicts(c: Checker, scopes: Scope[], reported: Set<number>): void {
+  const visited = new Set<Scope>();
   for (const scope of scopes) {
-    for (const symbol of scope.values.values())
-      if (symbol.valueEntries.some((entry) => !c.isLibrary(entry.name))) checkValueDuplicates(c, symbol);
-    for (const symbol of scope.types.values()) {
-      if (!symbol.typeEntries.some((entry) => !c.isLibrary(entry.name))) continue;
-      checkTypeDuplicates(c, symbol);
-      checkReservedTypeName(c, symbol);
+    if (visited.has(scope) || scope.defaultDeclaredNames.length === 0) continue;
+    visited.add(scope);
+    reportScopeDefaultNameConflicts(c, scope, reported);
+  }
+}
+
+function reportScopeDefaultNameConflicts(c: Checker, scope: Scope, reported: Set<number>): void {
+  const byName = new Map<string, Scope['defaultDeclaredNames']>();
+  for (const entry of scope.defaultDeclaredNames) {
+    const list = byName.get(entry.name) ?? [];
+    list.push(entry);
+    byName.set(entry.name, list);
+  }
+  for (const [name, defaults] of byName) {
+    const nonDefaults = collectNonDefaultNameDeclarations(c, scope, name, defaults);
+    if (nonDefaults.length === 0) continue;
+    const message = defaultNameConflictMessage(name, nonDefaults);
+    for (const site of [...nonDefaults.map((item) => item.site), ...defaults.map((item) => item.nameNode)]) {
+      if (reported.has(site.id)) continue;
+      reported.add(site.id);
+      c.error(site, message);
     }
   }
+}
+
+function collectNonDefaultNameDeclarations(
+  c: Checker,
+  scope: Scope,
+  name: string,
+  defaults: Scope['defaultDeclaredNames']
+): { kind: string; site: TreeNode }[] {
+  const onlyDefaultClasses = defaults.every((item) => item.kind === 'class');
+  const found = collectNonDefaultTypeEntries(c, scope, name, onlyDefaultClasses);
+  if (defaults.some((item) => item.kind === 'class')) {
+    collectNonDefaultNamespaceEntries(c, scope.namespaces.get(name), found);
+  }
+  return found;
+}
+
+function collectNonDefaultTypeEntries(
+  c: Checker,
+  scope: Scope,
+  name: string,
+  onlyDefaultClasses: boolean
+): { kind: string; site: TreeNode }[] {
+  const found: { kind: string; site: TreeNode }[] = [];
+  const typeSymbol = scope.types.get(name);
+  if (!typeSymbol || typeSymbol === scope.defaultTypeSymbol) return found;
+  for (const [index, entry] of typeSymbol.typeEntries.entries()) {
+    const decl = typeSymbol.typeDeclarations[index];
+    if (c.isLibrary(entry.name) || isDefaultExportDeclarationNode(decl)) continue;
+    if (entry.kind === 'class' && onlyDefaultClasses) continue;
+    found.push({ kind: entry.kind, site: entry.name });
+  }
+  return found;
+}
+
+function collectNonDefaultNamespaceEntries(
+  c: Checker,
+  nsSymbol: Sym | undefined,
+  found: { kind: string; site: TreeNode }[]
+): void {
+  for (const [index, entry] of (nsSymbol?.namespaceEntries ?? []).entries()) {
+    const decl = nsSymbol?.namespaceDeclarations[index];
+    if (!c.isLibrary(entry.name) && !isDefaultExportDeclarationNode(decl)) {
+      found.push({ kind: entry.kind, site: entry.name });
+    }
+  }
+}
+
+function defaultNameConflictMessage(name: string, nonDefaults: { kind: string }[]): string {
+  if (nonDefaults.some((item) => item.kind === 'alias' || item.kind === 'enum')) {
+    return 'モジュールに複数の既定のエクスポートを含めることはできません。';
+  }
+  return defaultMergeConflictMessage(name);
+}
+
+function defaultMergeConflictMessage(name: string): string {
+  return `マージされた宣言 '${name}' に既定のエクスポート宣言を含めることはできません。代わりに、'export default ${name}' 宣言を別個に追加することを検討してください。`;
+}
+
+function checkNamespaceClauseExportConflicts(c: Checker, scopes: Scope[]): void {
+  const seen = new Set<Scope>();
+  for (const scope of scopes) {
+    const exports = scope.namespace?.namespaceExports;
+    if (!exports || seen.has(exports)) continue;
+    seen.add(exports);
+    reportScopeClauseExportConflicts(c, exports);
+  }
+}
+
+function reportScopeClauseExportConflicts(c: Checker, exports: Scope): void {
+  const byName = new Map<string, Scope['clauseExportSpecifiers']>();
+  for (const entry of exports.clauseExportSpecifiers) {
+    if (c.isLibrary(entry.site)) continue;
+    const list = byName.get(entry.name) ?? [];
+    list.push(entry);
+    byName.set(entry.name, list);
+  }
+  for (const [name, entries] of byName) {
+    if (entries.length > 1) {
+      for (const entry of entries) c.error(entry.site, `識別子 '${name}' が重複しています。`);
+      continue;
+    }
+    if (clauseExportCollidesWithDeclaration(exports, name, entries[0]))
+      c.error(entries[0].site, `エクスポート宣言が、'${name}' のエクスポートされた宣言と競合しています。`);
+  }
+  for (const { site, firstModule, name } of exports.ambiguousStarExports) {
+    if (c.isLibrary(site)) continue;
+    c.error(
+      site,
+      `モジュール "${firstModule}" は既に '${name}' という名前のメンバーをエクスポートしています。あいまいさを解決するため、明示的にもう一度エクスポートすることを検討してください。`
+    );
+  }
+}
+
+function clauseExportCollidesWithDeclaration(
+  exports: Scope,
+  name: string,
+  entry: Scope['clauseExportSpecifiers'][number]
+): boolean {
+  return (
+    (Boolean(entry.value?.valueEntries.length) && exports.hasDeclarationExport(name, 'value')) ||
+    (Boolean(entry.type?.typeEntries.length) && exports.hasDeclarationExport(name, 'type')) ||
+    (Boolean(entry.namespace?.namespaceEntries.length) && exports.hasDeclarationExport(name, 'namespace'))
+  );
+}
+
+function uniqueSymbols(scopes: Scope[], select: (scope: Scope) => Iterable<Sym>): Sym[] {
+  const seen = new Set<number>();
+  const symbols: Sym[] = [];
+  for (const scope of scopes) {
+    for (const symbol of select(scope)) {
+      if (seen.has(symbol.id)) continue;
+      seen.add(symbol.id);
+      symbols.push(symbol);
+    }
+  }
+  return symbols;
 }
 
 function checkBuiltinUndefinedDeclaration(c: Checker): void {
@@ -28,12 +188,22 @@ function checkBuiltinUndefinedDeclaration(c: Checker): void {
 }
 
 const blockScopedKinds = new Set(['let', 'const', 'class']);
+const importKinds = new Set(['import', 'importAlias']);
 
 // code-gauge-allow functionCognitiveComplexity -- Distinguishes block-scoped conflicts, mixed function/var declarations, repeated implementations, and compatible var redeclarations.
 function checkValueDuplicates(c: Checker, symbol: Sym): void {
   const entries = symbol.valueEntries;
   if (entries.length < 2) return;
   const name = symbol.name;
+  if (entries.some((entry) => importKinds.has(entry.kind))) {
+    reportImportConflict(c, name, entries);
+    return;
+  }
+  if (
+    entries.some((entry) => entry.kind === 'enum' || entry.kind === 'namespace') &&
+    !checkNamespaceAndEnumMerges(c, symbol)
+  )
+    return;
   if (entries.some((entry) => blockScopedKinds.has(entry.kind))) {
     const message = namesBlockScopedConflict(c, entries)
       ? `ブロックスコープの変数 ${name} はすでに宣言されています。`
@@ -51,14 +221,7 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
     return;
   }
   if (entries.every((entry) => entry.kind === 'function')) {
-    const implementations = symbol.valueDeclarations.filter(
-      (declaration) => declaration.type === 'function_declaration'
-    );
-    if (implementations.length > 1) {
-      for (const implementation of implementations) {
-        c.error(implementation.childForFieldName('name') ?? implementation, `関数 ${name} の実装が重複しています。`);
-      }
-    }
+    checkDuplicateImplementations(c, symbol);
     return;
   }
   if (
@@ -67,6 +230,65 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
     entries.every(isFunctionScopedVariable)
   )
     checkVarRedeclarations(c, symbol);
+}
+
+/**
+ * A namespace merges with namespaces, functions, classes, and enums, and an enum only with enums and namespaces; any
+ * other duplicate of a namespace's name is checked as the others are, which this tells by returning true.
+ */
+function checkNamespaceAndEnumMerges(c: Checker, symbol: Sym): boolean {
+  const kinds = symbol.valueEntries.map((entry) => entry.kind);
+  const mergeable = kinds.includes('enum') ? ['enum', 'namespace'] : ['namespace', 'function', 'class', 'enum'];
+  if (kinds.every((kind) => mergeable.includes(kind))) {
+    if (!kinds.includes('enum')) checkNamespaceMergedDeclarations(c, symbol);
+    return false;
+  }
+  if (!kinds.includes('enum')) return true;
+  for (const entry of symbol.valueEntries) c.error(entry.name, ENUM_MERGE_MESSAGE);
+  return false;
+}
+
+/**
+ * A namespace with code to run must follow the function or class it merges with, whose implementations and classes
+ * are still duplicates of each other.
+ */
+function checkNamespaceMergedDeclarations(c: Checker, symbol: Sym): void {
+  const merged = symbol.valueDeclarations.filter((declaration) => !isAmbient(declaration));
+  const firstMerged = merged.find((declaration) => !isNamespaceDeclaration(declaration));
+  if (firstMerged) {
+    for (const declaration of merged) {
+      const body = declaration.childForFieldName('body');
+      if (
+        isNamespaceDeclaration(declaration) &&
+        declaration.startIndex < firstMerged.startIndex &&
+        body &&
+        blockHasRuntimeCode(body)
+      )
+        c.error(
+          declaration.childForFieldName('name') ?? declaration,
+          'namespace の宣言は、マージ先のクラスや関数より前には置けません。'
+        );
+    }
+  }
+  checkDuplicateImplementations(c, symbol);
+  const classes = symbol.valueDeclarations.filter((declaration) => declaration.type === 'class_declaration');
+  if (classes.length > 1)
+    for (const declaration of classes)
+      c.error(declaration.childForFieldName('name') ?? declaration, `${symbol.name} はすでに宣言されています。`);
+}
+
+function isNamespaceDeclaration(declaration: TreeNode): boolean {
+  return declaration.type === 'internal_module' || declaration.type === 'module';
+}
+
+function checkDuplicateImplementations(c: Checker, symbol: Sym): void {
+  const implementations = symbol.valueDeclarations.filter(
+    (declaration) =>
+      declaration.type === 'function_declaration' || declaration.type === 'generator_function_declaration'
+  );
+  if (implementations.length < 2) return;
+  for (const implementation of implementations)
+    c.error(implementation.childForFieldName('name') ?? implementation, `関数 ${symbol.name} の実装が重複しています。`);
 }
 
 export function checkParameterRedeclarations(c: Checker, scopes: Scope[]): void {
@@ -152,19 +374,185 @@ function checkReservedTypeName(c: Checker, symbol: Sym): void {
 function checkTypeDuplicates(c: Checker, symbol: Sym): void {
   const entries = symbol.typeEntries;
   if (entries.length < 2) return;
+  if (entries.some((entry) => importKinds.has(entry.kind))) {
+    reportImportConflict(c, symbol.name, entries);
+    return;
+  }
   const kinds = entries.map((entry) => entry.kind);
+  // Enums merge with each other, conflict with a class as values, and conflict with a type-only declaration here.
+  if (kinds.includes('enum')) {
+    reportEnumTypeMergeConflicts(c, entries, kinds);
+    return;
+  }
   // Interfaces merge with each other and with a class; any other pair declares the name twice.
-  const merges =
-    kinds.every((kind) => kind === 'interface' || kind === 'class') &&
-    kinds.filter((kind) => kind === 'class').length <= 1;
-  if (!merges) {
-    // Two classes report as values.
-    if (kinds.every((kind) => kind === 'class')) return;
-    for (const entry of entries) c.error(entry.name, `${symbol.name} はすでに宣言されています。`);
+  if (!mergesTypeDeclarations(kinds)) {
+    if (!kinds.every((kind) => kind === 'class'))
+      for (const entry of entries) c.error(entry.name, `${symbol.name} はすでに宣言されています。`);
     return;
   }
   checkMergedTypeParameters(c, symbol);
   checkMergedProperties(c, symbol);
+}
+
+function reportEnumTypeMergeConflicts(c: Checker, entries: Sym['typeEntries'], kinds: string[]): void {
+  if (!kinds.some((kind) => kind === 'alias' || kind === 'interface')) return;
+  for (const entry of entries) c.error(entry.name, ENUM_MERGE_MESSAGE);
+}
+
+function mergesTypeDeclarations(kinds: string[]): boolean {
+  return (
+    kinds.every((kind) => kind === 'interface' || kind === 'class') &&
+    kinds.filter((kind) => kind === 'class').length <= 1
+  );
+}
+
+function checkMergedValueExportConsistency(c: Checker, symbol: Sym, reported: Set<number>): void {
+  const entries = symbol.valueEntries;
+  if (entries.length < 2 || !checksExportConsistencyInScope(symbol.scope)) return;
+  if (
+    !entries.some((entry) => entry.kind === 'namespace') &&
+    entries.some(
+      (entry) => importKinds.has(entry.kind) || blockScopedKinds.has(entry.kind) || entry.kind === 'parameter'
+    )
+  )
+    return;
+  const kinds = entries.map((entry) => entry.kind);
+  if (kinds.every((kind) => kind === 'function')) return;
+  if (kinds.some((kind) => kind === 'function') && kinds.some((kind) => kind === 'var')) return;
+  if (kinds.includes('enum') && !kinds.every((kind) => kind === 'enum' || kind === 'namespace')) return;
+  if (kinds.includes('namespace') && !kinds.every((kind) => ['namespace', 'function', 'class', 'enum'].includes(kind)))
+    return;
+  reportMixedExports(c, symbol.name, entries, symbol.valueDeclarations, reported);
+}
+
+function checkMergedTypeExportConsistency(c: Checker, symbol: Sym, reported: Set<number>): void {
+  const entries = symbol.typeEntries;
+  if (entries.length < 2 || !checksExportConsistencyInScope(symbol.scope)) return;
+  const kinds = entries.map((entry) => entry.kind);
+  if (!mergesTypeDeclarations(kinds)) return;
+  reportMixedExports(c, symbol.name, entries, symbol.typeDeclarations, reported);
+}
+
+function checkNamespaceDuplicates(c: Checker, symbol: Sym): void {
+  const entries = symbol.namespaceEntries;
+  if (entries.length < 2) return;
+  if (entries.some((entry) => importKinds.has(entry.kind))) {
+    reportImportConflict(c, symbol.name, entries);
+  }
+}
+
+function checkMergedNamespaceExportConsistency(c: Checker, symbol: Sym, reported: Set<number>): void {
+  const entries = symbol.namespaceEntries;
+  if (entries.length < 2 || !checksExportConsistencyInScope(symbol.scope)) return;
+  if (!entries.every((entry) => entry.kind === 'namespace')) return;
+  reportMixedExports(c, symbol.name, entries, symbol.namespaceDeclarations, reported);
+}
+
+function checksExportConsistencyInScope(scope: Scope): boolean {
+  if (scope.node?.type === 'program') return true;
+  if (!scope.namespace) return false;
+  if (!scope.isAmbient) return true;
+  const body = scope.node?.childForFieldName('body');
+  return body
+    ? named(body).some((child) => child.type === 'export_statement' && !child.childForFieldName('declaration'))
+    : false;
+}
+
+function reportMixedExports(
+  c: Checker,
+  name: string,
+  entries: { name: TreeNode }[],
+  declarations: TreeNode[],
+  reported: Set<number>
+): void {
+  const userIndices = entries.map((_, index) => index).filter((index) => !c.isLibrary(entries[index].name));
+  if (userIndices.length < 2) return;
+  const defaultFlags = userIndices.map((index) => isDefaultExportDeclarationNode(declarations[index]));
+  if (defaultFlags.some(Boolean) && defaultFlags.some((flag) => !flag)) {
+    reportAtDeclarationSites(c, userIndices, entries, reported, defaultMergeConflictMessage(name));
+    return;
+  }
+  const flags = userIndices.map((index) => isExportedDeclaration(declarations[index], entries[index].name));
+  if (flags.every(Boolean) || flags.every((flag) => !flag)) return;
+  const message = `マージされた宣言 '${name}' の個々の宣言はすべてエクスポートされるか、すべてローカルであるかのどちらかである必要があります。`;
+  reportAtDeclarationSites(c, userIndices, entries, reported, message);
+}
+
+function reportAtDeclarationSites(
+  c: Checker,
+  indices: number[],
+  entries: { name: TreeNode }[],
+  reported: Set<number>,
+  message: string
+): void {
+  for (const index of indices) {
+    const site = entries[index].name;
+    if (reported.has(site.id)) continue;
+    reported.add(site.id);
+    c.error(site, message);
+  }
+}
+
+function isDefaultExportDeclarationNode(declaration: TreeNode | undefined): boolean {
+  if (!declaration) return false;
+  const outer = declaration.parent?.type === 'ambient_declaration' ? declaration.parent : declaration;
+  return (
+    outer.parent?.type === 'export_statement' &&
+    outer.parent.children.some((child) => !child.isNamed && child.type === 'default')
+  );
+}
+
+function isExportedDeclaration(declaration: TreeNode | undefined, entryName: TreeNode): boolean {
+  if (
+    (declaration?.type === 'internal_module' || declaration?.type === 'module') &&
+    namespaceRootName(declaration)?.id !== entryName.id
+  ) {
+    return true;
+  }
+  let current: TreeNode | null | undefined = declaration?.parent;
+  while (
+    current &&
+    ['lexical_declaration', 'variable_declaration', 'expression_statement', 'ambient_declaration'].includes(
+      current.type
+    )
+  ) {
+    current = current.parent;
+  }
+  if (current?.type === 'export_statement') return true;
+  if (current?.type !== 'statement_block' || !isAmbient(current)) return false;
+  if (!named(current).some((child) => child.type === 'export_statement' && !child.childForFieldName('declaration')))
+    return true;
+  return isNamedInExportClause(current, entryName.text);
+}
+
+function isNamedInExportClause(body: TreeNode, targetName: string): boolean {
+  return named(body).some(
+    (child) =>
+      child.type === 'export_statement' &&
+      !child.childForFieldName('source') &&
+      named(child).some(
+        (part) =>
+          part.type === 'export_clause' &&
+          named(part).some((specifier) => specifier.childForFieldName('name')?.text === targetName)
+      )
+  );
+}
+
+function namespaceRootName(declaration: TreeNode): TreeNode | null {
+  let root = declaration.childForFieldName('name');
+  while (root?.childForFieldName('object')) root = root.childForFieldName('object');
+  return root;
+}
+
+function reportImportConflict(c: Checker, name: string, entries: { kind: string; name: TreeNode }[]): void {
+  const hasLocal = entries.some((entry) => !importKinds.has(entry.kind));
+  for (const entry of entries) {
+    if (hasLocal && !importKinds.has(entry.kind)) continue;
+    c.error(
+      entry.name,
+      hasLocal ? `インポート宣言が、'${name}' のローカル宣言と競合しています。` : `${name} はすでに宣言されています。`
+    );
+  }
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Validates parameter order, defaulted additions, and agreement of constraints and defaults across merged declarations.
