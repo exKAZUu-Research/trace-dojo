@@ -447,7 +447,6 @@ function fieldTypeOf(c: Checker, type: Type, name: string): Type | undefined {
   return undefined;
 }
 
-/** Taking `self` by value through a reference moves out of it, which only `Copy` types allow. */
 /**
  * A method taking `self` by value moves the receiver; `self: Box<Self>` takes the `Box`, which method lookup derefs
  * through to `Self`, while lookup stops at an `Rc`, `Arc` or `Pin` itself.
@@ -472,6 +471,7 @@ function typeThrough(c: Checker, receiverType: Type, derefs: DerefKind[]): Type 
   return type;
 }
 
+/** Taking `self` by value through a reference moves out of it, which only `Copy` types allow. */
 function checkMoveOutOfRef(
   c: Checker,
   expr: Extract<Expr, { kind: 'methodCall' }>,

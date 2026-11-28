@@ -112,8 +112,6 @@ interface CoverageCheck {
 }
 
 /** Checks the types of every function body, recording what the compiler needs in {@link Annotations}. */
-/** The cells an `Rc`, `Arc` or `Box` of a trait object may hold it in. */
-
 export class Checker {
   private readonly adtStorage: AdtStorage;
   readonly annotations = new Annotations();
