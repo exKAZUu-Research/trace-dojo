@@ -67,23 +67,19 @@ export class AssignmentChecker {
     }
     if (this.isEvolvingArrayAssignment(leftExpression)) {
       this.c.expressions.check(leftExpression.childForFieldName('index') as TreeNode);
-      const valueType = this.c.expressions.checkWidened(right);
-      this.evolve(leftExpression.childForFieldName('object') as TreeNode, valueType);
+      const { result: valueType, yields } = this.c.functions.collectImplicitYields(() =>
+        this.c.expressions.checkWidened(right)
+      );
+      this.evolve(leftExpression.childForFieldName('object') as TreeNode, valueType, yields);
       return valueType;
     }
     const targetType = this.targetType(left, false);
     const { result: valueType, yields } = this.c.functions.collectImplicitYields(() =>
       this.c.expressions.checkAssignedValue(right, targetType === errorType ? undefined : targetType)
     );
-    if (leftExpression.type === 'identifier') {
-      const symbol = this.c.scopeOf(leftExpression).lookupValue(leftExpression.text);
-      if (symbol && this.isAutoTyped(symbol)) {
-        this.c.functions.recordVariableYieldDeps(symbol, false, yields, true);
-      }
-    }
     this.c.expressions.expandos.recordAssignment(node, valueType);
     if (targetType !== errorType) this.c.expressions.checkAssignable(leftExpression, valueType, targetType, right);
-    this.assignReference(leftExpression, targetType, valueType);
+    this.assignReference(leftExpression, targetType, valueType, true, yields);
     return valueType;
   }
 
@@ -137,12 +133,17 @@ export class AssignmentChecker {
   }
 
   /** Adds an element type to an evolving array, as `push` does to one declared as `[]`. */
-  evolve(objectNode: TreeNode, elementType: Type): void {
+  evolve(objectNode: TreeNode, elementType: Type, yieldDeps?: ReadonlySet<number>): void {
     const key = this.c.flow.referenceKey(objectNode);
     const entry = key ? this.c.flow.entry(key) : undefined;
     if (!key || !entry?.evolving) return;
     const element = this.c.elementTypeOf(entry.type as ObjectType);
-    this.c.flow.set(key, { ...entry, type: this.c.arrayType(unionOf([element, this.c.widen(elementType)])) });
+    const mergedYields = unionOptionalSets(entry.yieldDeps, yieldDeps);
+    this.c.flow.set(key, {
+      ...entry,
+      type: this.c.arrayType(unionOf([element, this.c.widen(elementType)])),
+      ...(mergedYields ? { yieldDeps: mergedYields } : {}),
+    });
   }
 
   isEvolvingArray(node: TreeNode): boolean {
@@ -151,19 +152,36 @@ export class AssignmentChecker {
   }
 
   /** Narrows an assigned reference to the assigned type. */
-  assignReference(target: TreeNode, declared: Type, assigned: Type, initializesField = true): void {
+  assignReference(
+    target: TreeNode,
+    declared: Type,
+    assigned: Type,
+    initializesField = true,
+    yieldDeps?: ReadonlySet<number>
+  ): void {
     const key = this.c.flow.referenceKey(target);
     if (!key) return;
     this.c.flow.invalidate(key);
     if (initializesField && /^this\d+\.[^.]*$/.test(key)) this.c.flow.current?.assignedFields.add(key);
     if (declared === errorType) return;
     const entry = this.c.flow.entry(key);
-    const symbol = target.type === 'identifier' ? this.c.scopeOf(target).lookupValue(target.text) : undefined;
+    const symbol = isVariableIdentifierTarget(target) ? this.c.scopeOf(target).lookupValue(target.text) : undefined;
     const isAuto = symbol !== undefined && this.isAutoTyped(symbol);
     const accessor = this.accessorTypes(target);
     const type = isAuto ? this.c.widen(assigned) : this.c.flow.assignmentReduced(accessor?.read ?? declared, assigned);
     const writeType = accessor && this.c.flow.assignmentReduced(accessor.write, assigned);
-    this.c.flow.set(key, { type, writeType, assigned: true, evolving: entry?.evolving }, target);
+    const nextYieldDeps = isAuto && yieldDeps && yieldDeps.size > 0 ? new Set(yieldDeps) : undefined;
+    this.c.flow.set(
+      key,
+      {
+        type,
+        writeType,
+        assigned: true,
+        evolving: entry?.evolving,
+        ...(nextYieldDeps ? { yieldDeps: nextYieldDeps } : {}),
+      },
+      target
+    );
   }
 
   accessorTypes(target: TreeNode): { read: Type; write: Type } | undefined {
@@ -217,23 +235,17 @@ export class AssignmentChecker {
     pattern: TreeNode,
     type: Type,
     expressionTypes?: ReadonlyMap<number, Type>,
-    yields?: Set<number>
+    yields?: ReadonlySet<number>
   ): void {
     this.assignmentTargets(
       pattern,
       type,
       (target, valueType) => {
         const unwrapped = skipParentheses(target);
-        if (unwrapped.type === 'identifier') {
-          const symbol = this.c.scopeOf(unwrapped).lookupValue(unwrapped.text);
-          if (symbol && this.isAutoTyped(symbol)) {
-            this.c.functions.recordVariableYieldDeps(symbol, false, yields, true);
-          }
-        }
         const declared = expressionTypes?.get(target.id) ?? this.targetType(target, false);
         if (declared !== errorType && !this.c.relations.isAssignable(valueType, declared))
           this.c.expressions.reportNotAssignable(target, valueType, declared);
-        this.assignReference(unwrapped, declared, valueType);
+        this.assignReference(unwrapped, declared, valueType, true, yields);
       },
       { expressionTypes }
     );
@@ -370,7 +382,7 @@ export class AssignmentChecker {
     if (operator === '&&=' || operator === '||=' || operator === '??=')
       return this.logicalAssignment(left, right, operator, declared, targetType);
     const writeType = this.compoundWriteType(left, declared, targetType);
-    const valueType = this.c.expressions.check(right);
+    const { result: valueType, yields } = this.c.functions.collectImplicitYields(() => this.c.expressions.check(right));
     const resultType = this.c.operators.binaryOperatorType(
       node,
       operator.slice(0, -1),
@@ -385,7 +397,7 @@ export class AssignmentChecker {
       (operator === '+=' || this.c.operators.hasNumericOperands(left, right, targetType, valueType))
     )
       this.c.expressions.checkAssignable(reference, resultType, mapType(writeType, baseTypeOfLiteral));
-    this.recordCompoundWrite(reference, declared);
+    this.recordCompoundWrite(reference, declared, yields);
     return resultType;
   }
 
@@ -398,10 +410,11 @@ export class AssignmentChecker {
     const { skipped, evaluating } = this.logicalAssignmentPaths(reference, operator);
     let valueType: Type = neverType;
     const evaluated = this.c.flow.from(evaluating, () => {
-      valueType = this.c.expressions.check(right, write);
+      const collected = this.c.functions.collectImplicitYields(() => this.c.expressions.check(right, write));
+      valueType = collected.result;
       if (checked === errorType) return;
       this.c.expressions.checkAssignable(reference, valueType, write);
-      this.assignReference(target, declared, valueType, operator !== '&&=');
+      this.assignReference(target, declared, valueType, operator !== '&&=', collected.yields);
     });
     this.c.flow.current = this.c.flow.merge([skipped, evaluated]);
     return this.logicalAssignmentType(operator, operand, valueType);
@@ -413,7 +426,7 @@ export class AssignmentChecker {
     return entry ? intersectionOf([declared, entry.writeType ?? entry.type], this.c) : declared;
   }
 
-  private recordCompoundWrite(reference: TreeNode, declared: Type): void {
+  private recordCompoundWrite(reference: TreeNode, declared: Type, rhsYields?: ReadonlySet<number>): void {
     const key = this.c.flow.referenceKey(reference);
     if (!key) return;
     this.c.flow.invalidate(key);
@@ -424,8 +437,24 @@ export class AssignmentChecker {
     const write = entry?.writeType ?? accessor?.write;
     const type = mapType(read, baseTypeOfLiteral);
     const writeType = write && mapType(write, baseTypeOfLiteral);
-    if (entry || type !== read || writeType !== write)
-      this.c.flow.set(key, { ...entry, type, writeType, assigned: entry?.assigned ?? true }, reference);
+    const symbol = isVariableIdentifierTarget(reference)
+      ? this.c.scopeOf(reference).lookupValue(reference.text)
+      : undefined;
+    const yieldDeps =
+      symbol && this.isAutoTyped(symbol) ? unionOptionalSets(entry?.yieldDeps, rhsYields) : entry?.yieldDeps;
+    if (entry || type !== read || writeType !== write || yieldDeps) {
+      this.c.flow.set(
+        key,
+        {
+          ...entry,
+          type,
+          writeType,
+          assigned: entry?.assigned ?? true,
+          ...(yieldDeps ? { yieldDeps } : {}),
+        },
+        reference
+      );
+    }
   }
 
   private logicalAssignmentType(operator: string, targetType: Type, valueType: Type): Type {
@@ -665,6 +694,26 @@ export class AssignmentChecker {
 
 function isAssignmentPattern(node: TreeNode): boolean {
   return ['array', 'object', 'array_pattern', 'object_pattern'].includes(node.type);
+}
+
+function isVariableIdentifierTarget(node: TreeNode): boolean {
+  return (
+    node.type === 'identifier' ||
+    node.type === 'shorthand_property_identifier' ||
+    node.type === 'shorthand_property_identifier_pattern'
+  );
+}
+
+function unionOptionalSets(
+  first: ReadonlySet<number> | undefined,
+  second: ReadonlySet<number> | undefined
+): ReadonlySet<number> | undefined {
+  const hasFirst = Boolean(first && first.size > 0);
+  const hasSecond = Boolean(second && second.size > 0);
+  if (!hasFirst && !hasSecond) return undefined;
+  if (!hasSecond) return first;
+  if (!hasFirst) return new Set(second);
+  return new Set([...(first as ReadonlySet<number>), ...(second as ReadonlySet<number>)]);
 }
 
 function immutableSymbolAssignmentMessage(

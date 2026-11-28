@@ -53,6 +53,8 @@ export interface FlowEntry {
   evolving?: boolean;
   /** For a value of a type parameter constrained to a union, that constraint as narrowed so far. */
   constraint?: Type;
+  /** Uncontextualized `yield` nodes whose untyped results may still reach an auto-typed variable here. */
+  yieldDeps?: ReadonlySet<number>;
 }
 
 /** What the paths to a point in a program tell about its variables and references; undefined where none reach it. */
@@ -138,12 +140,14 @@ export class Flow {
   }
 
   joinEntries(entries: FlowEntry[]): FlowEntry {
+    const yieldDeps = joinYieldDeps(entries);
     return {
       type: this.joinTypes(entries.map((entry) => entry.type)),
       writeType: this.joinOptionalTypes(entries.map((entry) => entry.writeType)),
       assigned: entries.every((entry) => entry.assigned),
       evolving: entries.some((entry) => entry.evolving),
       constraint: this.joinOptionalTypes(entries.map((entry) => entry.constraint)),
+      ...(yieldDeps ? { yieldDeps } : {}),
     };
   }
 
@@ -341,10 +345,10 @@ export class Flow {
       assigned: assigned || !this.c.relations.isAssignable(undefinedType, narrow(unionOf([current, undefinedType]))),
       evolving: entry?.evolving,
       constraint: constraint && narrow(constraint),
+      ...(entry?.yieldDeps ? { yieldDeps: entry.yieldDeps } : {}),
     });
   }
 
-  /** As TypeScript's `isGenericTypeWithUnionConstraint`, the base constraint of a type variable that may be a union. */
   private unionConstraint(type: Type): Type | undefined {
     if (type.kind !== 'typeParameter' && type.kind !== 'indexedAccess') return undefined;
     const constraint = this.c.baseConstraint(type);
@@ -798,4 +802,14 @@ export { trueType };
 
 export function propertyReferenceKey(base: string, name: string): string {
   return `${base}.${name.replaceAll('%', '%25').replaceAll('.', '%2E')}`;
+}
+
+function joinYieldDeps(entries: FlowEntry[]): ReadonlySet<number> | undefined {
+  let merged: Set<number> | undefined;
+  for (const entry of entries) {
+    if (!entry.yieldDeps || entry.yieldDeps.size === 0) continue;
+    merged ??= new Set();
+    for (const id of entry.yieldDeps) merged.add(id);
+  }
+  return merged;
 }

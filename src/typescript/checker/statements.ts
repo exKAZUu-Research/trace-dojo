@@ -563,7 +563,7 @@ export class StatementChecker {
     const { result: valueType, yields } = this.c.functions.collectImplicitYields(() =>
       this.c.expressions.checkAssignedValue(value, annotation)
     );
-    this.c.functions.recordVariableYieldDeps(symbol, annotation !== undefined, yields);
+    this.c.functions.recordDeclaredVariableYields(symbol, annotation !== undefined, yields);
     if (annotation) this.c.expressions.checkAssignable(nameNode, valueType, annotation, value);
     if (!annotation && isDirectEmptyArray(value)) {
       // `const a = []` evolves as elements are pushed.
@@ -590,8 +590,6 @@ export class StatementChecker {
     const { result: valueType, yields } = this.c.functions.collectImplicitYields(() =>
       this.c.expressions.check(value, annotation)
     );
-    const hasAnnotation = annotation !== undefined || symbol.valueDeclaration?.childForFieldName('type') !== null;
-    this.c.functions.recordVariableYieldDeps(symbol, hasAnnotation, yields, true);
     if (annotation)
       this.c.expressions.checkAssignable(
         declarator.childForFieldName('name') as TreeNode,
@@ -600,7 +598,13 @@ export class StatementChecker {
         value
       );
     const declared = this.c.expressions.valueTypeOf(symbol);
-    this.c.assignments.assignReference(declarator.childForFieldName('name') as TreeNode, declared, valueType);
+    this.c.assignments.assignReference(
+      declarator.childForFieldName('name') as TreeNode,
+      declared,
+      valueType,
+      true,
+      yields
+    );
   }
 
   private uninitializedVariable(declarator: TreeNode, symbol: Sym, kind: string, annotation: Type | undefined): void {
@@ -640,7 +644,7 @@ export class StatementChecker {
       (identifier, type, assigned = type) => {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (!symbol) return;
-        this.c.functions.recordVariableYieldDeps(symbol, annotation !== undefined, collected?.yields);
+        this.c.functions.recordDeclaredVariableYields(symbol, annotation !== undefined, collected?.yields);
         const declared = this.c.literals.widenDeclared(type, isConst);
         this.c.expressions.setVariableType(symbol, declared);
         this.c.flow.set(`s${symbol.id}`, { type: this.c.flow.assignmentReduced(declared, assigned), assigned: true });
@@ -735,7 +739,7 @@ export class StatementChecker {
     const entry = this.c.flow.current;
     let stateKey = this.stateKey(entry);
     // An enclosing loop's silent passes check this loop once each; the same entry state leaves it the same way.
-    const key = this.c.silent > 0 ? `${node.id}:${stateKey}` : undefined;
+    const key = this.c.silent > 0 && !this.c.functions.isTrackingReturnYields() ? `${node.id}:${stateKey}` : undefined;
     const known = key === undefined ? undefined : this.silentLoopExits.get(key);
     if (known) {
       this.c.flow.current = this.c.flow.merge(known);
@@ -783,8 +787,17 @@ export class StatementChecker {
 
   private stateKey(state: State): string {
     if (!state) return '-';
-    const entries = [...state.entries].map(([reference, { type, writeType, assigned, constraint, evolving }]) =>
-      JSON.stringify([reference, type.id, writeType?.id, assigned, constraint?.id, evolving === true])
+    const entries = [...state.entries].map(
+      ([reference, { type, writeType, assigned, constraint, evolving, yieldDeps }]) =>
+        JSON.stringify([
+          reference,
+          type.id,
+          writeType?.id,
+          assigned,
+          constraint?.id,
+          evolving === true,
+          yieldDeps ? [...yieldDeps].toSorted() : undefined,
+        ])
     );
     return JSON.stringify([entries.toSorted(), [...state.assignedFields].toSorted(), state.superCalled, state.dead]);
   }
@@ -852,15 +865,17 @@ export class StatementChecker {
     const right = header.childForFieldName('right') as TreeNode;
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const kind = header.childForFieldName('kind')?.text;
-    const rightType = this.c.expressions.check(right);
+    const { result: rightType, yields: rightYields } = this.c.functions.collectImplicitYields(() =>
+      this.c.expressions.check(right)
+    );
     if (hasToken(node, 'await')) checkAwaitPlace(this.c, node, true);
     const elementType = this.loopElementType(node, rightType);
     if (!isOf) this.forInObjectTypes.set(node.id, rightType);
     const body = node.childForFieldName('body') as TreeNode;
     this.loop(node, (target) => {
       const head = this.c.flow.current?.clone();
-      if (kind) this.bindLoopVariables(left, kind, elementType, isOf ? right : undefined);
-      else this.assignLoopVariables(left, elementType);
+      if (kind) this.bindLoopVariables(left, kind, elementType, isOf ? right : undefined, rightYields);
+      else this.assignLoopVariables(left, elementType, rightYields);
       this.checkSubstatement(body);
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
       return this.c.flow.merge([head, this.c.flow.current]);
@@ -958,7 +973,13 @@ export class StatementChecker {
   }
 
   /** Declares the variables of a loop's `const`, `let`, or `var` head. */
-  private bindLoopVariables(left: TreeNode, kind: string, elementType: Type, literalSource?: TreeNode): void {
+  private bindLoopVariables(
+    left: TreeNode,
+    kind: string,
+    elementType: Type,
+    literalSource?: TreeNode,
+    yieldDeps?: Set<number>
+  ): void {
     const isConst = kind === 'const';
     this.c.patterns.bindPattern(
       left,
@@ -966,6 +987,7 @@ export class StatementChecker {
       (identifier, type) => {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (!symbol) return;
+        this.c.functions.recordDeclaredVariableYields(symbol, false, yieldDeps);
         this.c.expressions.setVariableType(symbol, isConst ? type : this.c.widen(type));
         this.c.flow.set(`s${symbol.id}`, { type, assigned: true });
       },
@@ -974,14 +996,14 @@ export class StatementChecker {
   }
 
   /** Assigns the existing variables a loop's head without a declaration names. */
-  private assignLoopVariables(left: TreeNode, elementType: Type): void {
+  private assignLoopVariables(left: TreeNode, elementType: Type, yieldDeps?: ReadonlySet<number>): void {
     if (left.type === 'array_pattern' || left.type === 'object_pattern') {
-      this.c.assignments.destructuringAssignment(left, elementType);
+      this.c.assignments.destructuringAssignment(left, elementType, undefined, yieldDeps);
       return;
     }
     const declared = this.c.assignments.targetType(left, false);
     if (declared !== errorType) this.c.expressions.checkAssignable(left, elementType, declared);
-    this.c.assignments.assignReference(left, declared, elementType);
+    this.c.assignments.assignReference(left, declared, elementType, true, yieldDeps);
   }
 
   private switchStatement(node: TreeNode): void {

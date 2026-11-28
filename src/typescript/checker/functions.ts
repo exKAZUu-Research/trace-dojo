@@ -67,7 +67,7 @@ export interface FunctionContext {
 
 interface ReturnYieldTracker {
   collectors: Set<number>[];
-  symbolYields: Map<number, Set<number>>;
+  declaredSymbolYields: Map<number, ReadonlySet<number>>;
   returnYields: Set<number>;
 }
 
@@ -150,7 +150,11 @@ export class FunctionChecker {
   constructor(private readonly c: Checker) {}
 
   isTrackingReturnYields(): boolean {
-    return this.contexts.some((context) => context.generator?.returnYieldTracker !== undefined);
+    return this.activeYieldContext()?.generator?.returnYieldTracker !== undefined;
+  }
+
+  private activeYieldContext(): FunctionContext | undefined {
+    return this.contexts.findLast((context) => !context.inlined);
   }
 
   withCommittedCallInference<T>(run: () => T): T {
@@ -173,7 +177,7 @@ export class FunctionChecker {
   }
 
   collectImplicitYields<T>(run: () => T): { result: T; yields: Set<number> | undefined } {
-    const tracker = this.contexts.at(-1)?.generator?.returnYieldTracker;
+    const tracker = this.activeYieldContext()?.generator?.returnYieldTracker;
     if (!tracker) return { result: run(), yields: undefined };
     const yields = new Set<number>();
     tracker.collectors.push(yields);
@@ -187,39 +191,33 @@ export class FunctionChecker {
     }
   }
 
-  recordVariableYieldDeps(
-    symbol: Sym | undefined,
-    annotated: boolean,
-    yields: Set<number> | undefined,
-    merge = false
-  ): void {
-    const tracker = this.contexts.at(-1)?.generator?.returnYieldTracker;
+  recordDeclaredVariableYields(symbol: Sym | undefined, annotated: boolean, yields: Set<number> | undefined): void {
+    const tracker = this.activeYieldContext()?.generator?.returnYieldTracker;
     if (!tracker || !symbol) return;
-    if (annotated) {
-      tracker.symbolYields.delete(symbol.id);
+    if (annotated || !yields || yields.size === 0 || this.c.assignments.isAutoTyped(symbol)) {
+      tracker.declaredSymbolYields.delete(symbol.id);
       return;
     }
-    if (!yields || yields.size === 0) {
-      if (!merge) tracker.symbolYields.delete(symbol.id);
-      return;
-    }
-    const existing = merge ? tracker.symbolYields.get(symbol.id) : undefined;
-    if (existing) {
-      for (const id of yields) existing.add(id);
-      return;
-    }
-    tracker.symbolYields.set(symbol.id, new Set(yields));
+    tracker.declaredSymbolYields.set(symbol.id, new Set(yields));
   }
 
   noteIdentifierRead(symbol: Sym): void {
-    for (const context of this.contexts) {
-      const tracker = context.generator?.returnYieldTracker;
-      const deps = tracker?.symbolYields.get(symbol.id);
-      if (!tracker || !deps) continue;
-      const active = tracker.collectors.at(-1);
-      if (active) for (const id of deps) active.add(id);
-      if (context.inReturn) for (const id of deps) tracker.returnYields.add(id);
-    }
+    const context = this.activeYieldContext();
+    const tracker = context?.generator?.returnYieldTracker;
+    if (!context || !tracker) return;
+    this.propagateYieldDeps(tracker, tracker.declaredSymbolYields.get(symbol.id), Boolean(context.inReturn));
+    this.propagateYieldDeps(tracker, this.c.flow.entry(`s${symbol.id}`)?.yieldDeps, Boolean(context.inReturn));
+  }
+
+  private propagateYieldDeps(
+    tracker: ReturnYieldTracker,
+    deps: ReadonlySet<number> | undefined,
+    inReturn: boolean
+  ): void {
+    if (!deps) return;
+    const active = tracker.collectors.at(-1);
+    if (active) for (const id of deps) active.add(id);
+    if (inReturn) for (const id of deps) tracker.returnYields.add(id);
   }
 
   /** For `o.f = function () {...}`, the object the function is assigned to, which tsc gives it as `this`. */
@@ -748,7 +746,7 @@ export class FunctionChecker {
         yieldTypes: [],
         inferredNextTypes: [],
         returnYieldTracker: shouldTrack
-          ? { collectors: [], symbolYields: new Map(), returnYields: new Set() }
+          ? { collectors: [], declaredSymbolYields: new Map(), returnYields: new Set() }
           : undefined,
       },
       declaredReturn: declaredReturn && given?.returnType,
