@@ -50,6 +50,7 @@ import {
   panic,
   placeOf,
   some,
+  unsupportedAtRun,
 } from './support';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -248,6 +249,19 @@ function adtDefaultValue(ctx: NativeContext, t: Type & { kind: 'adt' }): Value {
   return new StructValue(t.def, fields);
 }
 
+/** Whether a type is or holds a union, in its fields, elements or type arguments. */
+function containsUnion(type: Type, seen = new Set<unknown>()): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'array') return containsUnion(t.elem, seen);
+  if (t.kind === 'tuple') return t.elems.some((elem) => containsUnion(elem, seen));
+  if (t.kind !== 'adt' || seen.has(t.def)) return false;
+  if (t.def.isUnion) return true;
+  seen.add(t.def);
+  const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+  const fields = t.def.variants.flatMap((variant) => variant.fields.map((field) => substituteType(field.type, subst)));
+  return [...t.args, ...fields].some((part) => containsUnion(part, seen));
+}
+
 function defaultBoxValue(ctx: NativeContext, type: Type): Value {
   const content = normalize(shallow(type));
   if (content.kind === 'str') return '';
@@ -345,7 +359,11 @@ define({
     const isBytes = target.kind === 'slice' && (typeof value === 'string' || value instanceof StringValue);
     return isBytes ? utf8Reader.bytesView(textOf(value), ctx.runtime) : value;
   },
-  'std::mem::size_of': (_args, ctx) => BigInt(sizeOf(ctx.typeArgs[0])),
+  'std::mem::size_of': (_args, ctx) => {
+    // A union shares one storage among its fields, which this interpreter keeps apart, so it has no size here.
+    if (containsUnion(ctx.typeArgs[0])) unsupportedAtRun(ctx, 'union を含む型の大きさ（size_of）');
+    return BigInt(sizeOf(ctx.typeArgs[0]));
+  },
   'std::mem::swap': ([x, y]) => {
     const a = placeOf(x);
     const b = placeOf(y);
