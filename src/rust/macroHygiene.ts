@@ -246,11 +246,21 @@ function argumentSeparators(tokens: Token[]): Set<number> {
 /** What a group is: a struct's fields, a `match`'s arms, or a format macro's arguments, by its format string's place. */
 type GroupContext = 'struct' | 'match' | number;
 
-/** A format string with its inline arguments (`{t}`, `{t:>3}`) renamed where they name the rule's variables. */
+/**
+ * A format string with its inline arguments (`{t}`, `{t:>3}`) and its width and precision arguments (`{:w$.p$}`)
+ * renamed where they name the rule's variables.
+ */
 function renamedFormat(text: string, visible: Visible, suffix: string): string {
-  return text.replaceAll(/(?<!\{)\{([\p{L}_][\p{L}\p{N}_]*)(?=[}:])/gu, (whole, name: string) =>
-    (visible.get(name) ?? 0) > 0 ? `{${name}${suffix}` : whole
-  );
+  const rename = (name: string): string => ((visible.get(name) ?? 0) > 0 ? `${name}${suffix}` : name);
+  return text.replaceAll(/\{\{|\{([^{}]*)\}/gu, (whole, inner: string | undefined) => {
+    if (inner === undefined) return whole;
+    const [argument, ...spec] = inner.split(':');
+    const named = /^[\p{L}_][\p{L}\p{N}_]*$/u.test(argument) ? rename(argument) : argument;
+    const counts = spec
+      .join(':')
+      .replaceAll(/(?<![\p{L}\p{N}_])([\p{L}_][\p{L}\p{N}_]*)(?=\$)/gu, (name: string) => rename(name));
+    return `{${[named, ...(spec.length > 0 ? [counts] : [])].join(':')}}`;
+  });
 }
 
 /** A leaf, renamed where it is one of the rule's variables; in a struct's fields, a field name stays as it is. */
