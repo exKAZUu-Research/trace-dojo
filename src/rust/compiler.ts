@@ -240,10 +240,10 @@ export class Compiler {
 
   compileBlock(block: Block, tailAsStatement = false, clearsLocals = true): Eval {
     const stmts = block.stmts.map((stmt) => this.compileStmt(stmt));
-    // A tail whose value is not used is a statement, whose temporaries go at its end, as at each loop iteration's.
+    // A tail whose value is not used is a statement, whose temporaries go at its end, as at each loop iteration's. Its
+    // value goes with the statement the block is, after the block's variables.
     const tail =
-      block.tail &&
-      (tailAsStatement ? this.expressionStatement(this.statement(block.tail), block.tail) : this.value(block.tail));
+      block.tail && (tailAsStatement ? this.releasingTemporaries(this.statement(block.tail)) : this.value(block.tail));
     const declared = this.declaredSlots(block);
     const count = stmts.length;
     const run: Eval = (frame) => {
@@ -287,12 +287,27 @@ export class Compiler {
   /** Runs an expression as a statement: its value and its temporaries go at its end, also when it breaks out. */
   private expressionStatement(value: Eval, expr: Expr): Eval {
     const dropped = this.droppedType(expr.ty);
+    const run = this.releasingTemporaries(value, (frame, result) => {
+      if (dropped) frame.runtime.dropper?.drop(result, dropped(frame));
+    });
+    return (frame) => {
+      run(frame);
+      return UNIT_VALUE;
+    };
+  }
+
+  /**
+   * Runs an expression whose temporaries go at its end, also when it breaks out, and gives its value; `before` takes
+   * the value before the temporaries go, as the value is the last of them.
+   */
+  private releasingTemporaries(value: Eval, before?: (frame: Frame, result: Value) => void): Eval {
     return (frame) => {
       frame.runtime.spend();
       const mark = frame.runtime.liveGuards.length;
       try {
         const result = value(frame);
-        if (dropped) frame.runtime.dropper?.drop(result, dropped(frame));
+        before?.(frame, result);
+        return result;
       } catch (error) {
         // A guard the statement holds goes as the panic unwinds, which poisons its lock.
         if (error instanceof RustPanic) frame.runtime.unwinding = true;
@@ -300,7 +315,6 @@ export class Compiler {
       } finally {
         frame.runtime.releaseGuards(frame, mark);
       }
-      return UNIT_VALUE;
     };
   }
 
