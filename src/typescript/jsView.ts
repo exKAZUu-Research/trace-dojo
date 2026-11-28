@@ -88,6 +88,7 @@ const exportedPatternTypes = new Set([
   'array_pattern',
   'pair_pattern',
   'assignment_pattern',
+  'object_assignment_pattern',
   'rest_pattern',
 ]);
 
@@ -983,8 +984,7 @@ function exportedVariables(declaration: TreeNode, namespaceName: string, binder:
 
 /**
  * A destructuring pattern that an exported declaration binds, as the assignment pattern TypeScript compiles it to,
- * which assigns the namespace's properties: `{ a, b = 1 }` becomes `{ a: N.a, b: N.b = 1 }`, and the names elsewhere in
- * it read as the namespace's properties already.
+ * which rewrites bound targets to the namespace's properties while lowering keys and default values as expressions.
  */
 function exportedPattern(node: TreeNode, namespaceName: string, binder: Binder): ViewNode {
   if (node.type === 'identifier') return exportedMemberReference(node, namespaceName, nameOf(node));
@@ -1006,7 +1006,9 @@ function exportedPattern(node: TreeNode, namespaceName: string, binder: Binder):
       if (!child || child.type === 'comment') return [];
       const fieldName = node.fieldNameForChild(index);
       const viewed =
-        !child.isNamed || fieldName === 'key' ? view(child, binder) : exportedPattern(child, namespaceName, binder);
+        !child.isNamed || fieldName === 'key' || fieldName === 'right'
+          ? view(child, binder)
+          : exportedPattern(child, namespaceName, binder);
       return [{ node: viewed, fieldName }];
     })
   );
