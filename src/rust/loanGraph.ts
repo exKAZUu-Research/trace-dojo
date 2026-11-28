@@ -336,6 +336,8 @@ function conflicts(loan: Loan, access: Access, at: number): boolean {
   for (let index = 0; index < common; index++) {
     const a = borrowed[index];
     const b = accessed[index];
+    // A `Deref` impl's target (`&`) borrows its whole owner, and an element (`[]`) may be any of them.
+    if (a === '&' || b === '&') break;
     if (a !== b && a !== '[]' && b !== '[]') return false;
   }
   // Assigning a place, or ending its storage, leaves alone what it refers to.

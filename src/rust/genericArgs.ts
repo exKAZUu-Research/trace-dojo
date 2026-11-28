@@ -1,7 +1,17 @@
 import type { Expr, TypeAst } from './ast';
 import { constInteger, constScalarValue } from './constExpressions';
 import { compileError, lowerType, type TypeScope } from './items';
-import { type AdtDef, arrayOfLength, constValueType, substitute, type Type, type TypeParam, USIZE } from './types';
+import {
+  type AdtDef,
+  arrayOfLength,
+  constValueType,
+  shallow,
+  substitute,
+  type Type,
+  type TypeParam,
+  typeToString,
+  USIZE,
+} from './types';
 
 /** `[T; N]`, whose length is a constant or a const parameter. */
 export function lowerArrayType(ast: Extract<TypeAst, { kind: 'array' }>, scope: TypeScope): Type {
@@ -21,9 +31,15 @@ export function lowerConstArg(ast: Extract<TypeAst, { kind: 'constArg' }>, scope
   // `{ 2 + 1 }` is the constant expression inside its braces.
   const expr =
     ast.value.kind === 'block' && ast.value.stmts.length === 0 && ast.value.tail ? ast.value.tail : ast.value;
-  if (expr.kind === 'bool' || expr.kind === 'char') return constValueType(expr.value);
+  const expected = ast.type ? lowerType(ast.type, scope) : undefined;
+  if (expr.kind === 'bool' || expr.kind === 'char') {
+    if (expected && shallow(expected).kind !== expr.kind) {
+      compileError(ast.span, `型が合いません（${typeToString(expected)} が必要ですが、${expr.kind} です）。`);
+    }
+    return constValueType(expr.value);
+  }
   // The value has the type of the const parameter it is given to (`usize` where that is not known yet).
-  const value = constScalarValue(expr, scope, ast.type ? lowerType(ast.type, scope) : USIZE);
+  const value = constScalarValue(expr, scope, expected ?? USIZE);
   if (value === undefined) compileError(ast.span, '定数の型引数には、リテラルか定数の式を書いてください。');
   return constValueType(value);
 }

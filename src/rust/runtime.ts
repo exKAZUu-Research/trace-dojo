@@ -282,7 +282,7 @@ export class Runtime implements TracedRuntime<Frame> {
     if (this.liveGuards.length <= mark) return;
     // Rust drops a statement's temporaries in the reverse order of their making.
     for (const guard of this.liveGuards.splice(mark).toReversed()) {
-      if (guard === kept || frame.locals.some((value) => holds(value, guard))) continue;
+      if (holds(kept, guard) || frame.locals.some((value) => holds(value, guard))) continue;
       guard.release();
     }
   }
@@ -325,11 +325,14 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 }
 
-/** Whether a value is a guard, or holds it directly in an `Option`, a tuple, or a struct. */
-function holds(value: unknown, guard: { release(): void }): boolean {
+/** Whether a value is a guard, or holds it in an `Option`, a tuple, a struct, or an array, however deep. */
+function holds(value: unknown, guard: { release(): void }, seen = new Set<unknown>()): boolean {
   if (value === guard) return true;
-  if (value instanceof StructValue || value instanceof EnumValue) return value.fields.includes(guard as Value);
-  return Array.isArray(value) && value.includes(guard as Value);
+  if (seen.has(value)) return false;
+  seen.add(value);
+  const parts =
+    value instanceof StructValue || value instanceof EnumValue ? value.fields : Array.isArray(value) ? value : [];
+  return parts.some((part) => holds(part, guard, seen));
 }
 
 export class StackOverflow {}

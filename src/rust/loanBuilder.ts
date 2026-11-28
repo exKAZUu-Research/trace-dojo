@@ -19,7 +19,7 @@ import {
   type BindingMode,
   derefCoercedLayout,
   derefCoercedPlace,
-  isReference,
+  derefProjection,
   matchDeref,
   project,
   reborrowedPointeeLayout,
@@ -340,7 +340,7 @@ export class LoanBuilder {
       case 'unary': {
         if (expr.op !== '*') return undefined;
         const base = this.placeOrTemp(expr.operand, mutable);
-        return { root: base.root, proj: [...base.proj, isReference(expr.operand.ty) ? '*' : '#'] };
+        return { root: base.root, proj: [...base.proj, derefProjection(expr.operand.ty)] };
       }
       default: {
         return undefined;
@@ -411,7 +411,8 @@ export class LoanBuilder {
       case '*': {
         return derefLayout(layout);
       }
-      case '#': {
+      case '#':
+      case '&': {
         return ownedDerefLayout(layout);
       }
       case '[]': {

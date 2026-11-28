@@ -72,6 +72,17 @@ export function isReference(type: Type | undefined): boolean {
   return t?.kind === 'ref' || (t?.kind === 'adt' && (t.def.builtin === 'ConstPtr' || t.def.builtin === 'MutPtr'));
 }
 
+/**
+ * The projection of `*` of a value of the type: `*` through a pointer, `#` into what an owner holds (`Box`, `String`,
+ * `Vec`), and `&` through a `Deref` impl (the program's, `Rc`, a guard), which borrows the whole owner, so that it
+ * overlaps every field of it.
+ */
+export function derefProjection(type: Type | undefined): '*' | '#' | '&' {
+  if (isReference(type)) return '*';
+  const t = type && normalize(shallow(type));
+  return t?.kind === 'adt' && ['Box', 'String', 'Vec'].includes(t.def.builtin ?? '') ? '#' : '&';
+}
+
 export function variantOf(annotations: Annotations, pattern: Pattern): number {
   const res = annotations.paths.get(pattern);
   return res?.kind === 'ctor' ? res.variant : 0;

@@ -465,9 +465,12 @@ export function ownedDerefLayout(layout: Layout): Layout {
   return NONE;
 }
 
-/** The projections of derefs: `*` through a reference, `#` through an owner (a `Box`, a collection's slice). */
+/**
+ * The projections of derefs: `*` through a reference, `#` through an owner (a `Box`, a collection's slice), and `&`
+ * through a `Deref` impl, which borrows the whole owner.
+ */
 export function derefSteps(derefs: readonly DerefKind[] | undefined): string[] {
-  return (derefs ?? []).map((step) => (step === 'ref' || step === 'mutRef' ? '*' : '#'));
+  return (derefs ?? []).map((step) => (step === 'ref' || step === 'mutRef' ? '*' : step === 'user' ? '&' : '#'));
 }
 
 /** The type of a receiver after the derefs of its method call's adjustment. */
