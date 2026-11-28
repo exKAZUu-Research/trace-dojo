@@ -140,16 +140,7 @@ function overloadedOperator(
 
 // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, expected: Type | undefined): Type {
-  if (expr.op === '*') {
-    const type = normalize(shallow(c.settled(c.expr(expr.operand, undefined))));
-    if (type.kind === 'adt' && (type.def.builtin === 'ConstPtr' || type.def.builtin === 'MutPtr')) {
-      return rawPointee(c, expr, type);
-    }
-    const deref = derefOnce(c.program, type);
-    if (deref) return deref.type;
-    if (type.kind === 'var') compileError(expr.span, '型が決まらないので、* で参照をたどれません。');
-    compileError(expr.span, `${typeToString(resolve(type))} は参照ではないので、* でたどれません。`);
-  }
+  if (expr.op === '*') return checkDeref(c, expr);
   if (expr.op === '-' && expr.operand.kind === 'int') c.negatedLiterals.add(expr.operand);
   const operandType = c.expr(expr.operand, expected);
   const t = numericOperand(operandType);
@@ -167,6 +158,23 @@ export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, e
   if (t.kind === 'int' || t.kind === 'float' || (t.kind === 'var' && t.v.literal)) return t;
   if (t.kind === 'var') c.unknownLocal(expr.operand);
   return compileError(expr.span, `${typeToString(resolve(operandType))} に - は使えません。`);
+}
+
+/** `*x`: through a reference, a raw pointer, an owner, a `Deref` impl, or a type parameter's `Deref` bound. */
+function checkDeref(c: Checker, expr: Extract<Expr, { kind: 'unary' }>): Type {
+  const type = normalize(shallow(c.settled(c.expr(expr.operand, undefined))));
+  if (type.kind === 'adt' && (type.def.builtin === 'ConstPtr' || type.def.builtin === 'MutPtr')) {
+    return rawPointee(c, expr, type);
+  }
+  const deref = derefOnce(c.program, type);
+  if (deref) return deref.type;
+  if (type.kind === 'var') compileError(expr.span, '型が決まらないので、* で参照をたどれません。');
+  // A type parameter derefs through its `Deref` bound (`T: Deref<Target = i32>`).
+  const derefTrait = c.program.traitDef('Deref');
+  if (type.kind === 'param' && c.solver.implements(type, { trait: derefTrait, args: [] }) === 'yes') {
+    return projectionOf(derefTrait, 'Target', type, []);
+  }
+  return compileError(expr.span, `${typeToString(resolve(type))} は参照ではないので、* でたどれません。`);
 }
 
 /**

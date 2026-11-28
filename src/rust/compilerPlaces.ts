@@ -136,6 +136,7 @@ function derefPlace(c: Compiler, expr: ExprOf<'unary'>): PlaceEval {
     const call = userDerefCall(c, operandType, true, expr.span);
     return (frame) => call(frame, base(frame)) as Place;
   }
+  if (operandType.kind === 'param') return parameterDerefPlace(c, expr, operandType);
   if (operandType.kind === 'ref' && operandType.mutable) {
     const operand = c.read(expr.operand);
     return (frame) => operand(frame) as Place;
@@ -146,6 +147,21 @@ function derefPlace(c: Compiler, expr: ExprOf<'unary'>): PlaceEval {
   }
   // A Box is its value.
   return compilePlace(c, expr.operand);
+}
+
+/** `*t` of a type parameter with a `DerefMut` bound, which derefs as the type it stands for in the running frame does. */
+function parameterDerefPlace(c: Compiler, expr: ExprOf<'unary'>, operandType: Type): PlaceEval {
+  const base = compilePlace(c, expr.operand);
+  const type = runtimeType(operandType);
+  const fn = c.program.traitDef('DerefMut').methods.get('deref_mut')!;
+  return (frame) => {
+    const t = normalize(shallow(type(frame)));
+    if (derefOnce(c.program, t)?.kind === 'user') {
+      return c.support.callFn(fn, [t], [base(frame)], undefined, expr.span, frame) as Place;
+    }
+    if (t.kind === 'ref') return t.mutable ? (base(frame).get() as Place) : readOnlyPlace(base(frame).get());
+    return base(frame);
+  };
 }
 
 function indexPlace(c: Compiler, expr: ExprOf<'index'>): PlaceEval {
