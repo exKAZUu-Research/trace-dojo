@@ -151,7 +151,7 @@ export class BorrowChecker {
       case 'let': {
         if (!stmt.init) return this.declareEmpty(stmt.pattern, state);
         const { pattern, init } = stmt;
-        if (pattern.kind === 'binding' && !pattern.sub) {
+        if (pattern.kind === 'binding' && !pattern.sub && !pattern.byRef) {
           const known = this.constantValue(init, state);
           let current = this.expr(init, state, 'move');
           for (const local of this.bindingsOf(pattern)) current = setVar(current, local, initState(known));

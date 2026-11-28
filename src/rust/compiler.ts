@@ -315,8 +315,9 @@ export class Compiler {
         return UNIT_VALUE;
       };
     }
-    // Destructuring a place moves the parts its bindings take; the place keeps the rest.
-    if (stmt.pattern.kind !== 'binding' && isPlaceExpr(stmt.init, this.annotations)) return this.destructure(stmt);
+    // Destructuring a place moves the parts its bindings take; the place keeps the rest. `let ref x = place` borrows it.
+    const destructures = stmt.pattern.kind !== 'binding' || stmt.pattern.byRef !== undefined;
+    if (destructures && isPlaceExpr(stmt.init, this.annotations)) return this.destructure(stmt);
     if (stmt.else) {
       const init = this.value(stmt.init);
       const bindRest = this.compileTemporaryBinder(stmt.pattern, stmt.init);
