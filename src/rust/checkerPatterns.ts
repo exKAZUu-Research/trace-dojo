@@ -266,15 +266,8 @@ function bindingPattern(
     checkConstPattern(c, pattern, binding, matched);
     return;
   }
-  if (!inherited) checkVariantBinding(pattern, matched, mode);
-  // Edition 2024 does not let `mut` or `ref` modify a binding where the pattern borrows what it matches without saying so.
-  if (inherited && (pattern.mutable || pattern.byRef)) {
-    const written = pattern.byRef === 'refMut' ? 'ref mut' : pattern.byRef ? 'ref' : 'mut';
-    compileError(
-      pattern.span,
-      `参照を分解するパターンの中では、${written} ${pattern.name} と書けません（パターンに & を書くか、値を分解してください）。`
-    );
-  }
+  if (inherited) inheritedBinding(pattern, t);
+  else checkVariantBinding(pattern, matched, mode);
   const byRef = pattern.byRef && ref(type, pattern.byRef === 'refMut');
   const localType = byRef ?? (mode === 'move' ? type : ref(t, mode === 'refMut'));
   const existing = c.orBindings?.get(pattern.name);
@@ -294,6 +287,18 @@ function bindingPattern(
   }
   c.annotations.bindings.set(pattern, local);
   if (pattern.sub && pattern.sub.kind !== 'rest') checkPatternPart(c, pattern.sub, type, mode);
+}
+
+/** A binding a default binding mode borrows for: one `mut` or `ref` may not modify in edition 2024. */
+function inheritedBinding(pattern: Extract<Pattern, { kind: 'binding' }>, t: Type): void {
+  if (pattern.mutable || pattern.byRef) {
+    const written = pattern.byRef === 'refMut' ? 'ref mut' : pattern.byRef ? 'ref' : 'mut';
+    compileError(
+      pattern.span,
+      `参照を分解するパターンの中では、${written} ${pattern.name} と書けません（パターンに & を書くか、値を分解してください）。`
+    );
+  }
+  if (t.kind === 'ref') pattern.inheritedRef = t.mutable ? 'refMut' : 'ref';
 }
 
 function checkVariantBinding(pattern: Extract<Pattern, { kind: 'binding' }>, type: Type, mode: LocalVar['mode']): void {

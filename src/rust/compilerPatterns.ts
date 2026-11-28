@@ -275,8 +275,8 @@ function bindingMatcher(c: Compiler, pattern: PatternOf<'binding'>, type: Type):
   const sub = pattern.sub ? compileProbe(c, pattern.sub) : undefined;
   const copies = local.mode === 'move' && needsCopy(resolve(local.type, true)) && c.isCopy(local.type);
   const localType = normalize(shallow(local.type));
-  // An explicit `ref mut` borrows what it matches, even a value that is itself a reference.
-  const mode = pattern.byRef === 'refMut' ? 'refMut' : local.mode;
+  // An explicit `ref mut`, or a default binding mode, borrows what it matches, even a value that is itself a reference.
+  const mode = pattern.byRef === 'refMut' || pattern.inheritedRef === 'refMut' ? 'refMut' : local.mode;
   // Match ergonomics on a `&mut` value gives the parts of the value with `&mut` types, which are their places.
   const bindsPlace = mode === 'refMut' || (localType.kind === 'ref' && localType.mutable);
   // Binding a part of a variable by value moves it out, leaving the variable without it, as Rust does.

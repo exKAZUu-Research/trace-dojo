@@ -410,6 +410,8 @@ export type Pattern = PatternBase &
         name: string;
         mutable: boolean;
         byRef?: 'ref' | 'refMut';
+        /** Set by the type checker: a default binding mode borrows what it binds (`Some(x)` matching `&mut o`). */
+        inheritedRef?: 'ref' | 'refMut';
         sub: Pattern | undefined;
       }
     | { kind: 'lit'; expr: Expr }
