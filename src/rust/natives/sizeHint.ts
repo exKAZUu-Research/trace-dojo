@@ -1,7 +1,7 @@
 import { normalize } from '../infer';
 import { intoIterShape } from '../iterTypes';
 import { shallow, type Type } from '../types';
-import { DynValue, type Value } from '../values';
+import { DynValue, isPlace, type Value } from '../values';
 import { deref, type NativeContext } from './support';
 
 export const UNBOUNDED_SHAPES = new Set(['RangeFromShape', 'RepeatShape', 'RepeatWithShape']);
@@ -12,22 +12,23 @@ export function sizeHintShape(
   value: Value,
   type: Type
 ): Extract<Type, { kind: 'adt' }> | undefined {
-  const shape = normalize(shallow(intoIterShape(ctx.interp.program, type) ?? type));
+  let shape = normalize(shallow(intoIterShape(ctx.interp.program, type) ?? type));
+  while (shape.kind === 'adt' && shape.def.name === 'ByRefShape') shape = normalize(shallow(shape.args[0]));
   if (shape.kind !== 'adt') return undefined;
-  if (shape.def.name === 'ByRefShape') return sizeHintShapeOf(shape.args[0]);
   if (shape.def.name !== 'DynIteratorShape') return shape;
-  const held = deref(value);
+  let held = deref(value);
+  while (isPlace(held)) held = deref(held.get());
   return held instanceof DynValue ? sizeHintShape(ctx, deref(held.value), held.type) : undefined;
 }
 
-function sizeHintShapeOf(type: Type): Extract<Type, { kind: 'adt' }> | undefined {
-  const shape = normalize(shallow(type));
-  if (shape.kind !== 'adt') return undefined;
-  return shape.def.name === 'ByRefShape' ? sizeHintShapeOf(shape.args[0]) : shape;
-}
-
-export function reachesUnbounded(shape: Type): boolean {
+/**
+ * Whether the shape's count of what it has left is not its own: an adapter takes it from its source's, which an
+ * unbounded source, a `cycle`, or a `dyn Iterator` inside it does not give.
+ */
+export function hidesCount(shape: Type): boolean {
   const t = normalize(shallow(shape));
   if (t.kind !== 'adt') return false;
-  return UNBOUNDED_SHAPES.has(t.def.name) || t.args.some((arg) => reachesUnbounded(arg));
+  return COUNT_HIDING_SHAPES.has(t.def.name) || t.args.some((arg) => hidesCount(arg));
 }
+
+const COUNT_HIDING_SHAPES = new Set([...UNBOUNDED_SHAPES, 'CycleShape', 'DynIteratorShape', 'IntoShape']);

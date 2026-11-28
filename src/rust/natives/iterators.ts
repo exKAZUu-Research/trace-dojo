@@ -49,7 +49,7 @@ import { extreme, extremeByKey } from './extremes';
 import { layoutOf, sizeOf } from './layout';
 import { outcomeIter } from './options';
 import { rangeIterator } from './rangeIterator';
-import { reachesUnbounded, sizeHintShape, UNBOUNDED_SHAPES } from './sizeHint';
+import { hidesCount, sizeHintShape, UNBOUNDED_SHAPES } from './sizeHint';
 import { lessByPartialOrd, sortSlice } from './sorting';
 import { collectString } from './stringBuilder';
 import { sumOrProduct } from './sums';
@@ -585,8 +585,8 @@ define({
     if (isUserIterator(ctx.typeArgs[0])) return [0n, none(ctx)];
     const shape = sizeHintShape(ctx, deref(self), ctx.typeArgs[0]);
     if (UNBOUNDED_SHAPES.has(shape?.def.name ?? '')) return [intMax('usize'), none(ctx)];
-    // An adapter's own count of what it has left is taken from its source's, which an unbounded source has not.
-    if (shape && reachesUnbounded(shape)) unsupportedAtRun(ctx, '終わりのない反復子を元にした反復子の size_hint');
+    if (!shape || hidesCount(shape))
+      unsupportedAtRun(ctx, '終わりのない反復子や dyn Iterator を元にした反復子の size_hint');
     const iter = iterOf(ctx.interp.toIter(deref(self), ctx.typeArgs[0]));
     if (!iter.remaining) unsupportedAtRun(ctx, 'この反復子の size_hint');
     const left = lengthOf(iter);
