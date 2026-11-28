@@ -82,8 +82,9 @@ const REPR_NAMES = new Set(['C', 'Rust', 'transparent', 'packed', 'align', ...IN
 
 /** Requires `#[repr(..)]` to name known representations, `align` and `packed` alone taking `(N)` (E0539, E0565). */
 function checkReprArgs(args: Node | null, span: Span): void {
-  const parts = args?.namedChildren.filter((child) => !isComment(child)) ?? [];
-  if (parts.length === 0) syntaxError(span, '#[repr] には、表現（C や u8 など）を書いてください（E0539）。');
+  // A bare `#[repr]` is malformed; an empty `#[repr()]` asks for nothing, which rustc accepts.
+  if (!args) syntaxError(span, '#[repr] には、表現（C や u8 など）を書いてください（E0539）。');
+  const parts = args.namedChildren.filter((child) => !isComment(child));
   for (const [index, part] of parts.entries()) {
     if (part.type === 'token_tree' && ['align', 'packed'].includes(parts[index - 1]?.text ?? '')) continue;
     if (!['identifier', 'primitive_type'].includes(part.type) || !REPR_NAMES.has(part.text)) {
