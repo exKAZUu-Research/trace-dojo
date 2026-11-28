@@ -169,11 +169,6 @@ function checkDeref(c: Checker, expr: Extract<Expr, { kind: 'unary' }>): Type {
   const deref = derefOnce(c.program, type);
   if (deref) return deref.type;
   if (type.kind === 'var') compileError(expr.span, '型が決まらないので、* で参照をたどれません。');
-  // A type parameter derefs through its `Deref` bound (`T: Deref<Target = i32>`).
-  const derefTrait = c.program.traitDef('Deref');
-  if (type.kind === 'param' && c.solver.implements(type, { trait: derefTrait, args: [] }) === 'yes') {
-    return projectionOf(derefTrait, 'Target', type, []);
-  }
   return compileError(expr.span, `${typeToString(resolve(type))} は参照ではないので、* でたどれません。`);
 }
 

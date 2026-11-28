@@ -5,13 +5,12 @@ import { fnCall } from './compilerCalls';
 import { derefAll, evaluateValues, isStringType, stringish, stripRefs, withEvaluatedValues } from './compilerCommon';
 import { pointee, userDerefCall, withoutPin } from './compilerPlaces';
 import { floatNumber, negateFloat } from './floatBits';
-import { normalize } from './infer';
 import { derefOnce } from './methods';
 import { btreeSetOp, hashSetMembers, type SetOp } from './natives/setOps';
 import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, valuesUnequal, wrap } from './ops';
 import type { Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { type IntName, resolve, shallow, type Type } from './types';
+import { type IntName, resolve, type Type } from './types';
 import { DONE, type Place, type RawPtr, SetValue, textOf, UNIT_VALUE } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
@@ -50,7 +49,6 @@ export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
       const call = userDerefCall(c, operandType, false, expr.span);
       return (frame) => call(frame, derefAll(operand(frame)));
     }
-    if (operandType.kind === 'param') return parameterDeref(c, expr, operand, operandType);
     if (operandType.kind === 'ref' && operandType.mutable) return (frame) => (operand(frame) as Place).get();
     return operand;
   }
@@ -70,20 +68,6 @@ export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
     const negated = -(derefAll(operand(frame)) as bigint);
     if (negated !== wrap(name, negated)) overflow('neg', span);
     return negated;
-  };
-}
-
-/** `*t` of a type parameter with a `Deref` bound, which derefs as the type it stands for in the running frame does. */
-function parameterDeref(c: Compiler, expr: ExprOf<'unary'>, operand: Eval, operandType: Type): Eval {
-  const type = runtimeType(operandType);
-  const fn = c.program.traitDef('Deref').methods.get('deref')!;
-  return (frame) => {
-    const t = normalize(shallow(type(frame)));
-    const value = operand(frame);
-    if (derefOnce(c.program, t)?.kind === 'user') {
-      return c.support.callFn(fn, [t], [derefAll(value)], undefined, expr.span, frame);
-    }
-    return t.kind === 'ref' && t.mutable ? (value as Place).get() : value;
   };
 }
 
