@@ -2,17 +2,7 @@ import { exactCapacity } from '../capacity';
 import { normalize } from '../infer';
 import { cloneValue, copyValue } from '../ops';
 import { shallow, type Type } from '../types';
-import {
-  BorrowGuard,
-  CellBox,
-  CellPlace,
-  type Place,
-  SharedBox,
-  textOf,
-  UNIT_VALUE,
-  type Value,
-  WeakRef,
-} from '../values';
+import { BorrowGuard, CellBox, type Place, SharedBox, textOf, UNIT_VALUE, type Value, WeakRef } from '../values';
 import { defaultValue } from './core';
 import { call, define, deref, err, type NativeContext, none, ok, panic, placeOf, some } from './support';
 
@@ -141,7 +131,7 @@ define({
     target.borrows = -1;
     let replacement: Value;
     try {
-      replacement = call(ctx, f, [new CellPlace(target.value)]);
+      replacement = call(ctx, f, [cellPlace(target)]);
     } finally {
       target.borrows = 0;
     }
