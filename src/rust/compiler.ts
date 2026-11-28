@@ -61,6 +61,8 @@ export interface CompiledFn {
   body: Eval;
   /** The slots the body's own variables are in, in the order declared, which go the last declared first. */
   bodySlots?: readonly number[];
+  /** The slots each parameter binds, in the order declared; the parameters go after the body, the last one first. */
+  paramSlots?: readonly (readonly number[])[];
 }
 
 /** What compiled code calls into: functions, closures, natives, conversions, and formatting. */
@@ -173,10 +175,11 @@ export class Compiler {
       const params: { local: LocalVar | undefined; pattern: Pattern | undefined }[] = [];
       if (item.selfParam) params.push({ local: context.locals.find((local) => local.isSelf), pattern: undefined });
       for (const param of item.params) params.push({ local: undefined, pattern: param.pattern });
-      const binders = params.map(({ local, pattern }) => this.paramBinder(local, pattern));
+      const binders = params.map(({ local, pattern }, index) => this.paramBinder(local, pattern, index));
       compiled.bind = (frame, args) => {
         for (const [index, binder] of binders.entries()) binder(frame, args[index]);
       };
+      compiled.paramSlots = params.map(({ local, pattern }) => (local ? [local.slot] : this.patternSlots(pattern!)));
       const body = item.body!;
       compiled.body = this.compileBlock(body, isUnit(resolve(def.ret, true)), false);
       compiled.bodySlots = this.declaredSlots(body);
@@ -376,11 +379,22 @@ export class Compiler {
     for (const operand of operands) this.extendedOperands.set(operand, slot);
   }
 
-  private paramBinder(local: LocalVar | undefined, pattern: Pattern | undefined): (frame: Frame, value: Value) => void {
+  /**
+   * Binds a parameter. What a pattern parameter (`_`, `(a, _)`, `P { p, .. }`) does not bind goes with the parameter,
+   * after the variables it binds.
+   */
+  private paramBinder(
+    local: LocalVar | undefined,
+    pattern: Pattern | undefined,
+    index: number
+  ): (frame: Frame, value: Value) => void {
     if (local) return (frame, value) => void (frame.locals[local.slot] = value);
     const bind = this.compileOwnedBinder(pattern!);
+    const type = pattern!.ty && runtimeType(pattern!.ty);
     return (frame, value) => {
-      frame.temporaries.push(bind(frame, value));
+      const place = bind(frame, value);
+      frame.temporaries.push(place);
+      if (type) frame.paramLeftovers.set(index, () => frame.runtime.dropper?.drop(place.get(), type(frame)));
     };
   }
 
@@ -810,10 +824,11 @@ export class Compiler {
     this.withFn(context, () => {
       // A closure's steps are recorded as its function's are.
       this.recordsSteps = this.tracing && !outer.isAtomic && !context.isAtomic;
-      const binders = expr.params.map((param) => this.paramBinder(undefined, param.pattern));
+      const binders = expr.params.map((param, index) => this.paramBinder(undefined, param.pattern, index));
       compiled.bind = (frame, args) => {
         for (const [index, binder] of binders.entries()) binder(frame, args[index]);
       };
+      compiled.paramSlots = expr.params.map((param) => this.patternSlots(param.pattern));
       const body = expr.body;
       compiled.body = body.ty && isUnit(resolve(body.ty, true)) ? this.statement(body) : this.value(body);
       this.fillInfo(functionInfo, context);

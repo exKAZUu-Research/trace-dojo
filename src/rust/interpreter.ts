@@ -70,10 +70,10 @@ interface Dispatch {
   implArgs: Type[] | undefined;
 }
 
-/** Runs a checked program: calls, trait dispatch, natives, and formatting. */
 /** Where a library call that a loop or an adapter makes, not the program, reports a panic it has no place for. */
 const NO_SPAN: Span = { row: 0, col: 1 };
 
+/** Runs a checked program: calls, trait dispatch, natives, and formatting. */
 export class Interpreter implements CallSupport {
   runtime!: Runtime;
   readonly formatter: Formatter;
@@ -277,11 +277,7 @@ export class Interpreter implements CallSupport {
         // The temporaries of the body's tail or `return` value go first (edition 2024), then the body's variables,
         // then the parameters; `process::exit` drops nothing.
         runtime.releaseGuards(frame, guards, result);
-        if (!exiting && runtime.dropper) {
-          const bodySlots = compiled.bodySlots ?? [];
-          const others = compiled.info.locals.map((local) => local.slot).filter((slot) => !bodySlots.includes(slot));
-          runtime.dropper.dropSlots(frame, [...others.toSorted((a, b) => a - b), ...bodySlots]);
-        }
+        if (!exiting && runtime.dropper) dropFrameLocals(runtime.dropper, frame, compiled);
         onEnd?.(frame, result);
       } finally {
         runtime.popFrame();
@@ -767,4 +763,22 @@ function mentions(type: Type, param: TypeParam): boolean {
 
 function fieldsOf(value: Value): Value[] {
   return value instanceof StructValue ? value.fields : (value as Value[]);
+}
+
+/**
+ * Drops a returning frame's variables: the body's, the last declared first, then the parameters, the last declared
+ * first, a pattern parameter's leftover after the variables it binds.
+ */
+function dropFrameLocals(dropper: Dropper, frame: Frame, compiled: CompiledFn): void {
+  const bodySlots = compiled.bodySlots ?? [];
+  const paramSlots = compiled.paramSlots ?? [];
+  const params = new Set(paramSlots.flat());
+  const others = compiled.info.locals
+    .map((local) => local.slot)
+    .filter((slot) => !bodySlots.includes(slot) && !params.has(slot));
+  dropper.dropSlots(frame, [...others.toSorted((a, b) => a - b), ...bodySlots]);
+  for (let index = paramSlots.length - 1; index >= 0; index--) {
+    dropper.dropSlots(frame, paramSlots[index]);
+    frame.paramLeftovers.get(index)?.();
+  }
 }

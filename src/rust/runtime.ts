@@ -67,6 +67,8 @@ export class Frame implements TracedFrame {
   readonly referents = new Map<number, { place: Place; root: number; view?: (value: Value) => Value }>();
   /** The temporaries a `let` extends to the life of the variable in each slot (`let r = &make();`), in order made. */
   readonly extendedTemporaries = new Map<number, (() => void)[]>();
+  /** What each pattern parameter does not bind, by the parameter's index, which goes after the variables it binds. */
+  readonly paramLeftovers = new Map<number, () => void>();
 
   holdUntilDropped(slot: number, release: () => void): void {
     const held = this.extendedTemporaries.get(slot);
