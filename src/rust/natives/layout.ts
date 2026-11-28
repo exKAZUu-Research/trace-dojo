@@ -38,6 +38,22 @@ const COLLECTION_LAYOUTS: Partial<Record<string, Layout>> = {
   BTreeSet: { size: 24, align: 8 },
 };
 
+/**
+ * The layouts of std types whose declarations hide their storage (`Duration { inner: () }`), as rustc 1.99.1 lays them
+ * out on a 64-bit target; a size of 0 would make them zero-sized, which sorting and the like skip.
+ */
+const OPAQUE_LAYOUTS: Partial<Record<string, Layout>> = {
+  // `secs: u64` and `nanos: u32`, whose values past 999_999_999 are a niche.
+  Duration: { size: 16, align: 8, niche: { size: 4, available: 2n ** 32n - 1_000_000_000n } },
+  PathBuf: { size: 24, align: 8, niche: CAPACITY_NICHE },
+  File: { size: 4, align: 4, niche: { size: 4, available: 1n } },
+  JoinHandle: { size: 24, align: 8 },
+  Sender: { size: 16, align: 8 },
+  Receiver: { size: 16, align: 8 },
+  Thread: { size: 8, align: 8, niche: { size: 8, available: 1n } },
+  Instant: { size: 16, align: 8 },
+};
+
 export function sizeOf(type: Type): number {
   return layoutOf(type).size;
 }
@@ -87,7 +103,9 @@ export function layoutOf(type: Type): Layout {
 function builtinLayout(builtin: string | undefined, args: Type[]): Layout | undefined {
   const collection = COLLECTION_LAYOUTS[builtin as string];
   if (collection) return collection;
-  if (builtin === 'Box') return pointerTo(args[0]);
+  if (builtin === 'Box' || builtin === 'Rc' || builtin === 'Arc' || builtin === 'Weak') return pointerTo(args[0]);
+  const opaque = OPAQUE_LAYOUTS[builtin as string];
+  if (opaque) return opaque;
   // std's holds `start`, `end`, and `exhausted: bool`.
   if (builtin === 'RangeInclusive') {
     const bound = layoutOf(args[0]);

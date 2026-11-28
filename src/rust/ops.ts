@@ -305,6 +305,10 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
     case 'String': {
       return textOf(x) === textOf(y);
     }
+    case 'Path':
+    case 'PathBuf': {
+      return comparePaths(textOf(x), textOf(y)) === 0;
+    }
     case 'ParseIntError':
     case 'ParseFloatError':
     case 'ParseCharError':
@@ -526,6 +530,10 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
     case 'CStr': {
       return compareBytes(x as bigint[], y as bigint[]);
     }
+    case 'Path':
+    case 'PathBuf': {
+      return comparePaths(textOf(x), textOf(y));
+    }
     case 'Duration': {
       const a = (x as DurationValue).nanos;
       const b = (y as DurationValue).nanos;
@@ -565,6 +573,20 @@ function compareFields(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: b
     if (order !== 0) return order;
   }
   return 0;
+}
+
+/** Paths compare by their components, as std's do (`a/b` before `a/c`, and `a` before `a/b`). */
+function comparePaths(x: string, y: string): number {
+  const [a, b] = [pathComponents(x), pathComponents(y)];
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return Math.sign(a.length - b.length);
+}
+
+/** A path's components: its parts between `/`, of which only a leading empty one (the root) counts. */
+function pathComponents(path: string): string[] {
+  return path.split('/').filter((part, index) => part !== '' || index === 0);
 }
 
 function compareOrderedEntries(
