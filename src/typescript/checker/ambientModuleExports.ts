@@ -15,11 +15,13 @@ interface DefaultExportSymbols {
   namespace?: Sym;
 }
 
-interface DefaultExportLookup {
+export interface DefaultExportLookup {
   scope: Scope;
   exports: Scope;
   scopeOf: (site: TreeNode) => Scope;
   budget?: ExecutionBudget;
+  findModule?: (specifier: string) => Sym | undefined;
+  isLibraryModule?: (module: Sym) => boolean;
 }
 
 /** Binds an unnamed `export default class / abstract class / function` inside an ambient module under `'default'`. */
@@ -59,39 +61,52 @@ export function bindAnonymousDefaultDeclaration(
 }
 
 /** Binds `export default Target;` in an ambient body after all declarations in the program have been bound. */
-export function bindAmbientDefaultValueExport(
-  node: TreeNode,
-  scope: Scope,
-  exports: Scope,
-  scopeOf: (site: TreeNode) => Scope,
-  budget?: ExecutionBudget
-): void {
-  if (!node.children.some((part) => !part.isNamed && part.type === 'default')) return;
+export function bindAmbientDefaultValueExport(node: TreeNode, lookup: DefaultExportLookup): boolean {
+  if (!node.children.some((part) => !part.isNamed && part.type === 'default')) return false;
   const value = node.childForFieldName('value');
-  if (!value) return;
-  const resolved = resolveAmbientEntityInBinder(node, value, scope, exports, scopeOf, budget);
-  if (resolved.value) exports.exportViaClause('default', resolved.value, 'value');
-  if (resolved.type) exports.exportViaClause('default', resolved.type, 'type');
-  if (resolved.namespace) exports.exportViaClause('default', resolved.namespace, 'namespace');
+  if (!value) return false;
+  const resolved = resolveAmbientEntityInBinder(node, value, lookup);
+  const { exports } = lookup;
+  let added = false;
+  if (resolved.value && !exports.values.has('default')) {
+    exports.exportViaClause('default', resolved.value, 'value');
+    added = true;
+  }
+  if (resolved.type && !exports.types.has('default')) {
+    exports.exportViaClause('default', resolved.type, 'type');
+    added = true;
+  }
+  if (resolved.namespace && !exports.namespaces.has('default')) {
+    exports.exportViaClause('default', resolved.namespace, 'namespace');
+    added = true;
+  }
   if (resolved.value || resolved.type || resolved.namespace) {
     exports.recordClauseExport('default', value, resolved);
   }
+  return added;
 }
 
 export function resolveAmbientEntityInBinder(
   node: TreeNode,
   target: TreeNode,
-  scope: Scope,
-  exports: Scope,
-  scopeOf: (site: TreeNode) => Scope,
-  budget?: ExecutionBudget
+  lookup: DefaultExportLookup
 ): DefaultExportSymbols {
   const path = entityNamePath(target);
   if (!path) return {};
-  const lookup: DefaultExportLookup = { scope, exports, scopeOf, budget };
   return path.length === 1
     ? resolveSingleDefaultTarget(path[0], lookup)
     : resolveQualifiedDefaultTarget(node, target, path, lookup);
+}
+
+export function resolveBinderEntityMeaning(
+  target: TreeNode,
+  meaning: MeaningSpace,
+  lookup: DefaultExportLookup,
+  seen = new Set<string>()
+): Sym | undefined {
+  const path = entityNamePath(target);
+  if (!path) return undefined;
+  return resolveBinderEntityPath(path, meaning, lookup, seen);
 }
 
 function resolveSingleDefaultTarget(ident: TreeNode, lookup: DefaultExportLookup): DefaultExportSymbols {
@@ -168,13 +183,14 @@ function scopeContainerAt(
   const resolvedNs = unaliasInBinder(ns, 'namespace', lookup, seen);
   if (resolvedNs?.namespaceExports) return resolvedNs;
   const val = !allowClause && scope.isClauseOnlyExport(name, 'value') ? undefined : scope.values.get(name);
-  if (!val || (val.valueKind !== 'enum' && val.valueKind !== 'importAlias')) return undefined;
+  if (!val || (val.valueKind !== 'enum' && val.valueKind !== 'importAlias' && val.valueKind !== 'import'))
+    return undefined;
   return unaliasContainer(val, lookup, seen);
 }
 
 function unaliasContainer(symbol: Sym | undefined, lookup: DefaultExportLookup, seen: Set<string>): Sym | undefined {
   if (!symbol) return undefined;
-  if (symbol.namespaceKind === 'importAlias') {
+  if (symbol.namespaceKind === 'importAlias' || symbol.namespaceKind === 'import') {
     const ns = unaliasInBinder(symbol, 'namespace', lookup, seen);
     if (ns?.namespaceExports) return ns;
   }
@@ -252,6 +268,7 @@ function unaliasInBinder(
   if (!symbol) return undefined;
   const kind =
     meaning === 'value' ? symbol.valueKind : meaning === 'namespace' ? symbol.namespaceKind : symbol.typeKind;
+  if (kind === 'import') return unaliasImportSymbolInBinder(symbol, meaning, lookup, seen);
   if (kind !== 'importAlias') return symbol;
   const declaration =
     symbol.valueDeclarations.find((decl) => decl.type === 'import_alias') ??
@@ -267,6 +284,65 @@ function unaliasInBinder(
   } finally {
     seen.delete(key);
   }
+}
+
+function unaliasImportSymbolInBinder(
+  symbol: Sym,
+  meaning: MeaningSpace,
+  lookup: DefaultExportLookup,
+  seen: Set<string>
+): Sym | undefined {
+  const target = symbol.importTarget;
+  if (!target || !lookup.findModule) return undefined;
+  if (meaning === 'value' && target.typeOnly) return undefined;
+  const key = `imp:${symbol.id}:${meaning}`;
+  if (seen.has(key)) return undefined;
+  seen.add(key);
+  try {
+    const dep = lookup.findModule(target.module);
+    if (!dep) return undefined;
+    return resolveImportedModuleMemberInBinder(dep, target.name, meaning, lookup, seen);
+  } finally {
+    seen.delete(key);
+  }
+}
+
+function resolveImportedModuleMemberInBinder(
+  dep: Sym,
+  name: string,
+  meaning: MeaningSpace,
+  lookup: DefaultExportLookup,
+  seen: Set<string>
+): Sym | undefined {
+  if (dep.exportEquals) return resolveImportedExportEqualsInBinder(dep, name, meaning, lookup, seen);
+  if (name === '*') return meaning === 'type' ? undefined : dep;
+  const depExports = dep.namespaceExports;
+  if (name === 'default' && !depExports?.values.has('default') && lookup.isLibraryModule?.(dep)) {
+    return meaning === 'type' ? undefined : dep;
+  }
+  return unaliasInBinder(depExports?.tableOf(meaning).get(name), meaning, lookup, seen);
+}
+
+function resolveImportedExportEqualsInBinder(
+  dep: Sym,
+  name: string,
+  meaning: MeaningSpace,
+  lookup: DefaultExportLookup,
+  seen: Set<string>
+): Sym | undefined {
+  const eqTarget = dep.exportEquals;
+  const eqPath = eqTarget ? entityNamePath(eqTarget) : undefined;
+  if (!eqTarget || !eqPath) return undefined;
+  const eqLookup: DefaultExportLookup = {
+    ...lookup,
+    scope: lookup.scopeOf(eqTarget),
+    exports: dep.namespaceExports ?? lookup.exports,
+  };
+  if (name === '*' || name === 'default') return resolveBinderEntityPath(eqPath, meaning, eqLookup, seen);
+  const container =
+    resolveBinderEntityPath(eqPath, 'namespace', eqLookup, seen) ??
+    resolveBinderEntityPath(eqPath, 'value', eqLookup, seen);
+  return unaliasInBinder(container?.namespaceExports?.tableOf(meaning).get(name), meaning, lookup, seen);
 }
 
 function resolveBinderEntityPath(
@@ -316,9 +392,21 @@ function resolveBinderFinalMember(
   const partName = canonicalIdentifier(part.text, part);
   if (current.namespaceExports) {
     const exported = unaliasInBinder(current.namespaceExports.tableOf(meaning).get(partName), meaning, lookup, seen);
-    if (exported) return exported;
+    if (exported) {
+      if (meaning === 'value' && exported.valueKind === 'namespace' && !isRuntimeNamespaceSymbol(exported)) {
+        return undefined;
+      }
+      return exported;
+    }
   }
   return meaning === 'value' || meaning === 'type' ? enumMemberNamed(current, partName) : undefined;
+}
+
+function isRuntimeNamespaceSymbol(symbol: Sym): boolean {
+  return (
+    symbol.valueDeclarations.some((decl) => decl.childForFieldName('name')?.type === 'string') ||
+    isInstantiatedNamespace(symbol)
+  );
 }
 
 /** Checks the target of `export default X` or `export = X` in an ambient context, which may name a value, type, or namespace. */

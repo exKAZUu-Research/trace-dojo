@@ -1,7 +1,13 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
-import { matchWildcardAmbientModule, resolveAmbientEntityInBinder } from './ambientModuleExports';
+import {
+  bindAmbientDefaultValueExport,
+  type DefaultExportLookup,
+  matchWildcardAmbientModule,
+  resolveAmbientEntityInBinder,
+  resolveBinderEntityMeaning,
+} from './ambientModuleExports';
 import { canonicalIdentifier, type Scope, type Sym } from './scopes';
 import { hasToken, named, stringValue } from './syntax';
 
@@ -9,6 +15,7 @@ interface ReExportContext {
   ambientModules: ReadonlyMap<string, Sym>;
   existingModules: ReadonlyMap<string, Sym> | undefined;
   ownScopes: ReadonlyMap<number, Scope>;
+  pendingDefaults?: readonly { node: TreeNode; scope: Scope; exports: Scope }[];
   scopeOf: (site: TreeNode) => Scope;
   budget?: ExecutionBudget;
 }
@@ -38,14 +45,36 @@ interface StarOrigin {
 /** Resolves `export ... from "..."` statements across ambient modules in value, type, and namespace spaces. */
 export function resolveAmbientModuleReExports(context: ReExportContext): void {
   const entries = collectAmbientReExports(context);
-  if (entries.length === 0) return;
+  const hasDefaults = (context.pendingDefaults?.length ?? 0) > 0;
+  if (entries.length === 0 && !hasDefaults) return;
   const starOrigins = new Map<Scope, Map<string, StarOrigin>>();
   while (
+    applyPendingDefaultsPass(context) ||
     applyReExportPass(entries, context, starOrigins, false) ||
     applyReExportPass(entries, context, starOrigins, true)
   ) {
     context.budget?.spend();
   }
+}
+
+function applyPendingDefaultsPass(context: ReExportContext): boolean {
+  let changed = false;
+  for (const { node, scope, exports } of context.pendingDefaults ?? []) {
+    context.budget?.spend();
+    changed = bindAmbientDefaultValueExport(node, binderLookupFor(scope, exports, context)) || changed;
+  }
+  return changed;
+}
+
+function binderLookupFor(scope: Scope, exports: Scope, context: ReExportContext): DefaultExportLookup {
+  return {
+    scope,
+    exports,
+    scopeOf: context.scopeOf,
+    budget: context.budget,
+    findModule: (specifier) => findTargetModule(specifier, context.ambientModules, context.existingModules),
+    isLibraryModule: (module) => context.existingModules?.get(module.name) === module,
+  };
 }
 
 function collectAmbientReExports(context: ReExportContext): ReExportEntry[] {
@@ -304,8 +333,8 @@ function unwrapAliasSymbolOrigin(
   if (!decl || !target) return undefined;
   const scope = context.scopeOf(decl);
   const exports = scope.namespace?.namespaceExports ?? scope;
-  const entity = resolveAmbientEntityInBinder(decl, target, scope, exports, context.scopeOf, context.budget);
-  const picked = meaning === 'typeOnlyValue' ? entity.value : entity[meaning];
+  const binderMeaning = meaning === 'typeOnlyValue' ? 'value' : meaning;
+  const picked = resolveBinderEntityMeaning(target, binderMeaning, binderLookupFor(scope, exports, context));
   return unwrapExportOrigin(picked, meaning, context, seen);
 }
 
@@ -378,14 +407,7 @@ function resolveExportEqualsEntity(dep: Sym, context: ReExportContext): { value?
   const target = dep.exportEquals;
   const exports = dep.namespaceExports;
   if (!target || !exports) return {};
-  return resolveAmbientEntityInBinder(
-    target,
-    target,
-    context.scopeOf(target),
-    exports,
-    context.scopeOf,
-    context.budget
-  );
+  return resolveAmbientEntityInBinder(target, target, binderLookupFor(context.scopeOf(target), exports, context));
 }
 
 function decodedExportName(node: TreeNode): string {

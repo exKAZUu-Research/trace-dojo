@@ -3,11 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
 import { blockHasRuntimeCode, isAmbient } from '../namespaceInstantiation';
-import {
-  bindAmbientDefaultValueExport,
-  bindAnonymousDefaultDeclaration,
-  exportEqualsTargetOf,
-} from './ambientModuleExports';
+import { bindAnonymousDefaultDeclaration, exportEqualsTargetOf } from './ambientModuleExports';
 import { resolveAmbientModuleReExports } from './ambientModuleReExports';
 import { memberNameOf } from './enums';
 import { fsImportMeanings } from './nodeLibrary';
@@ -116,13 +112,11 @@ export class Binder {
     this.moduleScope = options?.rootScope ?? new Scope('module', globalScope, root);
     this.scopes.set(root.id, this.moduleScope);
     this.bindChildren(root, this.moduleScope);
-    for (const { node, scope, exports } of this.pendingAmbientDefaults) {
-      bindAmbientDefaultValueExport(node, scope, exports, (site) => this.scopeOf(site), this.options?.budget);
-    }
     resolveAmbientModuleReExports({
       ambientModules: this.ambientModules,
       existingModules: this.options?.existingModules,
       ownScopes: this.scopes,
+      pendingDefaults: this.pendingAmbientDefaults,
       scopeOf: (site) => this.scopeOf(site),
       budget: this.options?.budget,
     });
