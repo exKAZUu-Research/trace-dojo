@@ -15,13 +15,9 @@ const AVAILABLE_PROCESS_MEMBERS = new Set(['stdout', 'stderr', 'exit', 'exitCode
  * The feature a member of a Node.js object names when this interpreter does not run it, by the name of the interface or
  * module declaring it: of `process`, it provides `stdout`, `stderr`, `exit`, and `exitCode`.
  */
-export function unavailableNodeMember(
-  owner: string | undefined,
-  name: string,
-  stream: 'stdout' | 'stderr' = 'stdout'
-): string | undefined {
+export function unavailableNodeMember(owner: string | undefined, name: string): string | undefined {
   if (owner === 'Process' && !AVAILABLE_PROCESS_MEMBERS.has(name)) return `process.${name}`;
-  if (owner === 'WriteStream') return `process.${stream}.${name}`;
+  if (owner === 'WriteStream') return `WriteStream.${name}`;
   if ((owner === '"fs"' || owner === '"node:fs"') && UNAVAILABLE_FS_MEMBERS.has(name)) return `fs.${name}`;
   return undefined;
 }
