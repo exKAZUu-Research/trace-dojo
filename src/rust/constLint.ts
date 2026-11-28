@@ -591,8 +591,10 @@ export class ConstLint {
     const saved = afterGuard ? new Map(this.known) : undefined;
     if (saved) this.known.clear();
     this.bind(arm.pattern, value);
-    for (const cond of arm.guard ?? []) this.condition(cond);
-    const diverges = this.branch(() => this.expr(arm.body));
+    // A guard known to fail leaves the arm's body unreached, which rustc does not lint.
+    let fails = false;
+    for (const cond of arm.guard ?? []) fails ||= this.condition(cond) === false;
+    const diverges = fails || this.branch(() => this.expr(arm.body));
     if (saved) this.restoreKnown(saved);
     return diverges;
   }
