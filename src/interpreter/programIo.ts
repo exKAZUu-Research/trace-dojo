@@ -18,10 +18,9 @@ export interface ProgramOutput {
 
 /** The working directory, which relative paths start from. */
 export const WORKING_DIRECTORY = '/';
-/** The paths that read standard input as a file, as on Linux. */
-const STDIN_PATHS = new Set(['/dev/stdin', '/dev/fd/0']);
-const UTF8_ENCODER = new TextEncoder();
-const UTF8_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
+export type StandardStreamName = 'stdin' | 'stdout' | 'stderr';
+export const UTF8_ENCODER = new TextEncoder();
+export const UTF8_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /**
  * The standard streams and the file system of one run, which every language's builtins share. Files hold text, which
@@ -55,8 +54,7 @@ export class ProgramIO {
    * `/dev/stdin` or `/dev/fd/0` reads what remains of standard input.
    */
   openReader(path: string): TextReader {
-    const stream = this.files.resolveStreamPath(path);
-    if (stream && STDIN_PATHS.has(stream)) return this.stdin.reader;
+    if (this.files.resolveStreamPath(path) === 'stdin') return this.stdin.reader;
     return new TextReader(this.files.openForReading(path), this.budget);
   }
 
@@ -279,8 +277,16 @@ interface Step {
   name: string;
 }
 
-const DEV_STREAMS = new Set(['stdin', 'stdout', 'stderr']);
-const DEV_FDS = new Set(['0', '1', '2']);
+const DEV_STREAMS: Readonly<Record<string, StandardStreamName>> = {
+  stdin: 'stdin',
+  stdout: 'stdout',
+  stderr: 'stderr',
+};
+const DEV_FDS: Readonly<Record<string, StandardStreamName>> = {
+  '0': 'stdin',
+  '1': 'stdout',
+  '2': 'stderr',
+};
 
 type StreamStep =
   | { kind: 'real'; dir: DirectoryNode }
@@ -302,7 +308,7 @@ export class VirtualFileSystem {
    * Resolves `path` component-by-component to a standard stream (`/dev/stdin`, `/dev/stdout`, `/dev/stderr`, or
    * `/dev/fd/0..2`), failing with `ENOENT` or `ENOTDIR` when an intermediate component is missing or is a file.
    */
-  resolveStreamPath(path: string): string | undefined {
+  resolveStreamPath(path: string): StandardStreamName | undefined {
     const { components, namesDirectory } = this.componentsOf(path);
     const last = components.pop();
     const steps: StreamStep[] = [{ kind: 'real', dir: this.root }];
@@ -311,13 +317,13 @@ export class VirtualFileSystem {
     }
     if (last === undefined || last === '.' || last === '..') return undefined;
     const top = steps.at(-1) as StreamStep;
-    if (top.kind === 'dev' && DEV_STREAMS.has(last)) {
+    if (top.kind === 'dev' && Object.hasOwn(DEV_STREAMS, last)) {
       if (namesDirectory) throw new FileSystemError('ENOTDIR', path);
-      return `/dev/${last}`;
+      return DEV_STREAMS[last];
     }
-    if (top.kind === 'devFd' && DEV_FDS.has(last)) {
+    if (top.kind === 'devFd' && Object.hasOwn(DEV_FDS, last)) {
       if (namesDirectory) throw new FileSystemError('ENOTDIR', path);
-      return `/dev/fd/${last}`;
+      return DEV_FDS[last];
     }
     return undefined;
   }
@@ -352,7 +358,10 @@ export class VirtualFileSystem {
       if (realFd?.kind === 'file') throw new FileSystemError('ENOTDIR', path);
       return { kind: 'devFd', dir: realFd };
     }
-    if ((top.kind === 'dev' && DEV_STREAMS.has(name)) || (top.kind === 'devFd' && DEV_FDS.has(name))) {
+    if (
+      (top.kind === 'dev' && Object.hasOwn(DEV_STREAMS, name)) ||
+      (top.kind === 'devFd' && Object.hasOwn(DEV_FDS, name))
+    ) {
       throw new FileSystemError('ENOTDIR', path);
     }
     return undefined;

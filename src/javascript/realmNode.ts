@@ -1,4 +1,10 @@
-import { FileSystemError, type FileSystemErrorCode, type OpenMode } from '../interpreter/programIo';
+import {
+  FileSystemError,
+  type FileSystemErrorCode,
+  type OpenMode,
+  UTF8_DECODER,
+  UTF8_ENCODER,
+} from '../interpreter/programIo';
 import { inspect } from './inspect';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
@@ -17,18 +23,6 @@ const ERRORS: Record<NodeErrorCode, { description: string; errno: number }> = {
   EINVAL: { description: 'invalid argument', errno: -22 },
   EBADF: { description: 'bad file descriptor', errno: -9 },
 };
-
-const STDIN_PATHS = new Set(['/dev/stdin', '/dev/fd/0']);
-const UTF8_ENCODER = new TextEncoder();
-const UTF8_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
-
-/** The paths that name the run's standard output streams, by the stream each names. */
-const STANDARD_STREAMS = {
-  '/dev/stdout': 'stdout',
-  '/dev/stderr': 'stderr',
-  '/dev/fd/1': 'stdout',
-  '/dev/fd/2': 'stderr',
-} as const;
 
 /** The modules `require` returns, by the names Node.js accepts for them. */
 const MODULE_NAMES = { fs: 'fs', 'node:fs': 'fs' } as const;
@@ -225,10 +219,10 @@ function readFileSync(runtime: Runtime, args: Value[]): Value {
   // File descriptor 0 is standard input.
   if (args[0] === 0) return runtime.io.stdin.reader.readRest();
   const path = requirePath(runtime, args[0]);
-  const stream = withErrors(runtime, 'open', path, () => runtime.io.files.resolveStreamPath(path));
-  if (stream && STDIN_PATHS.has(stream)) {
+  if (withErrors(runtime, 'open', path, () => runtime.io.files.resolveStreamPath(path)) === 'stdin') {
     if (parsed.mode.create === 'exclusive') throwNodeError(runtime, 'EEXIST', 'open', path);
-    return readStandardInput(runtime, parsed);
+    if (!parsed.readable) throwNodeError(runtime, 'EBADF', 'read');
+    return runtime.io.stdin.reader.readRest();
   }
   // Node.js names no path when reading a directory opened read-only fails, since it fails on `read(fd)` rather than `open`.
   if (!parsed.writable && path !== '' && runtime.io.files.kindOf(path) === 'directory')
@@ -246,11 +240,6 @@ function checkReadEncoding(runtime: Runtime, options: Value): void {
     rejectUnavailableMember('エンコーディングを指定しない readFileSync（Buffer）', runtime.currentRow);
   if (!isUtf8(encoding))
     rejectUnavailableMember(`readFileSync の encoding: ${encodingLabel(runtime, encoding)}`, runtime.currentRow);
-}
-
-function readStandardInput(runtime: Runtime, parsed: ParsedOpenFlag): string {
-  if (!parsed.readable) throwNodeError(runtime, 'EBADF', 'read');
-  return runtime.io.stdin.reader.readRest();
 }
 
 /**
@@ -325,9 +314,8 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
 }
 
 function writeStandardStreamPath(runtime: Runtime, path: string, bytes: Uint8Array, parsed: ParsedOpenFlag): boolean {
-  const streamPath = withErrors(runtime, 'open', path, () => runtime.io.files.resolveStreamPath(path));
-  const stream = streamPath ? STANDARD_STREAMS[streamPath as keyof typeof STANDARD_STREAMS] : undefined;
-  if (!stream) return false;
+  const stream = withErrors(runtime, 'open', path, () => runtime.io.files.resolveStreamPath(path));
+  if (stream !== 'stdout' && stream !== 'stderr') return false;
   if (parsed.mode.create === 'exclusive') throwNodeError(runtime, 'EEXIST', 'open', path);
   if (!parsed.writable) throwNodeError(runtime, 'EBADF', 'write');
   runtime.io[stream].write(UTF8_DECODER.decode(bytes));
