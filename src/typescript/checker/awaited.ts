@@ -155,7 +155,7 @@ function inspectThenable(c: Checker, type: Type): ThenableStep {
   if (c.signaturesOf(c.relations.removeNullish(thenType), 'call').length === 0) return { kind: 'nonThenable' };
   const signatures = c.relations.isNullable(thenType) ? [] : c.signaturesOf(thenType, 'call');
   const values = signatures.length > 0 ? fulfilledValuesOfSignatures(c, signatures) : undefined;
-  return values ? { kind: 'valid', value: unionOf(values) } : { kind: 'invalid' };
+  return values ? { kind: 'valid', value: unionOf(values, true) } : { kind: 'invalid' };
 }
 
 function fulfilledValuesOfSignatures(c: Checker, signatures: readonly Signature[]): Type[] | undefined {
@@ -175,7 +175,10 @@ function signatureFulfilledValue(c: Checker, signature: Signature): Type | undef
   if (isAnyLike(callbackType) || isIntrinsic(callbackType, 'unknown')) return undefined;
   const callbacks = c.signaturesOf(callbackType, 'call');
   if (callbacks.length === 0) return undefined;
-  return unionOf(callbacks.map((callback) => callback.parameters[0]?.type ?? undefinedType));
+  return unionOf(
+    callbacks.map((callback) => callback.parameters[0]?.type ?? undefinedType),
+    true
+  );
 }
 
 function invalidThenableMessage(kind: AwaitedErrorSite['kind']): string {

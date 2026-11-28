@@ -741,10 +741,10 @@ export class BindingPatterns {
     if (!results.some(hasValue) || !yielding.every(hasValue)) return undefined;
     const values = yielding.flatMap((member) => {
       const property = this.c.propertyOf(member, 'value');
-      return property ? [propertyAccessType(property)] : [];
+      return property ? [propertyAccessType(property, 'read', true)] : [];
     });
     // tsc gives an iterator whose results are all done elements of type any.
-    return values.length > 0 ? unionOf(values) : anyType;
+    return values.length > 0 ? unionOf(values, true) : anyType;
   }
 
   private checkIteratorNextInput(node: TreeNode, nextType: Type, consumer: 'loop' | 'spread' | 'destructure'): void {
@@ -779,9 +779,9 @@ export class BindingPatterns {
       .filter((member) => this.isDoneResult(member))
       .flatMap((member) => {
         const property = this.c.propertyOf(member, 'value');
-        return property ? [propertyAccessType(property)] : [];
+        return property ? [propertyAccessType(property, 'read', true)] : [];
       });
-    return values.length > 0 ? unionOf(values) : anyType;
+    return values.length > 0 ? unionOf(values, true) : anyType;
   }
 
   hasCallableIteratorMethod(type: Type, method: 'iterator' | 'asyncIterator'): boolean {

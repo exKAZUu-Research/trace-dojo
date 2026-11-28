@@ -865,11 +865,10 @@ export class FunctionChecker {
     if (generator?.annotation) return generator.annotation;
     if (context.asyncAnnotation) return context.asyncAnnotation.type;
     if (generator) {
-      const yielded = generator.yieldTypes.length === 0 ? neverType : unionOf(generator.yieldTypes, true);
       const inferredNext =
         generator.inferredNextTypes.length > 0 ? intersectionOf(generator.inferredNextTypes, this.c) : unknownType;
       return this.c.globalType(context.isAsync ? 'AsyncGenerator' : 'Generator', [
-        this.c.widen(this.widenObjectLiteral(yielded)),
+        this.inferredYieldOf(generator),
         this.inferredReturnOf(context),
         generator.nextType ?? inferredNext,
       ]);
@@ -878,6 +877,18 @@ export class FunctionChecker {
     if (context.isAsync)
       return this.c.globalType('Promise', [unwrapAwaitedType(this.c, this.inferredReturnOf(context))]);
     return this.inferredReturnOf(context);
+  }
+
+  private inferredYieldOf(generator: GeneratorContext): Type {
+    const types = this.c.literals.normalizeObjectLiterals(
+      generator.yieldTypes.flatMap((type) => (type.kind === 'union' ? type.types : [type]))
+    );
+    if (types.length === 0) return neverType;
+    const type = unionOf(
+      types.map((member) => this.widenObjectLiteral(member)),
+      true
+    );
+    return type.kind === 'literal' ? returnedLiteralType(this.c, type, generator.yieldType) : type;
   }
 
   /** The type a function's `return` statements give, without an annotation. */
@@ -925,8 +936,14 @@ export class FunctionChecker {
 
   private combineIterationTypes(parts: IterationTypes[]): IterationTypes {
     return {
-      yieldType: unionOf(parts.map((part) => part.yieldType)),
-      returnType: unionOf(parts.map((part) => part.returnType)),
+      yieldType: unionOf(
+        parts.map((part) => part.yieldType),
+        true
+      ),
+      returnType: unionOf(
+        parts.map((part) => part.returnType),
+        true
+      ),
       nextType: intersectionOf(
         parts.map((part) => part.nextType),
         this.c
@@ -967,8 +984,8 @@ export class FunctionChecker {
     const yieldValues = this.readResultValueTypes(yielding);
     const returnValues = this.readResultValueTypes(results.filter((member) => this.canBeDoneResult(member)));
     return {
-      yieldType: yieldValues.length > 0 ? unionOf(yieldValues) : anyType,
-      returnType: returnValues.length > 0 ? unionOf(returnValues) : voidType,
+      yieldType: yieldValues.length > 0 ? unionOf(yieldValues, true) : anyType,
+      returnType: returnValues.length > 0 ? unionOf(returnValues, true) : voidType,
       nextType,
     };
   }
@@ -983,7 +1000,7 @@ export class FunctionChecker {
   private readResultValueTypes(members: Type[]): Type[] {
     return members.flatMap((member) => {
       const property = this.c.propertyOf(member, 'value');
-      return property ? [propertyAccessType(property)] : [];
+      return property ? [propertyAccessType(property, 'read', true)] : [];
     });
   }
 

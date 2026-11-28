@@ -1249,7 +1249,7 @@ export class LiteralChecker {
     if (type.kind === 'union') {
       const widened = mapType(type, (member) => this.widenDeclared(member, isConst, keepFresh));
       return widened.kind === 'union'
-        ? unionOf(this.normalizeObjectLiterals(widened.types, { keepFresh }), keepFresh)
+        ? unionOf(this.normalizeObjectLiterals(widened.types, { keepFresh }), isConst || keepFresh)
         : widened;
     }
     if (type.kind === 'object') {

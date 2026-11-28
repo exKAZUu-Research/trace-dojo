@@ -72,7 +72,11 @@ export function unionProperty(c: Checker, types: Type[], name: string): Property
       : undefined,
     readonly: properties.some((property) => property.readonly),
     isMethod: properties.every((property) => property.isMethod),
-    type: () => unionOf(properties.map((property) => property.type())),
+    type: () =>
+      unionOf(
+        properties.map((property) => property.type()),
+        true
+      ),
     writeType: hasWriteType
       ? () => unionOf(properties.map((property) => (property.writeType ?? property.type)()))
       : undefined,
