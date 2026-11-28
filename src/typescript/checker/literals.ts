@@ -1253,9 +1253,9 @@ export class LiteralChecker {
         : widened;
     }
     if (type.kind === 'object') {
-      // Only an array literal holds fresh literals; another array, as one of a recursive alias, is left as it is.
+      // Direct primitive literals in an array literal are widened when checked; declaration widening widens only object literals in it.
       if (this.isArrayLiteral(type))
-        return this.c.arrayType(this.widenDeclared(this.c.elementTypeOf(type), false, keepFresh));
+        return this.c.arrayType(this.widenDeclared(this.c.elementTypeOf(type), true, keepFresh));
       if (isObjectLiteral(type)) return this.widenObjectLiteral(type, keepFresh);
     }
     return regularOf(type);
