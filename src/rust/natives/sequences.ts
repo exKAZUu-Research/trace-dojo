@@ -740,13 +740,16 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   into_iter: ([self], ctx) => dequeIterator(vec(self), elemType(ctx), 'value'),
 };
 
+/**
+ * `VecDeque::retain`: the kept elements move to the front by swaps, and those it rejects, left behind, go at the end
+ * in their places, as std truncates them; a panic in the predicate leaves every element in the deque.
+ */
 function retainDeque(items: Value[], keep: (item: ElementPlace) => boolean, drop: (item: Value) => void): Value {
   let retained = 0;
   for (let read = 0; read < items.length; read++) {
     if (keep(new ElementPlace(items, read))) swapOwnedElements(items, retained++, read);
-    else drop(items[read]);
   }
-  items.length = retained;
+  for (const removed of items.splice(retained)) drop(removed);
   return UNIT_VALUE;
 }
 
