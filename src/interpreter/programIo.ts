@@ -279,10 +279,6 @@ interface Step {
   name: string;
 }
 
-/**
- * An in-memory file system holding text files, whose total length is bounded by {@link LIMITS}. Each call charges
- * the run for the names of its paths, which a program can make as long as its strings.
- */
 const DEV_STREAMS = new Set(['stdin', 'stdout', 'stderr']);
 const DEV_FDS = new Set(['0', '1', '2']);
 
@@ -291,6 +287,10 @@ type StreamStep =
   | { kind: 'dev'; dir: DirectoryNode | undefined }
   | { kind: 'devFd'; dir: DirectoryNode | undefined };
 
+/**
+ * An in-memory file system holding text files, whose total length is bounded by {@link LIMITS}. Each call charges
+ * the run for the names of its paths, which a program can make as long as its strings.
+ */
 export class VirtualFileSystem {
   private readonly root = new DirectoryNode();
   /** The total length of the files' contents and of all the program writes to files it deleted while open. */
