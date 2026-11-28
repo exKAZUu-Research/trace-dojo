@@ -121,7 +121,6 @@ function sameSelf(a: Type, b: Type | undefined): boolean {
   return b !== undefined && shallow(a) === shallow(b);
 }
 
-/** The pseudo-type that stands for an associated type of a trait on a type. */
 /** The `Item` of an iteration trait's projection; a type known now that has none is no iterator (`<i32 as IntoIterator>::Item`). */
 function iterationItem(self: Type, trait: string, span: Span): Type {
   const item = intoIterItem(self);
@@ -132,6 +131,7 @@ function iterationItem(self: Type, trait: string, span: Span): Type {
   return freshVar();
 }
 
+/** The pseudo-type that stands for an associated type of a trait on a type. */
 export function projectionDef(trait: TraitDef, name: string, module: Module): AdtDef {
   return {
     name: `${trait.name}::${name}`,

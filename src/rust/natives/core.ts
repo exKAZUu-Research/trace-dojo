@@ -221,7 +221,7 @@ function adtDefaultValue(ctx: NativeContext, t: Type & { kind: 'adt' }): Value {
     // As `new` of the inner type's default makes them.
     case 'Rc':
     case 'Arc': {
-      const inner = defaultValue(ctx, t.args[0]);
+      const inner = defaultBoxValue(ctx, t.args[0]);
       ctx.interp.dropper.activate();
       return new SharedBox(inner);
     }

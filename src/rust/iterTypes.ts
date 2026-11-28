@@ -70,6 +70,11 @@ export function intoIterItem(type: Type): Type | undefined {
     case 'Receiver': {
       return t.args[0];
     }
+    case 'Box': {
+      // `Box<[T]>` iterates its elements by value.
+      const content = normalize(shallow(t.args[0]));
+      return content.kind === 'slice' ? content.elem : undefined;
+    }
     case 'Range':
     case 'RangeInclusive':
     case 'RangeFrom': {

@@ -161,6 +161,11 @@ export function toIterator(value: Value, from: Type): Value {
 /** The iterator of a standard collection, of its elements (`value`) or of references to them (`ref`, `mut`). */
 function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value' | 'ref' | 'mut'): Value | undefined {
   switch (type.def.builtin) {
+    case 'Box': {
+      // A `Box` is its value: `Box<[T]>` iterates as an owned array does.
+      const content = normalize(shallow(type.args[0]));
+      return mode === 'value' && content.kind === 'slice' ? ownedIter(sliceItems(value), content.elem) : undefined;
+    }
     case 'Vec':
     case 'BinaryHeap': {
       return mode === 'value' ? ownedIter(value as Value[], type.args[0]) : sliceIter(value, mode === 'mut');

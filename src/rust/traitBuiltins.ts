@@ -765,11 +765,12 @@ function defaultValue(goal: Goal): Answer {
   if (d) return d;
   const builtin = t.def.builtin as string;
   if (DEFAULT_TYPES.has(builtin)) return 'yes';
-  if (builtin === 'Box') {
+  if (builtin === 'Box' || builtin === 'Rc' || builtin === 'Arc') {
+    // std gives `Box<str>`, `Rc<[T]>` and the like an empty default.
     const content = normalize(shallow(t.args[0]));
     return content.kind === 'str' || content.kind === 'slice' ? 'yes' : all([content]);
   }
-  if (['Rc', 'RefCell', 'Cell', 'Arc', 'Mutex', 'RwLock'].includes(builtin)) return all(t.args);
+  if (['RefCell', 'Cell', 'Mutex', 'RwLock'].includes(builtin)) return all(t.args);
   if (builtin === 'Duration') return 'yes';
   return 'no';
 }

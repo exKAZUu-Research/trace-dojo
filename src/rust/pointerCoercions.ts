@@ -35,3 +35,14 @@ function pointsTo(unifier: Unifier, from: Type, to: Type): boolean {
   const slice = normalize(shallow(to));
   return array.kind === 'array' && slice.kind === 'slice' && unifier.tryUnify(array.elem, slice.elem);
 }
+
+/** The cells a `Box`, `Rc` or reference may unsize through (`Rc<RefCell<dyn Trait>>`, `&RefCell<[T]>`). */
+export const CELLS = new Set(['RefCell', 'Mutex', 'RwLock']);
+
+/** Whether a `RefCell` or `Mutex` of an array unsizes to one of a slice (`&RefCell<[T; N]>` to `&RefCell<[T]>`). */
+export function unsizesCellArray(unifier: Unifier, from: Type, to: Type): boolean {
+  const [a, t] = [normalize(shallow(from)), normalize(shallow(to))];
+  if (a.kind !== 'adt' || t.kind !== 'adt' || a.def !== t.def || !CELLS.has(t.def.builtin ?? '')) return false;
+  const [array, slice] = [normalize(shallow(a.args[0])), normalize(shallow(t.args[0]))];
+  return array.kind === 'array' && slice.kind === 'slice' && unifier.tryUnify(array.elem, slice.elem);
+}

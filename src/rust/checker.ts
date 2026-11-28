@@ -24,7 +24,7 @@ import { dynIteratorTarget, intoIterItem, intoIterShape } from './iterTypes';
 import { checkElidedReturnLifetime, checkFieldLifetimes, checkFnTypeElision } from './lifetimeElision';
 import { autoderefSteps, derefOnce } from './methods';
 import { orderHint } from './orderingDiagnostics';
-import { pointerCoercion } from './pointerCoercions';
+import { CELLS, pointerCoercion, unsizesCellArray } from './pointerCoercions';
 import { TraitSolver } from './traits';
 import {
   type AdtDef,
@@ -113,7 +113,6 @@ interface CoverageCheck {
 
 /** Checks the types of every function body, recording what the compiler needs in {@link Annotations}. */
 /** The cells an `Rc`, `Arc` or `Box` of a trait object may hold it in. */
-const CELLS = new Set(['RefCell', 'Mutex', 'RwLock']);
 
 export class Checker {
   private readonly adtStorage: AdtStorage;
@@ -1203,7 +1202,7 @@ export class Checker {
     const target = shallow(t.target);
     const steps = autoderefSteps(this.program, a.target).slice(0, target.kind === 'dyn' ? 1 : undefined);
     for (const step of steps) {
-      if (!this.unifier.tryUnify(step.type, t.target)) continue;
+      if (!this.unifier.tryUnify(step.type, t.target) && !unsizesCellArray(this.unifier, step.type, t.target)) continue;
       if (step.derefs.length > 0 || (a.mutable && !t.mutable)) {
         this.setCoercion(expr, {
           kind: 'deref',
