@@ -409,7 +409,7 @@ export class TraitSolver {
     for (const param of impl.params) {
       const type = subst.get(param) as Type;
       const bounds = param.bounds.map((ref) => substituteTraitRef(ref, subst));
-      if (!(impl.module as Module).isStd) bounds.push(sized);
+      if (!(impl.module as Module).isStd && !param.maybeUnsized) bounds.push(sized);
       for (const bound of bounds) {
         const result = this.implements(type, bound);
         if (result === 'no') return 'no';

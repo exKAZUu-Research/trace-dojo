@@ -1556,16 +1556,16 @@ function lowerAdtPath(path: PathAst, def: AdtDef, written: Type[], scope: TypeSc
   return last.lifetimes?.length ? { kind: 'adt', def, args, lifetimes: last.lifetimes } : adt(def, args);
 }
 
-/** The type arguments of a type, the omitted ones that have defaults (`struct P<T = i32>`) given those. */
 /**
- * Lowers a bound that constrains the type's traits; `?Sized` and lifetime bounds lower to none, as the interpreter
- * lets type parameters be unsized and the borrow checker reads lifetimes from the types.
+ * Lowers a bound that constrains the type's traits; `?Sized` and lifetime bounds lower to none, as a type parameter's
+ * `maybeUnsized` records the one and the borrow checker reads the other from the types.
  */
 export function lowerBoundIfTrait(bound: BoundAst, scope: TypeScope, self: Type | undefined): TraitRef[] {
   if (bound.kind === 'maybeSized' || bound.kind === 'lifetime') return [];
   return [lowerBound(bound, scope, self)];
 }
 
+/** Lowers a bound on `self`, which closure traits complete with their signature. */
 export function lowerBound(bound: BoundAst, scope: TypeScope, self: Type | undefined): TraitRef {
   if (bound.kind === 'maybeSized' || bound.kind === 'lifetime') {
     return compileError(bound.span, `${describeBound(bound)} は、型引数の境界にだけ書けます。`);

@@ -35,6 +35,7 @@ export function addWherePredicates(
       );
       continue;
     }
+    if (predicate.bounds.some((bound) => bound.kind === 'maybeSized')) type.param.maybeUnsized = true;
     const bounds = predicate.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type));
     if (elsewhere?.(type.param, bounds)) continue;
     type.param.bounds.push(...bounds);
