@@ -147,8 +147,8 @@ function derefPlace(c: Compiler, expr: ExprOf<'unary'>): PlaceEval {
     const operand = c.read(expr.operand);
     return (frame) => readOnlyPlace(operand(frame));
   }
-  // A Box is its value.
-  return compilePlace(c, expr.operand);
+  // A Box is its value; one a call gives (`*boxed()`) goes when the statement ends, with what is not moved out of it.
+  return dropsBorrowedTemporary(c, expr.operand, compilePlace(c, expr.operand)) as PlaceEval;
 }
 
 function indexPlace(c: Compiler, expr: ExprOf<'index'>): PlaceEval {
