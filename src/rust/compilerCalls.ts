@@ -7,11 +7,12 @@ import { dropsBorrowedTemporary } from './compilerTemporaries';
 import { normalize } from './infer';
 import { isUserIterator } from './iterTypes';
 import { derefOnce } from './methods';
+import { borrowedView } from './natives/iterators';
 import { copyValue, needsCopy } from './ops';
 import { type Frame, MOVED } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type FnDef, shallow, type Type } from './types';
-import { CellPlace, DynValue, FnValue, type Place } from './values';
+import { CellPlace, DynValue, FnValue, IterValue, type Place } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 
@@ -96,9 +97,18 @@ function compileReceiver(c: Compiler, expr: ExprOf<'methodCall'>, method: Method
     byValue && !reborrowed ? c.value(expr.receiver) : valueThrough(c, expr.receiver, adjust.derefs, borrowed);
   if (iterFrom) return (frame) => c.support.toIter(read(frame), iterFrom(frame));
   if (method.fn.selfMode === 'value' && adjust.autoref === 'none' && adjust.derefs.length > 0) {
-    return derefedSelf(c, expr.receiver, adjust.derefs, read);
+    const self = derefedSelf(c, expr.receiver, adjust.derefs, read);
+    return adjust.derefs.includes('mutRef') ? borrowedIteratorSelf(self) : self;
   }
   return read;
+}
+
+/** An iterator a `&mut` reaches (`(&mut it).take(2)`), which the adapter or consumer it is given to only borrows. */
+function borrowedIteratorSelf(self: Eval): Eval {
+  return (frame) => {
+    const value = self(frame);
+    return value instanceof IterValue ? borrowedView(value) : value;
+  };
 }
 
 /** A receiver taken by value after derefs: a `Copy` value is copied, and through owners only (a `Box`), one that is not `Copy` moves out of the place that owns it. */

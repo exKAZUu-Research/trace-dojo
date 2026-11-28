@@ -28,6 +28,7 @@ import {
   DynValue,
   ElementPlace,
   EnumValue,
+  isPlace,
   IterValue,
   MapValue,
   type Next,
@@ -223,8 +224,13 @@ export function setIter(set: SetValue, item: Type, owned = false): IterValue {
   return owned ? ownedIter(values, item) : snapshotIter(values, item);
 }
 
+/**
+ * The iterator a method of std's iterators is called on: one a `&mut` reaches (`(&mut it).take(2)`, `it.next()`) is
+ * borrowed, so what the method leaves stays its owner's.
+ */
 function iterOf(value: Value): IterValue {
-  return deref(value) as IterValue;
+  const iter = deref(value) as IterValue;
+  return isPlace(value) ? borrowedView(iter) : iter;
 }
 
 /** Takes the next element, honoring elements that `peek` looked at. */
@@ -934,7 +940,7 @@ function flattenDebug(ctx: NativeContext, name: string, iter: IterValue, inner: 
 
 /** The iterator a `Peekable` wraps, which keeps the elements `peek` looked at. */
 function peekSource(self: Value): IterValue {
-  return iterOf(self).roots[0] as IterValue;
+  return (deref(self) as IterValue).roots[0] as IterValue;
 }
 
 /**
@@ -1466,7 +1472,7 @@ function successors(ctx: NativeContext, start: EnumValue, callback: IteratorCall
 }
 
 /** An iterator reached through `&mut` (`by_ref`): it advances the iterator, which its owner drops. */
-function borrowedView(iter: IterValue): IterValue {
+export function borrowedView(iter: IterValue): IterValue {
   const view = new IterValue(
     () => nextOf(iter),
     iter.nextBack && (() => iter.nextBack!()),
@@ -1474,6 +1480,8 @@ function borrowedView(iter: IterValue): IterValue {
     [iter]
   );
   view.sizeHintLower = iter.sizeHintLower && (() => iter.sizeHintLower!());
+  view.nth = iter.nth && ((n) => iter.nth!(n));
+  view.nthBack = iter.nthBack && ((n) => iter.nthBack!(n));
   return view;
 }
 
