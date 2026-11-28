@@ -80,8 +80,6 @@ const DEBUG_TYPES = new Set([
   'PathDisplay',
   'File',
   'IoErrorKind',
-  'ConstPtr',
-  'MutPtr',
   'Cell',
   'Rc',
   'Weak',
@@ -121,7 +119,10 @@ const DEBUG_TYPES = new Set([
   'OccupiedEntry',
 ]);
 
-/** Types whose `Debug` hides what they hold (`(Weak)`, `Sender { .. }`, `Poisoned(..)`), so it needs nothing of it. */
+/**
+ * Types whose `Debug` hides what they hold (`(Weak)`, `Sender { .. }`, `Poisoned(..)`, a pointer's address), so it
+ * needs nothing of it.
+ */
 const OPAQUE_DEBUG_TYPES = new Set([
   'SendError',
   'PoisonError',
@@ -130,6 +131,8 @@ const OPAQUE_DEBUG_TYPES = new Set([
   'Sender',
   'Receiver',
   'JoinHandle',
+  'ConstPtr',
+  'MutPtr',
 ]);
 
 const DEFAULT_TYPES = new Set([

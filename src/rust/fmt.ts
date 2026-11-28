@@ -23,6 +23,7 @@ import {
   type IterValue,
   type MapValue,
   type RangeValue,
+  type RawPtr,
   type SetValue,
   type SharedBox,
   sliceItems,
@@ -420,6 +421,10 @@ export class Formatter {
           true,
           write
         );
+      }
+      case 'ConstPtr':
+      case 'MutPtr': {
+        return padString(`0x${(v as RawPtr).address.toString(16)}`, spec, write);
       }
       case 'Duration': {
         // The precision is the number of fraction digits, which the text already has.
