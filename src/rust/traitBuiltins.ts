@@ -122,6 +122,17 @@ const DEBUG_TYPES = new Set([
   'OccupiedEntry',
 ]);
 
+/** Types whose `Debug` hides what they hold (`(Weak)`, `Sender { .. }`, `Poisoned(..)`), so it needs nothing of it. */
+const OPAQUE_DEBUG_TYPES = new Set([
+  'SendError',
+  'PoisonError',
+  'TryLockError',
+  'Weak',
+  'Sender',
+  'Receiver',
+  'JoinHandle',
+]);
+
 const DEFAULT_TYPES = new Set([
   'Weak',
   'String',
@@ -411,7 +422,6 @@ function sized({ solver, t, all }: Goal): Answer {
   return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? 'no' : 'yes';
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Follows std impls of Send and Sync case by case.
 function autoTrait({ solver, t, name, all }: Goal): Answer {
   if (t.kind === 'dyn') return 'no';
   if (t.kind === 'ref') {
@@ -422,28 +432,29 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
   if (t.kind === 'array' || t.kind === 'slice') return all([t.elem]);
   // A closure holds what it captures by reference as `&T` or `&mut T`, which need `T: Sync` and `T: Send` to send.
   if (t.kind === 'closure') return all(capturedTypes(t));
+  if (t.kind === 'adt')
+    return t.def.builtin ? builtinAutoTrait(solver, t, name, all) : programAdtAutoTrait(t, name, all);
+  return 'yes';
+}
+
+function builtinAutoTrait(solver: TraitSolver, t: AdtType, name: string, all: Goal['all']): Answer {
+  const builtin = t.def.builtin ?? '';
   // `Rc` shares its count between threads unsynchronized, and `Cell`, `RefCell`, and their guards may not be shared.
-  if (t.kind === 'adt' && ['Rc', 'Weak', 'ConstPtr', 'MutPtr'].includes(t.def.builtin ?? '')) return 'no';
+  if (['Rc', 'Weak', 'ConstPtr', 'MutPtr'].includes(builtin)) return 'no';
   // `Arc<T>` shares `T` between threads, which needs it both `Send` and `Sync`.
-  if (t.kind === 'adt' && t.def.builtin === 'Arc') return implementsAll(solver, t.args[0], ['Send', 'Sync']);
-  if (t.kind === 'adt' && ['Mutex', 'RwLock'].includes(t.def.builtin ?? '')) {
+  if (builtin === 'Arc') return implementsAll(solver, t.args[0], ['Send', 'Sync']);
+  if (builtin === 'Mutex' || builtin === 'RwLock') {
     // `RwLock<T>` lends `&T` to several threads at once, so sharing it also needs `T: Sync`.
-    const bounds = name === 'Sync' && t.def.builtin === 'RwLock' ? ['Send', 'Sync'] : ['Send'];
+    const bounds = name === 'Sync' && builtin === 'RwLock' ? ['Send', 'Sync'] : ['Send'];
     return implementsAll(solver, t.args[0], bounds);
   }
-  if (
-    t.kind === 'adt' &&
-    name === 'Send' &&
-    ['MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard'].includes(t.def.builtin ?? '')
-  ) {
+  if (name === 'Send' && ['MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard', 'Ref', 'RefMut'].includes(builtin)) {
     return 'no';
   }
-  if (t.kind === 'adt' && name === 'Sync' && t.def.builtin === 'Receiver') return 'no';
-  if (t.kind === 'adt' && name === 'Sync' && ['Cell', 'RefCell', 'Ref', 'RefMut'].includes(t.def.builtin ?? ''))
-    return 'no';
-  if (t.kind === 'adt' && !t.def.builtin) return programAdtAutoTrait(t, name, all);
-  if (t.kind === 'adt') return all(t.args);
-  return 'yes';
+  // `Sender<T>` may be shared between threads whenever `T` may be sent (since Rust 1.72).
+  if (name === 'Sync' && builtin === 'Sender') return implementsAll(solver, t.args[0], ['Send']);
+  if (name === 'Sync' && ['Receiver', 'Cell', 'RefCell', 'Ref', 'RefMut'].includes(builtin)) return 'no';
+  return all(t.args);
 }
 
 /**
@@ -573,8 +584,7 @@ function debug(goal: Goal): Answer {
   if (t.kind !== 'adt') return 'no';
   const d = derived(goal);
   if (d) return d;
-  // The errors of channels and locks hide what they hold (`SendError { .. }`, `Poisoned(..)`), whatever its type.
-  if (['SendError', 'PoisonError', 'TryLockError'].includes(t.def.builtin ?? '')) return 'yes';
+  if (OPAQUE_DEBUG_TYPES.has(t.def.builtin as string)) return 'yes';
   if (t.def.builtin === 'Iter') {
     return supportsDebug(t.args[1]) ? all(debugOperands(t.args[0], t.args[1], t.def)) : 'no';
   }
