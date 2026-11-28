@@ -243,7 +243,7 @@ export function extendedValue(target: Type, item: Type): (value: Value) => Value
 }
 
 function nthBack(ctx: NativeContext, iter: IterValue, n: bigint): Next {
-  return iter.nthBack ? iter.nthBack(n) : nthItem(ctx, n, () => iter.nextBack!());
+  return iter.nthBack ? iter.nthBack(n) : nthItem(ctx, n, () => iter.nextBack!(), ctx.typeArgs[0]);
 }
 
 /** The `n`th element of an iterator, of the item type `ctx.typeArgs[0]`; those it passes go at once, as std's do. */
@@ -786,8 +786,9 @@ define({
       },
       remaining: () => (state.done ? 0 : lengthOf(src)),
     })),
-  // `&mut I` iterates as `I` does, so the adapters after `by_ref` advance the same iterator.
-  'IterImpl<_, _>::by_ref': ([self]) => deref(self),
+  // `&mut I` iterates as `I` does, so the adapters after `by_ref` advance the same iterator; they only borrow it, so
+  // dropping them leaves what it has left to its owner.
+  'IterImpl<_, _>::by_ref': ([self]) => borrowedView(deref(self) as IterValue),
   'IterImpl<_, _>::into_iter': ([self]) => iterOf(self),
   'IterImpl<_, PeekableShape<_, _>>::peek': ([self], ctx) => {
     const iter = peekSource(self);
@@ -1451,6 +1452,18 @@ function successors(ctx: NativeContext, start: EnumValue, callback: IteratorCall
       ['next', optionPart(value === undefined ? undefined : (indent, sink) => show(value, item, indent, sink))],
     ]);
   });
+}
+
+/** An iterator reached through `&mut` (`by_ref`): it advances the iterator, which its owner drops. */
+function borrowedView(iter: IterValue): IterValue {
+  const view = new IterValue(
+    () => nextOf(iter),
+    iter.nextBack && (() => iter.nextBack!()),
+    iter.remaining && (() => Number(lengthOf(iter))),
+    [iter]
+  );
+  view.sizeHintLower = iter.sizeHintLower && (() => iter.sizeHintLower!());
+  return view;
 }
 
 /** A method that takes the iterator by value, which drops what the iterator has left once it returns. */

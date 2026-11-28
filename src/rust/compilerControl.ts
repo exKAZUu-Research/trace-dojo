@@ -170,9 +170,16 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
   const label = expr.label;
   const row = c.stepRow(expr.span);
   const answered = bindsAnswer(expr.pattern);
+  // `for x in &mut it` only borrows `it`, whose owner drops what the loop leaves.
+  const from = normalize(shallow(loopInfo.from));
+  const borrowed = from.kind === 'ref' && from.mutable;
   return (frame) => {
     const source = iterable(frame);
     const iterator = c.support.toIter(source, fromType(frame), expr.iterable.span) as IterValue;
+    const leave = (): void => {
+      if (borrowed) iterator.release();
+      else frame.runtime.dropper?.dropRest(iterator);
+    };
     return frame.runtime.withRoots([iterator], () =>
       frame.runtime.withActiveBorrows([iterator], () => {
         try {
@@ -193,13 +200,13 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
               frame.endScope(patternSlots);
             }
             if (broke) {
-              frame.runtime.dropper?.dropRest(iterator);
+              leave();
               return UNIT_VALUE;
             }
           }
         } catch (error) {
           // A `return`, a `break` of an outer loop or a panic leaves the loop, which drops its iterator.
-          if (error instanceof ControlSignal || error instanceof RustPanic) frame.runtime.dropper?.dropRest(iterator);
+          if (error instanceof ControlSignal || error instanceof RustPanic) leave();
           throw error;
         }
       })
