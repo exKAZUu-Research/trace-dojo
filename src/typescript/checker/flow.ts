@@ -313,14 +313,13 @@ export class Flow {
 
   private hasEnumMemberProperty(type: Type, memberName: string): boolean {
     const apparent = this.c.apparentType(type);
-    if (apparent.kind === 'union' || apparent.kind === 'intersection') {
+    if (apparent.kind === 'union') {
+      return apparent.types.every((member) => this.hasEnumMemberProperty(member, memberName));
+    }
+    if (apparent.kind === 'intersection') {
       return apparent.types.some((member) => this.hasEnumMemberProperty(member, memberName));
     }
-    const property = this.c.propertyOf(apparent, memberName);
-    if (!property) return false;
-    if (property.declaration?.parent?.type === 'enum_body') return true;
-    const propertyType = property.type();
-    return propertyType.kind === 'literal' && propertyType.fresh === true && propertyType.enumMember !== undefined;
+    return this.c.propertyOf(apparent, memberName)?.declaration?.parent?.type === 'enum_body';
   }
 
   /** Narrows the reference `node` to `narrow` of its current type. */

@@ -294,9 +294,7 @@ export class FunctionChecker {
     contextual = this.c.overloadContexts.contextOf(node, contextual);
     const preview = this.c.overloadContexts.previewType(node, contextual);
     if (preview) return preview;
-    const contextualSignature = isAnyLike(contextual ?? unknownType)
-      ? this.anySignature()
-      : contextualSignatureOf(this.c, contextual, node);
+    const contextualSignature = contextualSignatureOf(this.c, contextual, node);
     const signature = this.c.signatures.signatureOf(node, contextualSignature, false);
     if (node.type !== 'arrow_function' && isContextSensitiveFunction(node))
       this.c.classes.registerContextualThis(node, contextualSignature?.thisType ?? this.assignedObjectThis(node));
@@ -489,14 +487,6 @@ export class FunctionChecker {
     if (body.type !== 'statement_block') return body;
     const returns = returnStatements(body);
     return returns.length === 1 ? named(returns[0])[0] : undefined;
-  }
-
-  private anySignature(): Signature {
-    return {
-      typeParameters: [],
-      parameters: [{ name: 'args', type: this.c.arrayType(anyType), optional: false, rest: true }],
-      returnType: () => anyType,
-    };
   }
 
   declaredReturnType(node: TreeNode): Type | undefined {
