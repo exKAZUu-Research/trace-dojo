@@ -270,6 +270,8 @@ export function lengthOf(iter: IterValue): bigint {
   return BigInt(iter.remaining?.() ?? 0) + BigInt(iter.peeked?.filter((item) => item !== DONE).length ?? 0);
 }
 
+const UNBOUNDED_SHAPES = new Set(['RangeFromShape', 'RepeatShape', 'RepeatWithShape']);
+
 export function iteratorLowerBound(iter: IterValue, shape?: Type): bigint {
   if (iter.sizeHintLower) return shorterLength(iter.sizeHintLower(), intMax('usize'));
   if (!shape || iteratorCapability(shape, 'exact') === 'yes') return lengthOf(iter);
@@ -281,7 +283,7 @@ export function iteratorLowerBound(iter: IterValue, shape?: Type): bigint {
 function lowerBoundOfShape(iter: IterValue, shape: Extract<Type, { kind: 'adt' }>): bigint {
   const { name } = shape.def;
   if (name === 'RangeShape' || name === 'RangeInclusiveShape') return lengthOf(iter);
-  if (name === 'RangeFromShape' || name === 'RepeatShape' || name === 'RepeatWithShape') return intMax('usize');
+  if (UNBOUNDED_SHAPES.has(name)) return intMax('usize');
   if (name === 'CharsShape' || name === 'CharIndicesShape') {
     const bytes = iter.remainingTextBytes?.() ?? 0;
     return BigInt(Math.ceil(bytes / 4)) + BigInt(iter.peeked?.filter((item) => item !== DONE).length ?? 0);
@@ -582,6 +584,8 @@ define({
   // reproduced.
   'Iterator::size_hint': ([self], ctx) => {
     if (isUserIterator(ctx.typeArgs[0])) return [0n, none(ctx)];
+    const shape = normalize(shallow(intoIterShape(ctx.interp.program, ctx.typeArgs[0]) ?? ctx.typeArgs[0]));
+    if (shape.kind === 'adt' && UNBOUNDED_SHAPES.has(shape.def.name)) return [intMax('usize'), none(ctx)];
     const iter = iterOf(ctx.interp.toIter(deref(self), ctx.typeArgs[0]));
     if (!iter.remaining) unsupportedAtRun(ctx, 'この反復子の size_hint');
     const left = lengthOf(iter);
