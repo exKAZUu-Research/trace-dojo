@@ -83,11 +83,13 @@ export class Signatures {
       declaration: node,
       isAbstract: node.type === 'constructor_type' && node.children.some((child) => child?.type === 'abstract'),
       returnType: () => {
-        if (returnType) return returnType;
-        if (returnNode) returnType = this.c.typeNodes.annotationType(returnNode) ?? anyType;
-        else if (node.childForFieldName('body')) returnType = this.c.functions.inferredReturnType(node, signature);
-        else returnType = this.pairedSetterType(node) ?? anyType;
-        return returnType;
+        if (returnNode) return (returnType ??= this.c.typeNodes.annotationType(returnNode) ?? anyType);
+        if (node.childForFieldName('body')) {
+          returnType = this.c.functions.inferredReturnType(node, signature);
+          this.c.functions.propagateLatentYields(node.id);
+          return returnType;
+        }
+        return (returnType ??= this.pairedSetterType(node) ?? anyType);
       },
     };
     if (inferPredicate && !returnNode && node.childForFieldName('body') && !isClassConstructor(node))

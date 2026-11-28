@@ -482,7 +482,7 @@ export class ExpressionChecker {
     const enumSymbol = this.c.enums.resolvedEnumSymbol(symbol);
     if (enumSymbol) this.c.enums.checkConstEnumUse(node, enumSymbol);
     if (this.reportUnavailableValue(node, symbol)) return errorType;
-    this.c.functions.noteIdentifierRead(symbol);
+    this.c.functions.noteIdentifierRead(node, symbol);
     return this.variableReferenceType(node, symbol, undefined, true);
   }
 
@@ -509,7 +509,7 @@ export class ExpressionChecker {
     if (symbol.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, symbol)) return errorType;
     const aliased = symbol.valueKind === 'importAlias' ? this.c.namespaces.imported(symbol, 'value') : undefined;
     if (aliased?.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, aliased, name)) return errorType;
-    this.c.functions.noteIdentifierRead(symbol);
+    this.c.functions.noteIdentifierRead(node, symbol);
     return this.variableReferenceType(node, symbol, contextual);
   }
 
@@ -690,7 +690,7 @@ export class ExpressionChecker {
   }
 
   /** Whether a reference reads a variable of an enclosing function, which flow analysis does not follow into it. */
-  private isOuterVariable(node: TreeNode, symbol: Sym): boolean {
+  isOuterVariable(node: TreeNode, symbol: Sym): boolean {
     if (symbol.scope.kind === 'global') return false;
     const owner = this.c.functions.flowOwner();
     if (!owner) return false;

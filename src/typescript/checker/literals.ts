@@ -523,6 +523,7 @@ export class LiteralChecker {
         () => this.c.silently(() => this.declaredObjectMethod(literal, member, key)),
         before
       );
+      if (getter) this.c.functions.propagateLatentYields(member.id);
       return resolved;
     };
     const property = this.literalProperty(name, anyType, literal.isConstContext, member, key);
@@ -748,12 +749,10 @@ export class LiteralChecker {
     const isGetter = hasToken(member, 'get');
     const signature = this.c.signaturesOf(methodType, 'call')[0];
     const existing = properties.get(name);
-    const accessorType = isGetter ? (signature?.returnType() ?? anyType) : (signature?.parameters[0]?.type ?? anyType);
-    const property = this.literalProperty(name, accessorType, false, member, key);
-    properties.set(
-      name,
-      accessorProperty(property, existing, isGetter, () => accessorType)
-    );
+    const resolveAccessorType = (): Type =>
+      isGetter ? (signature?.returnType() ?? anyType) : (signature?.parameters[0]?.type ?? anyType);
+    const property = this.literalProperty(name, anyType, false, member, key);
+    properties.set(name, accessorProperty(property, existing, isGetter, resolveAccessorType));
   }
 
   private spreadOperand(member: TreeNode, contextual: Type | undefined): Type {
@@ -1200,10 +1199,21 @@ export class LiteralChecker {
       for (const [name, property] of this.c.structureOf(member).properties) {
         if (!isSpreadableProperty(property) || (property.isMethod && member.kind === 'object' && member.classInfo))
           continue;
+        this.touchSpreadGetter(property);
         result.set(name, spreadCopy(property, readonly));
       }
     }
     return result;
+  }
+
+  private touchSpreadGetter(property: Property): void {
+    if (
+      this.c.functions.isTrackingReturnYields() &&
+      property.declaration?.type === 'method_definition' &&
+      hasToken(property.declaration, 'get')
+    ) {
+      property.type();
+    }
   }
 
   /** The type the contextual type gives a property of an object literal. */

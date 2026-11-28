@@ -634,7 +634,10 @@ export class ClassChecker {
     const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
     if (annotation) return annotation;
     const cached = this.fieldTypes.get(member.id);
-    if (cached) return cached;
+    if (cached && (!this.c.functions.isTrackingReturnYields() || this.c.functions.hasLatentYields(member.id))) {
+      this.c.functions.propagateLatentYields(member.id);
+      return cached;
+    }
     const resolving = this.resolvingFields.findIndex((field) => field.member.id === member.id);
     // Fields whose initializers read one another have no type to infer, as TypeScript reports for each of them.
     if (resolving !== -1) {
@@ -653,6 +656,7 @@ export class ClassChecker {
     try {
       const type = this.inferredFieldType(member, nameNode);
       if (!this.fieldTypes.has(member.id)) this.fieldTypes.set(member.id, type);
+      this.c.functions.propagateLatentYields(member.id);
       return this.fieldTypes.get(member.id) as Type;
     } finally {
       this.resolvingFields.pop();

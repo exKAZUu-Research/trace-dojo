@@ -84,6 +84,7 @@ const explicitlyTypedDeclarations = new Set([
 export class Calls {
   /** The signature each call resolved to, for the type predicates that narrow its arguments. */
   private readonly resolved = new Map<number, Signature>();
+  private stringRawMutated: boolean | undefined;
 
   private readonly arity: CallArity;
   private readonly typeArguments: CallTypeArguments;
@@ -341,11 +342,12 @@ export class Calls {
     const object = callee.childForFieldName('object') as TreeNode;
     for (const arg of args) {
       // A spread adds the elements of what it spreads.
-      const element =
+      const { result: element, yields } = this.c.functions.collectImplicitYields(() =>
         arg.type === 'spread_element'
           ? this.c.patterns.iteratedType(arg, this.c.expressions.check(named(arg)[0]))
-          : this.c.expressions.check(arg);
-      this.c.assignments.evolve(object, element);
+          : this.c.expressions.check(arg)
+      );
+      this.c.assignments.evolve(object, element, yields);
     }
     // `push` and `unshift` return the new length.
     return numberType;
@@ -562,12 +564,17 @@ export class Calls {
   }
 
   private mayMutateStringRaw(stringSymbol: unknown): boolean {
+    if (this.stringRawMutated !== undefined) return this.stringRawMutated;
     const stack: TreeNode[] = [this.c.root];
     for (let node = stack.pop(); node; node = stack.pop()) {
       this.c.budget.spend();
-      if (this.targetsStringOrRaw(node, stringSymbol)) return true;
+      if (this.targetsStringOrRaw(node, stringSymbol)) {
+        this.stringRawMutated = true;
+        return true;
+      }
       for (const child of node.namedChildren) if (child) stack.push(child);
     }
+    this.stringRawMutated = false;
     return false;
   }
 

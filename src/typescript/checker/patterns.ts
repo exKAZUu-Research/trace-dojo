@@ -739,7 +739,10 @@ export class BindingPatterns {
     // tsc rejects an iterator whose results have no value, or one that yields without one (TS2490).
     const hasValue = (member: Type): boolean => this.c.propertyOf(member, 'value') !== undefined;
     if (!results.some(hasValue) || !yielding.every(hasValue)) return undefined;
-    const values = yielding.flatMap((member) => this.c.propertyOf(member, 'value')?.type() ?? []);
+    const values = yielding.flatMap((member) => {
+      const property = this.c.propertyOf(member, 'value');
+      return property ? [propertyAccessType(property)] : [];
+    });
     // tsc gives an iterator whose results are all done elements of type any.
     return values.length > 0 ? unionOf(values) : anyType;
   }
@@ -774,7 +777,10 @@ export class BindingPatterns {
     const results = settled.kind === 'union' ? settled.types : [settled];
     const values = results
       .filter((member) => this.isDoneResult(member))
-      .flatMap((member) => this.c.propertyOf(member, 'value')?.type() ?? []);
+      .flatMap((member) => {
+        const property = this.c.propertyOf(member, 'value');
+        return property ? [propertyAccessType(property)] : [];
+      });
     return values.length > 0 ? unionOf(values) : anyType;
   }
 
