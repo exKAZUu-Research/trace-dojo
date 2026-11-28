@@ -44,6 +44,7 @@ import {
 import { checkTableCapacity, checkVecCapacity } from './capacityNatives';
 import { defaultValue } from './core';
 import { dequeIterator } from './dequeHead';
+import { extreme, extremeByKey } from './extremes';
 import { layoutOf, sizeOf } from './layout';
 import { outcomeIter } from './options';
 import { rangeIterator } from './rangeIterator';
@@ -390,14 +391,9 @@ function adapter<S extends object>(
   // An adapter whose `fold` folds its source (`Map`, `Filter`, ...) takes its source's elements as it folds.
   if (folds && source.foldNext) iter.foldNext = parts(foldingView(source), state).next;
   iter.fork = () => adapter(cloneIterator(source), forkState(state), parts, forkState, folds);
+  // Its source and the iterators its state holds go with the adapter (`into_iter().map(..)` dropped early).
+  iter.adapterSource = source;
   iter.adapterState = state;
-  // The elements its source owns and has not given it yet go with the adapter (`into_iter().map(..)` dropped early).
-  if (source.rest && source.ownedItemType) {
-    const rest = source.rest;
-    // A `Peekable` drops its source before the element it peeked, as its fields stand.
-    iter.rest = () => [...rest(), ...(source.peeked ?? []).filter((item) => item !== DONE)];
-    iter.ownedItemType = source.ownedItemType;
-  }
   return iter;
 }
 
@@ -475,9 +471,15 @@ function takeWhile(ctx: NativeContext, source: IterValue, callback: IteratorCall
       if (item === DONE) return DONE;
       if (truthy(call(ctx, state.callback.value, [item]))) return item;
       state.done = true;
+      dropItem(ctx, item);
       return DONE;
     },
   }));
+}
+
+/** Drops an element an iterator method takes and throws away, of the item type `ctx.typeArgs[0]`, as std's do. */
+export function dropItem(ctx: NativeContext, item: Value): void {
+  ctx.interp.dropper.drop(item, ctx.typeArgs[0]);
 }
 
 function truthy(value: Value): boolean {
@@ -721,7 +723,10 @@ define({
           ctx.runtime.spend();
           const item = nextOf(src);
           if (item === DONE) return DONE;
-          if (st.skipping && truthy(call(ctx, st.callback.value, [item]))) continue;
+          if (st.skipping && truthy(call(ctx, st.callback.value, [item]))) {
+            dropItem(ctx, item);
+            continue;
+          }
           st.skipping = false;
           return item;
         }
@@ -1206,28 +1211,35 @@ define({
   'IterImpl<_, _>::product': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '*'),
   'IterImpl<_, _>::count': ([self], ctx) => {
     let count = 0n;
+    const iter = iterOf(self);
     each(
       ctx,
-      iterOf(self),
-      () => {
+      iter,
+      (item) => {
         count++;
+        dropItem(ctx, item);
       },
       'fold'
     );
+    ctx.interp.dropper.dropRest(iter);
     return count;
   },
   'IterImpl<_, _>::len': ([self]) => lengthOf(iterOf(self)),
   'IterImpl<_, _>::last': ([self], ctx) => {
     const last = new CellPlace(none(ctx));
+    const iter = iterOf(self);
     return ctx.runtime.withRoots([last], () => {
       each(
         ctx,
-        iterOf(self),
+        iter,
         (item) => {
+          const previous = last.value as EnumValue;
+          if (previous.variant === 1) dropItem(ctx, previous.fields[0]);
           last.value = some(ctx, item);
         },
         'fold'
       );
+      ctx.interp.dropper.dropRest(iter);
       return last.value;
     });
   },
@@ -1256,11 +1268,9 @@ define({
     each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? true : undefined)) ?? false,
   'IterImpl<_, _>::all': ([self, f], ctx) =>
     each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? undefined : false)) ?? true,
-  'IterImpl<_, _>::find': ([self, f], ctx) =>
-    each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? some(ctx, item) : undefined)) ?? none(ctx),
+  'IterImpl<_, _>::find': ([self, f], ctx) => each(ctx, iterOf(self), (item) => found(ctx, f, item)) ?? none(ctx),
   'IterImpl<_, _>::rfind': ([self, f], ctx) =>
-    each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? some(ctx, item) : undefined), 'back') ??
-    none(ctx),
+    each(ctx, iterOf(self), (item) => found(ctx, f, item), 'back') ?? none(ctx),
   'IterImpl<_, _>::find_map': ([self, f], ctx) =>
     each(ctx, iterOf(self), (item) => {
       const result = deref(call(ctx, f, [item])) as EnumValue;
@@ -1282,15 +1292,21 @@ define({
     }
   },
   'IterImpl<_, _>::max': ([self], ctx) =>
-    extreme(ctx, iterOf(self), (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, 1),
+    consuming(ctx, iterOf(self), (iter) => extreme(ctx, iter, (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, 1)),
   'IterImpl<_, _>::min': ([self], ctx) =>
-    extreme(ctx, iterOf(self), (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, -1),
-  'IterImpl<_, _>::max_by_key': ([self, f], ctx) => extremeByKey(ctx, iterOf(self), f, ctx.typeArgs[2], 1),
-  'IterImpl<_, _>::min_by_key': ([self, f], ctx) => extremeByKey(ctx, iterOf(self), f, ctx.typeArgs[2], -1),
+    consuming(ctx, iterOf(self), (iter) => extreme(ctx, iter, (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, -1)),
+  'IterImpl<_, _>::max_by_key': ([self, f], ctx) =>
+    consuming(ctx, iterOf(self), (iter) => extremeByKey(ctx, iter, f, ctx.typeArgs[2], 1)),
+  'IterImpl<_, _>::min_by_key': ([self, f], ctx) =>
+    consuming(ctx, iterOf(self), (iter) => extremeByKey(ctx, iter, f, ctx.typeArgs[2], -1)),
   'IterImpl<_, _>::max_by': ([self, f], ctx) =>
-    extreme(ctx, iterOf(self), (a, b) => (deref(call(ctx, f, [a, b])) as EnumValue).variant - 1, 1),
+    consuming(ctx, iterOf(self), (iter) =>
+      extreme(ctx, iter, (a, b) => (deref(call(ctx, f, [a, b])) as EnumValue).variant - 1, 1)
+    ),
   'IterImpl<_, _>::min_by': ([self, f], ctx) =>
-    extreme(ctx, iterOf(self), (a, b) => (deref(call(ctx, f, [a, b])) as EnumValue).variant - 1, -1),
+    consuming(ctx, iterOf(self), (iter) =>
+      extreme(ctx, iter, (a, b) => (deref(call(ctx, f, [a, b])) as EnumValue).variant - 1, -1)
+    ),
   'IterImpl<_, _>::partition': ([self, f], ctx) => {
     const yes: Value[] = [];
     const no: Value[] = [];
@@ -1437,58 +1453,18 @@ function successors(ctx: NativeContext, start: EnumValue, callback: IteratorCall
   });
 }
 
-/**
- * `max_by` and `min_by`: `compare(the best so far, the next)` for each next element, as `cmp::max_by` and
- * `cmp::min_by` call it; `max` keeps the next on `Equal` and `min` keeps the best so far.
- */
-function extreme(ctx: NativeContext, iter: IterValue, compare: (a: Value, b: Value) => number, sign: 1 | -1): Value {
-  const first = nextOf(iter);
-  if (first === DONE) return none(ctx);
-  const best = new CellPlace(first);
-  const rest = foldingView(iter);
-  return ctx.runtime.withRoots([best], () => {
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(rest);
-      if (item === DONE) return some(ctx, best.value);
-      const keep = ctx.runtime.withRoots([item], () => keepsBest(compare(best.value, item), sign));
-      if (!keep) best.value = item;
-    }
-  });
+/** A method that takes the iterator by value, which drops what the iterator has left once it returns. */
+function consuming(ctx: NativeContext, iter: IterValue, use: (iter: IterValue) => Value): Value {
+  const result = use(iter);
+  ctx.interp.dropper.dropRest(iter);
+  return result;
 }
 
-/** `max_by_key` and `min_by_key`: each key once, in order, compared as `extreme` compares the elements. */
-function extremeByKey(ctx: NativeContext, iter: IterValue, f: Value, keyType: Type, sign: 1 | -1): Value {
-  const first = nextOf(iter);
-  if (first === DONE) return none(ctx);
-  let best = first;
-  let bestKey = ctx.runtime.withRoots([first], () => call(ctx, f, [first]));
-  const rest = foldingView(iter);
-  const retained = [best, bestKey];
-  return ctx.runtime.withRoots(retained, () => {
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(rest);
-      if (item === DONE) return some(ctx, best);
-      const keep = ctx.runtime.withRoots([item], () => {
-        const key = call(ctx, f, [item]);
-        return ctx.runtime.withRoots([key], () => {
-          if (keepsBest(compareValues(keyType, bestKey, key) ?? 0, sign)) return true;
-          bestKey = key;
-          return false;
-        });
-      });
-      if (!keep) {
-        best = item;
-        retained[0] = best;
-        retained[1] = bestKey;
-      }
-    }
-  });
-}
-
-function keepsBest(order: number, sign: 1 | -1): boolean {
-  return sign === 1 ? order > 0 : order <= 0;
+/** `find`'s step: `Some` of an element the predicate takes, or the element dropped. */
+function found(ctx: NativeContext, f: Value, item: Value): Value | undefined {
+  if (truthy(call(ctx, f, [item]))) return some(ctx, item);
+  dropItem(ctx, item);
+  return undefined;
 }
 
 /**

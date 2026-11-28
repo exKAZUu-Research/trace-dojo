@@ -9,6 +9,7 @@ import {
   type CellBox,
   CellPlace,
   type ChannelEnd,
+  DONE,
   DynValue,
   EnumValue,
   FnValue,
@@ -139,9 +140,16 @@ export class Dropper {
     if (box.strong === 0) this.drop(box.value, t.args[0]);
   }
 
-  /** Drops the elements an iterator that owns them has not yielded. */
+  /**
+   * Drops the elements an iterator that owns them has not yielded, then a `Peekable`'s peeked one, as its fields stand;
+   * an adapter drops its source and the iterators its state holds.
+   */
   dropRest(iter: IterValue): void {
-    if (iter.rest && iter.ownedItemType) for (const item of iter.rest()) this.drop(item, iter.ownedItemType);
+    if (iter.rest && iter.ownedItemType) {
+      const peeked = (iter.peeked ?? []).filter((item): item is Value => item !== DONE);
+      for (const item of [...iter.rest(), ...peeked]) this.drop(item, iter.ownedItemType);
+    }
+    if (iter.adapterSource) this.dropRest(iter.adapterSource);
     for (const part of Object.values(iter.adapterState ?? {})) if (part instanceof IterValue) this.dropRest(part);
     iter.release();
   }
