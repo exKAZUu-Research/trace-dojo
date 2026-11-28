@@ -68,12 +68,31 @@ function unsupportedForm(node: TreeNode): string | undefined {
   if (node.type === 'meta_property' && node.text.replaceAll(/\s/g, '') === 'import.meta') return 'import.meta';
   if (node.type !== 'import_statement' && node.type !== 'export_statement') return undefined;
   if (isInAmbientDeclaration(node)) return undefined;
+  if (node.type === 'export_statement' && isExportedNamespaceDestructuring(node)) {
+    return '名前空間の export 変数宣言での分割代入';
+  }
   const source = node.childForFieldName('source') ?? node.namedChildren.at(-1)?.childForFieldName('source');
   // An export without `from` loads no other module.
   if (node.type === 'export_statement' && !source) return undefined;
   const module = source?.text.slice(1, -1) ?? '';
   if (importableModules.has(module)) return undefined;
   return `モジュール '${module}' の ${node.type === 'import_statement' ? 'import' : 'export'}`;
+}
+
+function isExportedNamespaceDestructuring(node: TreeNode): boolean {
+  const owner = node.parent?.type === 'statement_block' ? node.parent.parent : undefined;
+  if (
+    (owner?.type !== 'internal_module' && owner?.type !== 'module') ||
+    owner.childForFieldName('name')?.type === 'string'
+  ) {
+    return false;
+  }
+  const declaration = node.childForFieldName('declaration');
+  if (declaration?.type !== 'lexical_declaration' && declaration?.type !== 'variable_declaration') return false;
+  return declaration.namedChildren.some((declarator) => {
+    const name = declarator?.childForFieldName('name');
+    return Boolean(name && name.type !== 'identifier');
+  });
 }
 
 function isInAmbientDeclaration(node: TreeNode): boolean {

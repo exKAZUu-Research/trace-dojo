@@ -83,15 +83,6 @@ interface Part {
   fieldName: string | null | undefined;
 }
 
-const exportedPatternTypes = new Set([
-  'object_pattern',
-  'array_pattern',
-  'pair_pattern',
-  'assignment_pattern',
-  'object_assignment_pattern',
-  'rest_pattern',
-]);
-
 /** The kinds of names a namespace exports as properties that its declarations read and write. */
 const exportedVariableKinds = new Set(['let', 'const', 'var', 'declared']);
 
@@ -544,25 +535,6 @@ function isTopLevelEnumDeclaration(node: TreeNode): boolean {
   );
 }
 
-function exportedMemberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
-  const reference = memberReference(position, objectName, memberName);
-  reference.inferredName = memberName;
-  return reference;
-}
-
-function memberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
-  return assemble(
-    position,
-    'member_expression',
-    [
-      { node: leaf(position, 'identifier', objectName), fieldName: 'object' },
-      { node: token(position, '.'), fieldName: undefined },
-      { node: leaf(position, 'property_identifier', memberName), fieldName: 'property' },
-    ],
-    `${objectName}.${memberName}`
-  );
-}
-
 function token(position: TreeNode, text: string): ViewNode {
   return leaf(position, text, text, false);
 }
@@ -967,12 +939,8 @@ function exportedVariables(declaration: TreeNode, namespaceName: string, binder:
   const assignments = declaration.namedChildren.flatMap((declarator) => {
     const name = declarator?.childForFieldName('name');
     const value = declarator?.childForFieldName('value');
-    if (!declarator || !name || !value) return [];
-    const target =
-      name.type === 'identifier'
-        ? exportedMemberReference(name, namespaceName, nameOf(name))
-        : exportedPattern(name, namespaceName, binder);
-    return [assignment(declarator, target, view(value, binder))];
+    if (!declarator || !name || name.type !== 'identifier' || !value) return [];
+    return [assignment(declarator, exportedMemberReference(name, namespaceName, nameOf(name)), view(value, binder))];
   });
   if (assignments.length <= 1) return assignments.map((expression) => expressionStatement(declaration, expression));
   const parts = assignments.flatMap((part, index) => [
@@ -982,36 +950,10 @@ function exportedVariables(declaration: TreeNode, namespaceName: string, binder:
   return [expressionStatement(declaration, assemble(declaration, 'sequence_expression', parts))];
 }
 
-/**
- * A destructuring pattern that an exported declaration binds, as the assignment pattern TypeScript compiles it to,
- * which rewrites bound targets to the namespace's properties while lowering keys and default values as expressions.
- */
-function exportedPattern(node: TreeNode, namespaceName: string, binder: Binder): ViewNode {
-  if (node.type === 'identifier') return exportedMemberReference(node, namespaceName, nameOf(node));
-  if (node.type === 'shorthand_property_identifier_pattern')
-    return pairPattern(node, node, exportedMemberReference(node, namespaceName, nameOf(node)));
-  const left = node.childForFieldName('left');
-  const right = node.childForFieldName('right');
-  if (node.type === 'object_assignment_pattern' && left?.type === 'shorthand_property_identifier_pattern' && right)
-    return pairPattern(
-      node,
-      left,
-      defaultedTarget(node, exportedMemberReference(left, namespaceName, nameOf(left)), right, binder)
-    );
-  if (!exportedPatternTypes.has(node.type)) return view(node, binder);
-  return assemble(
-    node,
-    node.type,
-    node.children.flatMap((child, index) => {
-      if (!child || child.type === 'comment') return [];
-      const fieldName = node.fieldNameForChild(index);
-      const viewed =
-        !child.isNamed || fieldName === 'key' || fieldName === 'right'
-          ? view(child, binder)
-          : exportedPattern(child, namespaceName, binder);
-      return [{ node: viewed, fieldName }];
-    })
-  );
+function exportedMemberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
+  const reference = memberReference(position, objectName, memberName);
+  reference.inferredName = memberName;
+  return reference;
 }
 
 /** `var B = (($ns_B) => { ... })(B = $ns_A.B || ($ns_A.B = {}));` for a namespace `B` that `A` exports. */
@@ -1120,6 +1062,19 @@ function exportAssignment(node: TreeNode, namespaceName: string, name: string): 
   return expressionStatement(
     node,
     assignment(node, memberReference(node, namespaceName, name), leaf(node, 'identifier', name))
+  );
+}
+
+function memberReference(position: TreeNode, objectName: string, memberName: string): ViewNode {
+  return assemble(
+    position,
+    'member_expression',
+    [
+      { node: leaf(position, 'identifier', objectName), fieldName: 'object' },
+      { node: token(position, '.'), fieldName: undefined },
+      { node: leaf(position, 'property_identifier', memberName), fieldName: 'property' },
+    ],
+    `${objectName}.${memberName}`
   );
 }
 
