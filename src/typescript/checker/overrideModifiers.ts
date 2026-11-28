@@ -2,10 +2,26 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { memberName } from './declarations';
-import { hasToken, isConstructorName, named } from './syntax';
+import { hasToken, isClassConstructor, isConstructorName, named } from './syntax';
 import { errorType, permissiveAnyType } from './types';
 
 const invalidTypeMemberModifiers = new Set(['override_modifier', 'accessibility_modifier', 'static']);
+
+export function checkClassMemberModifiers(c: Checker, member: TreeNode, isAbstractClass: boolean): void {
+  const name = member.childForFieldName('name');
+  if (hasToken(member, 'abstract') && !isAbstractClass)
+    c.error(name ?? member, '抽象メンバーは抽象クラスの中でのみ宣言できます。');
+  if (hasToken(member, 'accessor')) {
+    const accessorToken = member.children.find((child) => child?.type === 'accessor') ?? name ?? member;
+    for (const incompatible of ['declare', 'readonly']) {
+      if (hasToken(member, incompatible))
+        c.error(accessorToken, `'accessor' 修飾子と '${incompatible}' 修飾子は同時に使用できません。`);
+    }
+    if (hasToken(member, '?')) c.error(name ?? member, "'accessor' プロパティはオプションとして宣言できません。");
+  }
+  if (isClassConstructor(member) && hasToken(member, 'static'))
+    c.error(member, "'static' 修飾子はコンストラクタの宣言には付けられません。");
+}
 
 /** Reports class-only member modifiers (`override`, accessibility, `static`) written on interface or object-type members. */
 export function checkTypeMemberModifiers(c: Checker, root: TreeNode): void {

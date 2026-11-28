@@ -8,7 +8,7 @@ import { checkDecorators } from './decoratorChecks';
 import { FlowState, propertyReferenceKey, type State } from './flow';
 import { checkIndexConformance } from './indexConformance';
 import { isBaseTypeVariable, isMixinConstructor } from './mixinConstructors';
-import { checkOverrideModifiers } from './overrideModifiers';
+import { checkClassMemberModifiers, checkOverrideModifiers } from './overrideModifiers';
 import { assignmentKind, hasToken, isClassConstructor, isWithin, named } from './syntax';
 import {
   anyType,
@@ -296,12 +296,7 @@ export class ClassDeclarationChecker {
   private checkMemberDeclaration(member: TreeNode, info: ClassInfo): void {
     const name = member.childForFieldName('name');
     if (name?.type === 'computed_property_name') this.c.expressions.checkComputedPropertyName(name);
-    if (hasToken(member, 'abstract') && !info.isAbstract)
-      this.c.error(name ?? member, '抽象メンバーは抽象クラスの中でのみ宣言できます。');
-    if (hasToken(member, 'accessor') && hasToken(member, '?'))
-      this.c.error(name ?? member, "'accessor' プロパティはオプションとして宣言できません。");
-    if (isClassConstructor(member) && hasToken(member, 'static'))
-      this.c.error(member, "'static' 修飾子はコンストラクタの宣言には付けられません。");
+    checkClassMemberModifiers(this.c, member, info.isAbstract === true);
   }
 
   private checkImplements(node: TreeNode, info: ClassInfo): void {
