@@ -1,12 +1,16 @@
 import type { FnItem, Span } from './ast';
 import { compileError, type Module } from './items';
-import { childTypes, type FnDef, shallow, type Type } from './types';
+import { childTypes, type FnDef, shallow, type TraitRef, type Type } from './types';
 
 /**
  * Requires a lifetime that the return type leaves out to be decided by the parameters, as rustc does (E0106): it is
  * that of `&self` or `&mut self`, or else of the only place for a lifetime in the parameters' types.
  */
 export function checkElidedReturnLifetime(fn: FnDef, ast: FnItem): void {
+  for (const [index, type] of fn.paramTypes.entries()) checkFnSugarElision(type, ast.params[index].span);
+  checkFnSugarElision(fn.ret, ast.ret?.span ?? ast.span);
+  // An argument of `impl Fn() -> &str` is a type parameter with the bound.
+  for (const param of fn.params) checkFnSugarBounds(param.bounds, ast.span);
   if (fn.selfMode === 'ref' || fn.selfMode === 'mutRef') return;
   if (lifetimePlaces(fn.ret, true) === 0) return;
   let inputs = 0;
@@ -48,6 +52,29 @@ function boundTypes(t: Extract<Type, { kind: 'dyn' | 'opaque' }>): Type[] {
     ...(bound.item ? [bound.item] : []),
     ...(bound.assoc?.values() ?? []),
   ]);
+}
+
+/**
+ * Requires the output of each `Fn(..) -> ..` bound in a type to elide its lifetimes from the bound's own inputs, as
+ * rustc does whatever the function around it has: `Fn() -> &str` and `Fn(&str, &str) -> &str` are E0106.
+ */
+function checkFnSugarElision(type: Type, span: Span): void {
+  const t = shallow(type);
+  if (t.kind === 'dyn' || t.kind === 'opaque') {
+    checkFnSugarBounds(t.kind === 'dyn' ? [t.trait] : t.opaque.bounds, span);
+    for (const part of boundTypes(t)) checkFnSugarElision(part, span);
+    return;
+  }
+  const parts = t.kind === 'ref' ? [t.target] : t.kind === 'adt' ? t.args : childTypesOf(t);
+  for (const part of parts) checkFnSugarElision(part, span);
+}
+
+function checkFnSugarBounds(bounds: readonly TraitRef[], span: Span): void {
+  for (const { fnSig } of bounds) {
+    if (!fnSig || lifetimePlaces(fnSig.ret, true) === 0) continue;
+    const inputs = fnSig.params.reduce((places, param) => places + lifetimePlaces(param, false), 0);
+    if (inputs !== 1) compileError(span, 'Fn(..) -> .. の戻り値の参照には、ライフタイムを書いてください（E0106）。');
+  }
 }
 
 function childTypesOf(t: Type): Type[] {
