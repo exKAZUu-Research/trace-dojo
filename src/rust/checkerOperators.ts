@@ -7,7 +7,19 @@ import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
 import { compileError } from './items';
 import { derefOnce } from './methods';
-import { BOOL, freshVar, intType, ref, REF_STR, resolve, shallow, type Type, typeToString, UNIT } from './types';
+import {
+  BOOL,
+  freshVar,
+  INT_NAMES,
+  intType,
+  ref,
+  REF_STR,
+  resolve,
+  shallow,
+  type Type,
+  typeToString,
+  UNIT,
+} from './types';
 
 /**
  * Gives each pending operator its result type once its operands' types are known: rustc waits while the left one is
@@ -239,7 +251,7 @@ function arithmeticOrBitwise(c: Checker, expr: Extract<Expr, { kind: 'binary' }>
   // A number with a type on the right whose impl takes it (`impl Mul<Point> for i32`).
   if (isOverloadable(right)) {
     const [trait, method] = BINARY_TRAITS[op];
-    const self = left.kind === 'var' ? resolve(left, true) : leftType;
+    const self = left.kind === 'var' ? (literalSelf(c, left, trait, rightType) ?? resolve(left, true)) : leftType;
     return overloadedOperator(c, expr, trait, method, self, [rightType], expr.opSpan, op);
   }
   if (!isArithmeticOperand(left) || !isArithmeticOperand(right)) badOperands(expr, leftType, rightType);
@@ -258,6 +270,19 @@ function arithmeticOrBitwise(c: Checker, expr: Extract<Expr, { kind: 'binary' }>
     });
   }
   return result;
+}
+
+/**
+ * The one integer type whose impl of an operator trait takes the right operand, for an integer literal on the left
+ * (`3 * Duration::from_millis(7)` is a `u32`), as rustc picks it before falling back to `i32`.
+ */
+function literalSelf(c: Checker, left: Type & { kind: 'var' }, traitName: string, right: Type): Type | undefined {
+  if (left.v.literal !== 'int') return undefined;
+  const ref = { trait: c.program.traitDef(traitName), args: [right] };
+  const [only, ...others] = INT_NAMES.map(intType).filter((type) => c.solver.implements(type, ref) === 'yes');
+  if (!only || others.length > 0) return undefined;
+  c.unifier.tryUnify(left, only);
+  return only;
 }
 
 /** `&a | &b`, `&`, `-`, and `^` of two sets by reference: their union, intersection, and differences. */

@@ -1,6 +1,7 @@
 import type { Expr, Span } from './ast';
 import { concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
+import { fnCall } from './compilerCalls';
 import { derefAll, evaluateValues, isStringType, stringish, stripRefs, withEvaluatedValues } from './compilerCommon';
 import { pointee, userDerefCall, withoutPin } from './compilerPlaces';
 import { floatNumber, negateFloat } from './floatBits';
@@ -26,22 +27,8 @@ function compileOverloaded(c: Compiler, expr: Expr, compileOperands: () => Eval[
   const operator = c.annotations.operators.get(expr);
   if (!operator) return undefined;
   // Compiling the operands only for an operator that calls an impl keeps each operand compiled once.
-  const operands = compileOperands();
-  const { fn } = operator;
-  const typeArgs = operator.typeArgs.map((arg) => runtimeType(arg));
-  const span = expr.kind === 'binary' ? expr.opSpan : expr.span;
-  const callRow = expr.span.row;
-  return (frame) => {
-    const values = evaluateValues(frame, operands);
-    return c.support.callFn(
-      fn,
-      typeArgs.map((arg) => arg(frame)),
-      values,
-      callRow,
-      span,
-      frame
-    );
-  };
+  // A std impl that panics where it is called (`Duration / 0`) reports the expression's start, as rustc does.
+  return fnCall(c, operator.fn, operator.typeArgs, compileOperands(), expr.span.row, expr.span);
 }
 
 // code-gauge-allow functionCognitiveComplexity -- One case per unary operator, including overloaded ones.

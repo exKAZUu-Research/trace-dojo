@@ -15,6 +15,7 @@ import { FmtFailure, ProcessExit, RustPanic } from '../runtime';
 import { intMax, type IntName, resolve, sameType, shallow, substitute as substituteType, type Type } from '../types';
 import { utf8Bytes, utf8Reader } from '../utf8';
 import {
+  DurationValue,
   DynValue,
   EnumValue,
   type FormatterValue,
@@ -201,6 +202,9 @@ function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
         }
         case 'Box': {
           return defaultBoxValue(ctx, t.args[0]);
+        }
+        case 'Duration': {
+          return new DurationValue(0n);
         }
         default: {
           break;
