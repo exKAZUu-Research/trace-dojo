@@ -1300,8 +1300,6 @@ export function checkTypeScript(root: TreeNode, budget: ExecutionBudget): Source
   return new Checker(root, budget).check();
 }
 
-export { isModule, regularOf };
-
 const instantiableKinds = new Set<Type['kind']>([
   'typeParameter',
   'indexedAccess',

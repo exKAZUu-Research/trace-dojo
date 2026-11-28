@@ -4,6 +4,8 @@ import type { Checker } from './checker';
 import { laterRunningTypes } from './expandos';
 import { type Type, typeCacheKey } from './types';
 
+export type RetainFresh = false | 'boolean' | 'all';
+
 export class ExpressionTypeCache {
   private readonly silentTypes = new Map<string, Type>();
   private readonly silentEnvironments = new Map<string, number>();
@@ -11,14 +13,14 @@ export class ExpressionTypeCache {
 
   constructor(private readonly c: Checker) {}
 
-  check(node: TreeNode, contextual: Type | undefined, retainFreshBoolean: boolean, compute: () => Type): Type {
+  check(node: TreeNode, contextual: Type | undefined, retainFresh: RetainFresh, compute: () => Type): Type {
     // Checking a `yield` records its type on the generator, which a cached type would skip.
     if (this.yields(node)) return compute();
-    const key = this.key(node, contextual, retainFreshBoolean);
+    const key = this.key(node, contextual, retainFresh);
     const cached = this.silentTypes.get(key);
     if (cached) return cached;
     const type = compute();
-    if (key === this.key(node, contextual, retainFreshBoolean)) this.silentTypes.set(key, type);
+    if (key === this.key(node, contextual, retainFresh)) this.silentTypes.set(key, type);
     return type;
   }
 
@@ -34,7 +36,7 @@ export class ExpressionTypeCache {
     return yields;
   }
 
-  private key(node: TreeNode, contextual: Type | undefined, retainFreshBoolean: boolean): string {
+  private key(node: TreeNode, contextual: Type | undefined, retainFresh: RetainFresh): string {
     const flow = [...(this.c.flow.current?.entries ?? [])].map(([key, entry]) => [
       key,
       typeCacheKey(entry.type),
@@ -67,6 +69,6 @@ export class ExpressionTypeCache {
       environmentId = this.silentEnvironments.size;
       this.silentEnvironments.set(environment, environmentId);
     }
-    return `${this.c.expressions.deferredContexts.id}/${this.c.overloadContexts.cacheKey}/${node.id}/${typeCacheKey(contextual)}/${this.c.literals.isConstContext(node, contextual)}/${retainFreshBoolean}/${environmentId}`;
+    return `${this.c.expressions.deferredContexts.id}/${this.c.overloadContexts.cacheKey}/${node.id}/${typeCacheKey(contextual)}/${this.c.literals.isConstContext(node, contextual)}/${retainFresh}/${environmentId}`;
   }
 }

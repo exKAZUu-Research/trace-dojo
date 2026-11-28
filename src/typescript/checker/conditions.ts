@@ -3,6 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { isAlwaysAwaitableType } from './awaited';
 import type { Checker } from './checker';
+import type { RetainFresh } from './expressionTypeCache';
 import type { State } from './flow';
 import { InlinedConditions } from './inlinedConditions';
 import type { Sym } from './scopes';
@@ -76,8 +77,8 @@ export class ConditionChecker {
     return { whenTrue, whenFalse };
   }
 
-  condition(node: TreeNode, testsTruthiness = true, contextual?: Type): Condition {
-    const result = this.conditionOf(node, contextual);
+  condition(node: TreeNode, testsTruthiness = true, contextual?: Type, retainFresh: RetainFresh = false): Condition {
+    const result = this.conditionOf(node, contextual, retainFresh);
     if (node.type === 'true') result.whenFalse = undefined;
     if (node.type === 'false') result.whenTrue = undefined;
     if (testsTruthiness) this.checkTruthiness(node, result.type);
@@ -85,7 +86,7 @@ export class ConditionChecker {
   }
 
   // code-gauge-allow functionNcss -- Computes branch states for each kind of narrowing expression.
-  private conditionOf(node: TreeNode, contextual?: Type): Condition {
+  private conditionOf(node: TreeNode, contextual?: Type, retainFresh: RetainFresh = false): Condition {
     const expression = skipParentheses(node);
     switch (expression.type) {
       case 'unary_expression': {
@@ -101,7 +102,7 @@ export class ConditionChecker {
         };
       }
       case 'binary_expression': {
-        const result = this.binaryCondition(expression, contextual);
+        const result = this.binaryCondition(expression, contextual, retainFresh);
         if (result) return result;
         break;
       }
@@ -126,17 +127,22 @@ export class ConditionChecker {
       }
     }
     return this.c.members.chainCondition(expression, () => {
-      const type = this.c.expressions.check(expression, contextual);
+      const type = this.c.expressions.check(expression, contextual, retainFresh);
       return { ...this.truthiness(expression), type };
     });
   }
 
   /** The condition a binary expression is, if its operator narrows. */
-  private binaryCondition(expression: TreeNode, contextual?: Type): Condition | undefined {
+  private binaryCondition(
+    expression: TreeNode,
+    contextual?: Type,
+    retainFresh: RetainFresh = false
+  ): Condition | undefined {
     const operator = expression.childForFieldName('operator')?.text ?? '';
     const left = expression.childForFieldName('left') as TreeNode;
     const right = expression.childForFieldName('right') as TreeNode;
-    if (operator === '&&' || operator === '||') return this.logicalCondition(operator, left, right, contextual);
+    if (operator === '&&' || operator === '||')
+      return this.logicalCondition(operator, left, right, contextual, retainFresh);
     if (!['===', '!==', '==', '!=', 'instanceof', 'in'].includes(operator)) return undefined;
     const { type, leftType, rightType } = this.c.operators.checkBinaryOperands(expression, operator, left, right);
     if (operator === 'instanceof') {
@@ -163,12 +169,18 @@ export class ConditionChecker {
       : this.truthiness(expression);
   }
 
-  private logicalCondition(operator: '&&' | '||', left: TreeNode, right: TreeNode, contextual?: Type): Condition {
-    const leftResult = this.condition(left, true, operator === '||' ? contextual : undefined);
+  private logicalCondition(
+    operator: '&&' | '||',
+    left: TreeNode,
+    right: TreeNode,
+    contextual?: Type,
+    retainFresh: RetainFresh = false
+  ): Condition {
+    const leftResult = this.condition(left, true, operator === '||' ? contextual : undefined, retainFresh);
     const rightState = operator === '&&' ? leftResult.whenTrue : leftResult.whenFalse;
     let rightResult: Condition = { whenTrue: undefined, whenFalse: undefined, type: neverType };
     this.c.flow.from(rightState, () => {
-      rightResult = this.condition(right, false, contextual);
+      rightResult = this.condition(right, false, contextual, retainFresh);
     });
     this.checkLogicalOperands(left, leftResult.type, right, rightResult.type);
     const merged =
@@ -185,10 +197,10 @@ export class ConditionChecker {
     const truthy = this.c.flow.narrowByTruthiness(leftResult.type, operator === '||');
     return {
       ...merged,
-      type: unionOf([
-        operator === '&&' ? this.c.flow.narrowByTruthiness(leftResult.type, false) : truthy,
-        rightResult.type,
-      ]),
+      type: unionOf(
+        [operator === '&&' ? this.c.flow.narrowByTruthiness(leftResult.type, false) : truthy, rightResult.type],
+        true
+      ),
     };
   }
 

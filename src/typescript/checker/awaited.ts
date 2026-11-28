@@ -19,7 +19,7 @@ import {
   unknownType,
 } from './types';
 
-export interface AwaitedErrorSite {
+interface AwaitedErrorSite {
   node: TreeNode;
   kind: 'await' | 'yield' | 'return';
   reported?: boolean;

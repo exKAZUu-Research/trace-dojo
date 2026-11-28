@@ -10,7 +10,7 @@ import { DeferredContexts } from './deferredContexts';
 import { arrayTargets, Elaboration, targetElementType } from './elaboration';
 import { isConstEnum } from './enums';
 import { Expandos, laterRunningTypes } from './expandos';
-import { ExpressionTypeCache } from './expressionTypeCache';
+import { ExpressionTypeCache, type RetainFresh } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import { namedPropertyIndex } from './indexInfos';
 import { nonNullableType } from './nullishConstraints';
@@ -95,10 +95,7 @@ export class ExpressionChecker {
   private readonly variableTypes = new Map<number, Type>();
 
   /** The type of each kind of expression; the others check their children and are `any`. */
-  private readonly checkers = new Map<
-    string,
-    (node: TreeNode, contextual?: Type, retainFreshBoolean?: boolean) => Type
-  >([
+  private readonly checkers = new Map<string, (node: TreeNode, contextual?: Type, retainFresh?: RetainFresh) => Type>([
     ['number', (node) => freshLiteralType(numberValue(node.text))],
     ['string', (node) => freshLiteralType(stringValue(node))],
     ['template_string', (node, contextual) => this.templateString(node, contextual)],
@@ -111,8 +108,8 @@ export class ExpressionChecker {
     ['this', (node) => this.thisExpression(node)],
     [
       'parenthesized_expression',
-      (node, contextual, retainFreshBoolean) =>
-        this.checkWrapped(node, contextual, (operand, context) => this.check(operand, context, retainFreshBoolean)),
+      (node, contextual, retainFresh) =>
+        this.checkWrapped(node, contextual, (operand, context) => this.check(operand, context, retainFresh)),
     ],
     ['array', (node, contextual) => this.c.literals.arrayLiteral(node, contextual)],
     ['object', (node, contextual) => this.c.literals.objectLiteral(node, contextual)],
@@ -137,19 +134,13 @@ export class ExpressionChecker {
     ['augmented_assignment_expression', (node) => this.c.assignments.compoundAssignment(node)],
     ['update_expression', (node) => this.c.assignments.update(node)],
     ['unary_expression', (node) => this.c.operators.unary(node)],
-    [
-      'binary_expression',
-      (node, contextual, retainFreshBoolean) => this.c.operators.binary(node, contextual, retainFreshBoolean),
-    ],
-    [
-      'ternary_expression',
-      (node, contextual, retainFreshBoolean) => this.c.operators.ternary(node, contextual, retainFreshBoolean),
-    ],
+    ['binary_expression', (node, contextual, retainFresh) => this.c.operators.binary(node, contextual, retainFresh)],
+    ['ternary_expression', (node, contextual, retainFresh) => this.c.operators.ternary(node, contextual, retainFresh)],
     ['as_expression', (node, contextual) => this.checkWrapped(node, contextual)],
     ['type_assertion', (node, contextual) => this.checkWrapped(node, contextual)],
     ['satisfies_expression', (node) => this.satisfiesExpression(node)],
     ['meta_property', (node) => this.newTarget(node)],
-    ['sequence_expression', (node, contextual) => this.sequenceExpression(node, contextual)],
+    ['sequence_expression', (node, contextual, retainFresh) => this.sequenceExpression(node, contextual, retainFresh)],
     ['yield_expression', (node, contextual) => this.c.functions.yieldExpression(node, contextual)],
     ['await_expression', (node, contextual) => this.awaitExpression(node, contextual)],
     ['instantiation_expression', (node) => this.calls.instantiationExpression(node)],
@@ -171,17 +162,15 @@ export class ExpressionChecker {
   // Entry points -------------------------------------------------------------------------------------------------
 
   checkAssignedValue(node: TreeNode, contextual?: Type): Type {
-    return this.check(node, contextual, true);
+    return this.check(node, contextual, 'boolean');
   }
 
-  check(node: TreeNode, contextual?: Type, retainFreshBoolean = false): Type {
+  check(node: TreeNode, contextual?: Type, retainFresh: RetainFresh = false): Type {
     this.c.budget.spend();
     return this.c.withTypeDemand(node, () => {
       if (this.c.silent > 0 && !this.c.functions.isTrackingReturnYields())
-        return this.silentTypes.check(node, contextual, retainFreshBoolean, () =>
-          this.compute(node, contextual, retainFreshBoolean)
-        );
-      const type = this.compute(node, contextual, retainFreshBoolean);
+        return this.silentTypes.check(node, contextual, retainFresh, () => this.compute(node, contextual, retainFresh));
+      const type = this.compute(node, contextual, retainFresh);
       if (!this.c.flow.probing && this.observedTypes?.has(node.id)) this.observedTypes.set(node.id, type);
       return type;
     });
@@ -234,12 +223,12 @@ export class ExpressionChecker {
    * `a, b, c`, which TypeScript parses as `(a, b), c`: each comma whose left side has no side effects is an error, at
    * the start of that side, unless it is the `(0, o.f)()` idiom of an indirect call.
    */
-  private sequenceExpression(node: TreeNode, contextual: Type | undefined): Type {
+  private sequenceExpression(node: TreeNode, contextual: Type | undefined, retainFresh: RetainFresh = false): Type {
     const elements = named(node).filter((child) => child.type !== 'comment');
     let leftIsFree = true;
     for (const [index, element] of elements.entries()) {
       if (index === elements.length - 1) {
-        const result = this.check(element, contextual);
+        const result = this.check(element, contextual, retainFresh);
         this.applySequenceCallFlow(element, result);
         return result;
       }
@@ -305,7 +294,7 @@ export class ExpressionChecker {
   private satisfiesExpression(node: TreeNode): Type {
     const [operand, typeNode] = named(node);
     const target = this.c.typeNodes.typeFromNode(typeNode);
-    const type = this.check(operand, target);
+    const type = this.check(operand, target, 'all');
     if (target === errorType) return type;
     if (this.c.relations.isAssignable(type, target)) this.checkExcessProperties(operand, type, target);
     else if (!this.elaboration.report(operand, type, target))
@@ -324,11 +313,15 @@ export class ExpressionChecker {
     }
   }
 
-  private compute(node: TreeNode, contextual: Type | undefined, retainFreshBoolean: boolean): Type {
+  private compute(node: TreeNode, contextual: Type | undefined, retainFresh: RetainFresh): Type {
     const checkKind = this.checkers.get(node.type);
     if (checkKind) {
-      const type = checkKind(node, contextual, retainFreshBoolean);
-      if (retainFreshBoolean && type.kind === 'literal' && typeof type.value === 'boolean') return type;
+      const type = checkKind(node, contextual, retainFresh);
+      if (
+        retainFresh === 'all' ||
+        (retainFresh === 'boolean' && type.kind === 'literal' && typeof type.value === 'boolean')
+      )
+        return type;
       return contextual ? this.c.literals.preserveContextualLiterals(type, contextual) : type;
     }
     for (const child of named(node)) this.check(child);
@@ -1284,7 +1277,6 @@ function objectTargets(target: Type): Type[] {
   );
 }
 
-/** Whether an expression, through parentheses, is what a call or `new` calls. */
 function isDirectOrWrappedRequireCallee(node: TreeNode): boolean {
   let current = node;
   while (
@@ -1308,6 +1300,7 @@ function isDirectOrWrappedRequireCallee(node: TreeNode): boolean {
   );
 }
 
+/** Whether an expression, through parentheses, is what a call or `new` calls. */
 function isCallee(node: TreeNode): boolean {
   let expression = node;
   while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;

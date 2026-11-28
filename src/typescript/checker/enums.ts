@@ -586,7 +586,7 @@ export function isConstEnum(symbol: Sym): boolean {
  * Whether a const enum's name is used where TypeScript allows it: as the object of an access, or as a whole type query,
  * though not as the object of one such as `typeof E.A`.
  */
-export function isAllowedConstEnumUse(node: TreeNode): boolean {
+function isAllowedConstEnumUse(node: TreeNode): boolean {
   const parent = node.parent;
   if (parent?.type === 'type_query') return true;
   if (parent?.type !== 'member_expression' && parent?.type !== 'subscript_expression') return false;

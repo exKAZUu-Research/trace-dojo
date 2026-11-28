@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { CheckExpression } from './expressions';
+import type { RetainFresh } from './expressionTypeCache';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { isConstAssertion, named, numberValue, skipParentheses, withoutAssertions } from './syntax';
 import {
@@ -185,7 +186,7 @@ export class OperatorChecker {
     return !isAnyLike(regular) && !isIntrinsic(regular, 'never') && this.c.relations.isAssignable(regular, stringType);
   }
 
-  binary(node: TreeNode, contextual?: Type, retainFreshBoolean = false): Type {
+  binary(node: TreeNode, contextual?: Type, retainFresh: RetainFresh = false): Type {
     const operator = node.childForFieldName('operator')?.text ?? '';
     const left = node.childForFieldName('left') as TreeNode;
     const right = node.childForFieldName('right') as TreeNode;
@@ -193,7 +194,7 @@ export class OperatorChecker {
       case '&&':
       case '||':
       case '??': {
-        return this.logical(operator, left, right, contextual, retainFreshBoolean);
+        return this.logical(operator, left, right, contextual, retainFresh);
       }
       default: {
         break;
@@ -406,7 +407,7 @@ export class OperatorChecker {
     left: TreeNode,
     right: TreeNode,
     contextual?: Type,
-    retainFreshBoolean = false
+    retainFresh: RetainFresh = false
   ): Type {
     if (operator === '??') {
       const nullishness = syntacticNullishness(this.c, left);
@@ -418,13 +419,13 @@ export class OperatorChecker {
       if (nullishness === 'always') this.c.error(left, 'この式は常に null か undefined です。');
       // A left optional chain that stops early is nullish, so the right operand runs there too.
       const { result: leftType, stops } = this.c.members.stoppingChain(skipParentheses(left), () =>
-        this.c.expressions.check(left, contextual, retainFreshBoolean)
+        this.c.expressions.check(left, contextual, retainFresh)
       );
       // The right operand runs only when the left one is nullish, so its effects join the path that skips it.
       const { whenTrue: skipped, whenFalse: nullish } = this.c.conditions.presence(left);
       let rightType: Type = neverType;
       const after = this.c.flow.from(this.c.flow.merge([nullish, ...stops]), () => {
-        rightType = this.c.expressions.check(right, contextual, retainFreshBoolean);
+        rightType = this.c.expressions.check(right, contextual, retainFresh);
       });
       this.c.conditions.checkLogicalOperands(left, leftType, right, rightType);
       this.c.flow.current = this.c.flow.merge([skipped, after]);
@@ -434,11 +435,11 @@ export class OperatorChecker {
       whenTrue,
       whenFalse,
       type: leftType,
-    } = this.c.conditions.condition(left, true, operator === '||' ? contextual : undefined);
+    } = this.c.conditions.condition(left, true, operator === '||' ? contextual : undefined, retainFresh);
     const rightState = operator === '&&' ? whenTrue : whenFalse;
     let rightType: Type = neverType;
     const after = this.c.flow.from(rightState, () => {
-      rightType = this.c.expressions.check(right, contextual ?? leftType, retainFreshBoolean);
+      rightType = this.c.expressions.check(right, contextual ?? leftType, retainFresh);
     });
     this.c.conditions.checkLogicalOperands(left, leftType, right, rightType);
     this.c.flow.current = this.c.flow.merge([operator === '&&' ? whenFalse : whenTrue, after]);
@@ -500,7 +501,7 @@ export class OperatorChecker {
     return this.c.relations.isAssignable(type, expected);
   }
 
-  ternary(node: TreeNode, contextual?: Type, retainFreshBoolean = false): Type {
+  ternary(node: TreeNode, contextual?: Type, retainFresh: RetainFresh = false): Type {
     const condition = node.childForFieldName('condition') as TreeNode;
     const consequence = node.childForFieldName('consequence') as TreeNode;
     const alternative = node.childForFieldName('alternative') as TreeNode;
@@ -509,10 +510,10 @@ export class OperatorChecker {
     let trueType: Type = neverType;
     let falseType: Type = neverType;
     const afterTrue = this.c.flow.from(whenTrue, () => {
-      trueType = this.c.expressions.check(consequence, contextual, retainFreshBoolean);
+      trueType = this.c.expressions.check(consequence, contextual, retainFresh);
     });
     const afterFalse = this.c.flow.from(whenFalse, () => {
-      falseType = this.c.expressions.check(alternative, contextual, retainFreshBoolean);
+      falseType = this.c.expressions.check(alternative, contextual, retainFresh);
     });
     this.c.flow.current = this.c.flow.merge([afterTrue, afterFalse]);
     return this.c.literals.subtypeReduced([trueType, falseType]);

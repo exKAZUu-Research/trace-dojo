@@ -84,7 +84,7 @@ interface GeneratorContext {
   inferredNextTypes: Type[];
 }
 
-export interface IterationTypes {
+interface IterationTypes {
   yieldType: Type;
   returnType: Type;
   nextType: Type;

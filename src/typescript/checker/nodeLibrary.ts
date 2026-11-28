@@ -5,7 +5,7 @@ import {
 } from '../../javascript/unavailableNodeMembers';
 
 // Declarations of the Node.js features this interpreter runs, as @types/node declares them, which a program reads
-// standard input and files with. Derived from DefinitelyTyped's @types/node 26.6.7 (MIT License), whose other members of
+// standard input and files with. Derived from DefinitelyTyped's @types/node 26.6.6 (MIT License), whose other members of
 // `process`, its streams, and `fs` are declared too, only so that a program using one is told it is unavailable. Data
 // written is a string only, as typed arrays are unavailable here.
 
