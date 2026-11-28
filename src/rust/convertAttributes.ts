@@ -109,8 +109,8 @@ export class AttributeReader {
       if (on !== 'item' && attrs.derives.length > 0) {
         syntaxError(this.span(node), '#[derive] は、構造体と列挙型にだけ付けられます。');
       }
-      if (on !== 'item' && attrs.repr)
-        syntaxError(this.span(node), `#[repr(${attrs.repr})] は、列挙型にだけ付けられます。`);
+      if (on !== 'item' && attrs.hasRepr)
+        syntaxError(this.span(node), '#[repr] は、構造体と列挙型と共用体にだけ付けられます。');
       if (on !== 'variant' && attrs.isDefault) {
         syntaxError(this.span(node), '#[default] は、列挙型の選択肢にだけ付けられます。');
       }
@@ -167,6 +167,7 @@ export class AttributeReader {
       case 'repr': {
         const int = args?.namedChildren.find((child) => INT_NAMES.includes(child.text as IntName))?.text;
         if (int) attrs.repr = int as IntName;
+        attrs.hasRepr = true;
         return true;
       }
       case 'unsafe': {

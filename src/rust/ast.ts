@@ -41,6 +41,8 @@ export interface Attributes {
   isDefault?: boolean;
   /** The integer type `#[repr(u8)]` and the like give an enum's discriminants. */
   repr?: IntName;
+  /** Whether a `#[repr(..)]` is written, of any kind (`C`, `transparent`, an integer). */
+  hasRepr?: boolean;
 }
 
 export interface Generics {
@@ -156,6 +158,8 @@ export interface VariantAst {
 
 export interface TraitItem {
   kind: 'trait';
+  /** An `unsafe trait`, which only an `unsafe impl` implements. */
+  isUnsafe?: boolean;
   name: string;
   span: Span;
   vis: Visibility;
@@ -171,6 +175,8 @@ export interface TraitItem {
 
 export interface ImplItem {
   kind: 'impl';
+  /** An `unsafe impl`, of an `unsafe trait` only. */
+  isUnsafe?: boolean;
   span: Span;
   generics: Generics;
   trait: PathAst | undefined;

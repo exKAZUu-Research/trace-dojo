@@ -108,6 +108,16 @@ export function declareTypeParams(generics: Generics, enclosing: readonly TypePa
   });
 }
 
+/** An `unsafe trait` needs an `unsafe impl` (E0200), and only it may have one (E0199). */
+function checkImplSafety(item: ImplItem, trait: TraitDef): void {
+  if (trait.isUnsafe && !item.isUnsafe) {
+    compileError(item.span, `トレイト ${trait.name} は unsafe なので、unsafe impl と書いてください（E0200）。`);
+  }
+  if (!trait.isUnsafe && item.isUnsafe) {
+    compileError(item.span, `トレイト ${trait.name} は unsafe ではないので、unsafe impl にはできません（E0199）。`);
+  }
+}
+
 export function compileError(span: Span, message: string): never {
   throw new CompileError([{ row: span.row, message }]);
 }
@@ -500,6 +510,7 @@ export class ItemCollector {
   private traitItem(item: TraitItem, module: Module): void {
     const self = newTypeParam('Self', true);
     const def: TraitDef = {
+      ...(item.isUnsafe ? { isUnsafe: true } : {}),
       name: item.name,
       path: module.isStd && module.path !== 'std::io' ? item.name : `${module.path}::${item.name}`,
       span: item.span,
@@ -611,6 +622,7 @@ export class ItemCollector {
         impl.trait = trait;
         scope.implTrait = trait;
         lowerImplAssocTypes(item, impl, trait, scope);
+        checkImplSafety(item, trait.trait);
         this.checkTraitImpl(item, impl, trait.trait);
       } else if (!module.isStd) {
         const self = impl.selfType;

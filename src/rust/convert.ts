@@ -197,12 +197,15 @@ export class Converter extends ExpressionConverter {
     const attrs = this.attributes.read(attributes, 'item');
     if (!attrs || !target) return undefined;
     const declaration = target;
-    const derivable = ['struct_item', 'enum_item', 'union_item'];
-    if (attrs.derives.length > 0 && !derivable.includes(declaration.type)) {
+    const derivable = new Set(['struct_item', 'enum_item', 'union_item']);
+    if (attrs.derives.length > 0 && !derivable.has(declaration.type)) {
       syntaxError(this.span(node), '#[derive] は、構造体と列挙型にだけ付けられます。');
     }
     if (attrs.repr && declaration.type !== 'enum_item') {
       syntaxError(this.span(node), `#[repr(${attrs.repr})] は、列挙型にだけ付けられます。`);
+    }
+    if (attrs.hasRepr && !derivable.has(declaration.type)) {
+      syntaxError(this.span(node), '#[repr] は、構造体と列挙型と共用体にだけ付けられます。');
     }
     return this.item(declaration, attrs);
   }
@@ -589,6 +592,7 @@ export class Converter extends ExpressionConverter {
     const bounds = node.childForFieldName('bounds');
     return {
       kind: 'trait',
+      isUnsafe: node.children.some((child) => child.type === 'unsafe'),
       name: this.identifier(this.field(node, 'name')),
       span,
       vis: this.visibility(node),
@@ -643,6 +647,7 @@ export class Converter extends ExpressionConverter {
     members(node.childForFieldName('body'));
     return {
       kind: 'impl',
+      isUnsafe: node.children.some((child) => child.type === 'unsafe'),
       span,
       generics: this.generics(node),
       trait: trait ? this.typePath(trait) : undefined,

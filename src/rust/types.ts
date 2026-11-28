@@ -269,6 +269,8 @@ export interface AssocTypeDef {
 }
 
 export interface TraitDef {
+  /** An `unsafe trait`, which only an `unsafe impl` implements. */
+  isUnsafe?: boolean;
   name: string;
   path: string;
   span?: Span;
