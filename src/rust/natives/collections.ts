@@ -231,8 +231,11 @@ function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value 
     ctx.runtime.withRoots([item], () => {
       const key = entryKey(ctx, m.entries, k);
       const existing = m.entries.get(key);
-      if (existing) existing[1] = v;
-      else storeNewEntry(ctx, m, key, k, v);
+      if (!existing) return storeNewEntry(ctx, m, key, k, v);
+      // As `insert` does, the map keeps its key and drops the key it is given and the value it replaces.
+      discard(ctx, k, ctx.typeArgs[0]);
+      discard(ctx, existing[1], ctx.typeArgs[1]);
+      existing[1] = v;
     });
   }
   return UNIT_VALUE;
@@ -379,7 +382,8 @@ function extendSet(ctx: NativeContext, target: SetValue, iterator: IterValue): V
     if (item === DONE) return UNIT_VALUE;
     ctx.runtime.withRoots([item], () => {
       const hash = entryKey(ctx, target.entries, item);
-      if (target.entries.has(hash)) return;
+      // A set keeps the element it has and drops the one it is given again.
+      if (target.entries.has(hash)) return discard(ctx, item, ctx.typeArgs[0]);
       ctx.runtime.allocate(1);
       target.entries.set(hash, convert(item));
     });

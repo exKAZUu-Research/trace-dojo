@@ -63,6 +63,7 @@ import {
   ordering,
   placeOf,
   some,
+  unsupportedAtRun,
 } from './support';
 
 /** An iterator over an array's elements from `start` to `end`, from both ends. */
@@ -579,6 +580,15 @@ function innerIter(ctx: NativeContext, value: Value, type: Type): IterValue {
 
 define({
   // `Iterator::next` of an iterator of std, which a type parameter or an opaque type bounded by `Iterator` reaches.
+  // The provided `size_hint`: std's `(0, None)` for the program's iterator that does not override it, the exact count
+  // of a std iterator that knows how many it has left; other std iterators' bounds are not reproduced.
+  'Iterator::size_hint': ([self], ctx) => {
+    const iter = deref(self);
+    if (!(iter instanceof IterValue)) return [0n, none(ctx)];
+    if (!iter.remaining) unsupportedAtRun(ctx, 'この反復子の size_hint');
+    const left = lengthOf(iter);
+    return [left, some(ctx, left)];
+  },
   'Iterator::next': ([self], ctx) => {
     const item = nextOf(iterOf(ctx.interp.toIter(deref(self), ctx.typeArgs[0])));
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
@@ -1690,8 +1700,12 @@ function collectHashMap(ctx: NativeContext, iter: IterValue, types: Type[], shap
     const [key, value] = item as Value[];
     const lookup = map.entries.key(types[0], key);
     const existing = map.entries.get(lookup);
-    if (existing) existing[1] = value;
-    else {
+    if (existing) {
+      // As `insert` does, the map keeps its key and drops the key it is given and the value it replaces.
+      ctx.interp.dropper.drop(key, types[0]);
+      ctx.interp.dropper.drop(existing[1], types[1]);
+      existing[1] = value;
+    } else {
       ctx.runtime.allocate(1);
       map.entries.set(lookup, [key, value]);
     }
@@ -1704,7 +1718,7 @@ function collectHashSet(ctx: NativeContext, iter: IterValue, itemType: Type, sha
   reserveHashInput(ctx, set.entries.table!, iter, shape);
   return collectHash(ctx, iter, set, (item) => {
     const lookup = set.entries.key(itemType, item);
-    if (set.entries.has(lookup)) return;
+    if (set.entries.has(lookup)) return ctx.interp.dropper.drop(item, itemType);
     ctx.runtime.allocate(1);
     set.entries.set(lookup, item);
   });
@@ -1767,7 +1781,8 @@ function collectBTreeMap(ctx: NativeContext, pairs: [Value, Value][], key: Type,
     pairs,
     (entry) => entry[0],
     key,
-    (entry) => map.entries.appendOrdered(entry)
+    (entry) => map.entries.appendOrdered(entry),
+    (entry) => ctx.interp.dropper.drop(entry, item)
   );
   return map;
 }
@@ -1780,7 +1795,8 @@ function collectBTreeSet(ctx: NativeContext, items: Value[], elem: Type): SetVal
     items,
     (value) => value,
     elem,
-    (value) => set.entries.appendOrdered(value)
+    (value) => set.entries.appendOrdered(value),
+    (value) => ctx.interp.dropper.drop(value, elem)
   );
   return set;
 }
@@ -1790,13 +1806,15 @@ function addLastOfEqualKeys<T extends Value>(
   items: T[],
   keyOf: (item: T) => Value,
   keyType: Type,
-  add: (item: T) => void
+  add: (item: T) => void,
+  drop: (item: T) => void
 ): void {
   ctx.runtime.withRoots(items, () => {
     for (let index = 0; index < items.length; index++) {
       const item = items[index];
-      // std's dedup of sorted keys asks whether they differ, which may run a user `ne`.
+      // std's dedup of sorted keys asks whether they differ, which may run a user `ne`; it drops the earlier of equal ones.
       if (index + 1 === items.length || valuesUnequal(keyType, keyOf(item), keyOf(items[index + 1]))) add(item);
+      else drop(item);
     }
   });
 }
