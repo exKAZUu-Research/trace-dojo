@@ -1669,7 +1669,6 @@ pub mod time {
         pub const fn from_millis(millis: u64) -> Duration;
         pub const fn from_micros(micros: u64) -> Duration;
         pub const fn from_nanos(nanos: u64) -> Duration;
-        pub fn from_secs_f64(secs: f64) -> Duration;
         pub const fn as_secs(&self) -> u64;
         pub const fn as_millis(&self) -> u128;
         pub const fn as_micros(&self) -> u128;
@@ -1678,7 +1677,6 @@ pub mod time {
         pub const fn subsec_millis(&self) -> u32;
         pub const fn subsec_nanos(&self) -> u32;
         pub fn abs_diff(self, other: Duration) -> Duration;
-        pub fn mul_f64(self, rhs: f64) -> Duration;
     }
     impl super::ops::Add for Duration { type Output = Duration; fn add(self, rhs: Duration) -> Duration; }
     impl super::ops::Sub for Duration { type Output = Duration; fn sub(self, rhs: Duration) -> Duration; }

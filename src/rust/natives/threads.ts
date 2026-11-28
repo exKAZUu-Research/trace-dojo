@@ -497,7 +497,6 @@ define({
   'Duration::from_millis': ([millis]) => new DurationValue((millis as bigint) * 1_000_000n),
   'Duration::from_micros': ([micros]) => new DurationValue((micros as bigint) * 1000n),
   'Duration::from_nanos': ([nanos]) => new DurationValue(nanos as bigint),
-  'Duration::from_secs_f64': ([secs], ctx) => fromSecsF64(ctx, secs as number),
   'Duration::as_secs': ([d]) => duration(d) / NANOS,
   'Duration::as_millis': ([d]) => duration(d) / 1_000_000n,
   'Duration::as_micros': ([d]) => duration(d) / 1000n,
@@ -508,7 +507,6 @@ define({
   },
   'Duration::subsec_millis': ([d]) => (duration(d) % NANOS) / 1_000_000n,
   'Duration::subsec_nanos': ([d]) => duration(d) % NANOS,
-  'Duration::mul_f64': ([d, factor], ctx) => fromSecsF64(ctx, (Number(duration(d)) / 1e9) * (factor as number)),
   'const:ZERO': () => new DurationValue(0n),
   'Duration::abs_diff': ([a, b]) => {
     const difference = duration(a) - duration(b);
@@ -525,12 +523,6 @@ define({
   'Duration::mul_assign': ([d, factor], ctx) => assigned(d, bounded(ctx, duration(d) * (factor as bigint))),
   'Duration::div_assign': ([d, divisor], ctx) => assigned(d, divided(ctx, d, divisor)),
 });
-
-/** `Duration::from_secs_f64` of seconds that a `Duration` holds; a negative, too large or NaN number is unsupported. */
-function fromSecsF64(ctx: NativeContext, secs: number): DurationValue {
-  if (!(secs >= 0 && secs < 2 ** 64)) unsupportedAtRun(ctx, '負の秒数、大きすぎる秒数、NaN から Duration を作ること');
-  return new DurationValue(BigInt(Math.round(secs * 1e9)));
-}
 
 /**
  * A `Duration` of `nanos`. One out of its range (an overflow or a negative result), where std panics inside its
