@@ -693,11 +693,15 @@ export class StatementChecker {
     const isConst = header.childForFieldName('kind')?.text === 'const';
     const rightType = this.c.expressions.check(right);
     const elementType = isOf ? this.iteratedLoopType(node, right, rightType, false) : stringType;
-    if (left.type === 'identifier') return elementType;
-    return this.c.patterns.patternType(left, elementType, symbol, {
-      isConst,
-      literalSource: isOf ? right : undefined,
-    });
+    if (left.type === 'identifier') return this.c.literals.widenDeclared(elementType, true);
+    const widenedElement = this.c.literals.widenDeclared(elementType, true, true);
+    return this.c.literals.widenDeclared(
+      this.c.patterns.patternType(left, widenedElement, symbol, {
+        isConst,
+        literalSource: isOf ? right : undefined,
+      }),
+      true
+    );
   }
 
   // Control flow -------------------------------------------------------------------------------------------------
@@ -981,15 +985,17 @@ export class StatementChecker {
     yieldDeps?: Set<number>
   ): void {
     const isConst = kind === 'const';
+    const widenedElement = this.c.literals.widenDeclared(elementType, true, true);
     this.c.patterns.bindPattern(
       left,
-      elementType,
-      (identifier, type) => {
+      widenedElement,
+      (identifier, type, assigned = type) => {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (!symbol) return;
         this.c.functions.recordDeclaredVariableYields(symbol, false, yieldDeps);
-        this.c.expressions.setVariableType(symbol, isConst ? type : this.c.widen(type));
-        this.c.flow.set(`s${symbol.id}`, { type, assigned: true });
+        const declared = this.c.literals.widenDeclared(type, true);
+        this.c.expressions.setVariableType(symbol, declared);
+        this.c.flow.set(`s${symbol.id}`, { type: this.c.flow.assignmentReduced(declared, assigned), assigned: true });
       },
       { isConst, literalSource }
     );
