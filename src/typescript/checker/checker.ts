@@ -172,6 +172,7 @@ export class Checker {
     checkDecoratorPlacements(this, this.root);
     checkTypeMemberModifiers(this, this.root);
     this.namespaces.pruneImportAliasMeanings(this.binder.allScopes);
+    this.namespaces.checkCircularAliases(this.binder.allScopes);
     checkDuplicateDeclarations(this, this.binder.allScopes);
     this.signatures.checkTypeParameterDeclarations(this.binder.allScopes);
     this.signatures.checkImplicitReturnTypes(this.root);

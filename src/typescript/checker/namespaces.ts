@@ -12,6 +12,7 @@ import {
 } from './ambientModuleExports';
 import type { Checker } from './checker';
 import { FlowState } from './flow';
+import { checkCircularAliasesInScopes, pruneImportAliasMeaningsInScopes } from './importAliases';
 import { unavailableNodeMember } from './nodeLibrary';
 import { canonicalIdentifier, type MeaningSpace, type Scope, type Sym } from './scopes';
 import { nameSuggestionHint, spellingSuggestion } from './spelling';
@@ -41,6 +42,9 @@ import {
 export class Namespaces {
   private readonly objectTypes = new Map<number, ObjectType>();
   private readonly resolvingAliases = new Set<number>();
+  private readonly resolvingImports = new Set<string>();
+  private cycleHit = false;
+  private readonly circularSymbolIds = new Set<number>();
 
   constructor(private readonly c: Checker) {}
 
@@ -118,7 +122,11 @@ export class Namespaces {
 
   aliasDeclarationTarget(declaration: TreeNode, meaning: MeaningSpace): Sym | undefined {
     const target = named(declaration)[1];
-    if (!target || this.resolvingAliases.has(declaration.id)) return undefined;
+    if (!target) return undefined;
+    if (this.resolvingAliases.has(declaration.id)) {
+      this.cycleHit = true;
+      return undefined;
+    }
     this.resolvingAliases.add(declaration.id);
     try {
       return this.resolvePath(qualifiedPath(target), meaning).symbol;
@@ -129,74 +137,20 @@ export class Namespaces {
 
   /** Drops the unused bindings of an `import` or `import X = N.Y` that resolves only in other symbol spaces. */
   pruneImportAliasMeanings(scopes: Scope[]): void {
-    for (const scope of scopes) {
-      this.pruneScopeImportAliases(scope, 'value');
-      this.pruneScopeImportAliases(scope, 'type');
-      this.pruneScopeImportAliases(scope, 'namespace');
-    }
+    pruneImportAliasMeaningsInScopes(this.c, scopes);
   }
 
-  private pruneScopeImportAliases(scope: Scope, meaning: MeaningSpace): void {
-    const { table, entriesOf, declarationsOf, others } = scopeAliasTables(scope, meaning);
-    for (const [name, symbol] of table) {
-      const entries = entriesOf(symbol);
-      const declarations = declarationsOf(symbol);
-      if (!entries.some((entry) => entry.kind === 'importAlias' || entry.kind === 'import')) continue;
-      const keptIndices = entries
-        .map((_, index) => index)
-        .filter((index) => !this.isOtherSpaceImport(symbol, entries[index].kind, declarations[index], meaning, others));
-      if (keptIndices.length === entries.length) continue;
-      if (keptIndices.length === 0) {
-        table.delete(name);
-        scope.namespace?.namespaceExports?.deleteClauseExportSymbol(symbol, meaning);
-      } else {
-        retainIndices(declarations, keptIndices);
-        this.restoreKeptSymbolKind(symbol, keptIndices, meaning);
-      }
-    }
+  checkCircularAliases(scopes: Scope[]): void {
+    checkCircularAliasesInScopes(this.c, scopes);
   }
 
-  private restoreKeptSymbolKind(symbol: Sym, keptIndices: number[], meaning: MeaningSpace): void {
-    if (meaning === 'value') {
-      retainIndices(symbol.valueEntries, keptIndices);
-      const merged = symbol.valueEntries.find(
-        (entry) => entry.kind === 'enum' || entry.kind === 'function' || entry.kind === 'class'
-      );
-      symbol.valueKind =
-        symbol.valueEntries[0].kind === 'namespace' && merged ? merged.kind : symbol.valueEntries[0].kind;
-      return;
-    }
-    if (meaning === 'type') {
-      retainIndices(symbol.typeEntries, keptIndices);
-      symbol.typeKind = symbol.typeEntries.some((entry) => entry.kind === 'class')
-        ? 'class'
-        : symbol.typeEntries[0].kind;
-      return;
-    }
-    retainIndices(symbol.namespaceEntries, keptIndices);
-    symbol.namespaceKind = symbol.namespaceEntries[0].kind;
-  }
-
-  private isOtherSpaceImport(
-    symbol: Sym,
-    kind: string,
-    declaration: TreeNode | undefined,
-    meaning: MeaningSpace,
-    others: readonly MeaningSpace[]
-  ): boolean {
-    if (kind === 'import' && declaration?.type === 'import_statement') {
-      if (symbol.importTarget?.typeOnly && meaning !== 'namespace') return false;
-      return (
-        this.importTarget(symbol, meaning) === undefined &&
-        others.some((other) => this.importTarget(symbol, other) !== undefined)
-      );
-    }
-    return (
-      kind === 'importAlias' &&
-      declaration?.type === 'import_alias' &&
-      this.aliasDeclarationTarget(declaration, meaning) === undefined &&
-      others.some((other) => this.aliasDeclarationTarget(declaration, other) !== undefined)
-    );
+  probeCircularImportSymbol(symbol: Sym): boolean {
+    this.cycleHit = false;
+    const resolved =
+      this.imported(symbol, 'value') ?? this.imported(symbol, 'type') ?? this.imported(symbol, 'namespace');
+    if (resolved || !this.cycleHit) return false;
+    this.circularSymbolIds.add(symbol.id);
+    return true;
   }
 
   /** Reports the path of `import X = N.Y` that names nothing. */
@@ -320,18 +274,28 @@ export class Namespaces {
     const target = symbol.importTarget;
     const module = target && this.moduleNamed(target.module);
     if (!target || !module) return undefined;
-    if (module.exportEquals) {
-      if (target.name === '*' || target.name === 'default') return this.exportEqualsSymbol(module, meaning);
-      const container = this.exportEqualsContainer(module);
-      return container?.namespaceExports ? this.exportedMember(container, target.name, meaning) : undefined;
+    const key = `${symbol.id}:${meaning}`;
+    if (this.resolvingImports.has(key)) {
+      this.cycleHit = true;
+      return undefined;
     }
-    if (target.name === '*' || this.isSyntheticDefault(module, target.name)) return module;
-    return (
-      this.exportedMember(module, target.name, meaning) ??
-      (meaning === 'value'
-        ? this.unaliased(module.namespaceExports?.typeOnlyValues.get(target.name), 'value')
-        : undefined)
-    );
+    this.resolvingImports.add(key);
+    try {
+      if (module.exportEquals) {
+        if (target.name === '*' || target.name === 'default') return this.exportEqualsSymbol(module, meaning);
+        const container = this.exportEqualsContainer(module);
+        return container?.namespaceExports ? this.exportedMember(container, target.name, meaning) : undefined;
+      }
+      if (target.name === '*' || this.isSyntheticDefault(module, target.name)) return module;
+      return (
+        this.exportedMember(module, target.name, meaning) ??
+        (meaning === 'value'
+          ? this.unaliased(module.namespaceExports?.typeOnlyValues.get(target.name), 'value')
+          : undefined)
+      );
+    } finally {
+      this.resolvingImports.delete(key);
+    }
   }
 
   /** Whether an `import` binding resolves in value space only through an upstream `export type` declaration. */
@@ -352,13 +316,21 @@ export class Namespaces {
 
   exportEqualsSymbol(module: Sym, meaning: MeaningSpace): Sym | undefined {
     const target = module.exportEquals;
-    if (!target || this.resolvingAliases.has(target.id)) return undefined;
+    if (!target) return undefined;
+    if (this.resolvingAliases.has(target.id)) {
+      this.cycleHit = true;
+      return undefined;
+    }
     this.resolvingAliases.add(target.id);
     try {
       return this.resolvePath(qualifiedPath(target), meaning).symbol;
     } finally {
       this.resolvingAliases.delete(target.id);
     }
+  }
+
+  exportEqualsContainerOf(module: Sym): Sym | undefined {
+    return this.exportEqualsContainer(module);
   }
 
   private exportEqualsContainer(module: Sym): Sym | undefined {
@@ -405,9 +377,13 @@ export class Namespaces {
   resolveImportTypeMember(node: TreeNode): { symbol?: Sym; error?: string; site?: TreeNode } {
     return resolveImportTypeMemberOf(this.c, node, (current, name, isLast) => {
       if (!isLast) return this.containerMemberOf(current, name);
-      return current.namespaceExports
-        ? (this.exportedMember(current, name, 'type') ?? current.enumMembers?.values.get(name))
-        : current.enumMembers?.values.get(name);
+      if (!current.namespaceExports) return current.enumMembers?.values.get(name);
+      const rawType = current.namespaceExports.types.get(name);
+      return (
+        this.exportedMember(current, name, 'type') ??
+        (rawType && this.circularSymbolIds.has(rawType.id) ? rawType : undefined) ??
+        current.enumMembers?.values.get(name)
+      );
     });
   }
 
@@ -670,34 +646,4 @@ function missingMemberError(container: Sym, name: string): string {
 /** The name a namespace is printed with, `A.B` for `B` in `A`. */
 function qualifiedName(symbol: Sym): string {
   return symbol.exportedFrom ? `${qualifiedName(symbol.exportedFrom)}.${symbol.name}` : symbol.name;
-}
-
-function retainIndices<T>(items: T[], indices: number[]): void {
-  const kept = indices.map((index) => items[index]);
-  items.splice(0, items.length, ...kept);
-}
-
-const allMeanings: readonly MeaningSpace[] = ['value', 'type', 'namespace'];
-
-function scopeAliasTables(
-  scope: Scope,
-  meaning: MeaningSpace
-): {
-  table: Map<string, Sym>;
-  entriesOf: (symbol: Sym) => { kind: string; name: TreeNode }[];
-  declarationsOf: (symbol: Sym) => TreeNode[];
-  others: readonly MeaningSpace[];
-} {
-  return {
-    table: scope.tableOf(meaning),
-    entriesOf: (symbol) =>
-      meaning === 'value' ? symbol.valueEntries : meaning === 'type' ? symbol.typeEntries : symbol.namespaceEntries,
-    declarationsOf: (symbol) =>
-      meaning === 'value'
-        ? symbol.valueDeclarations
-        : meaning === 'type'
-          ? symbol.typeDeclarations
-          : symbol.namespaceDeclarations,
-    others: allMeanings.filter((other) => other !== meaning),
-  };
 }
