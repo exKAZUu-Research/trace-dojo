@@ -30,6 +30,7 @@ import type {
 import { checkVariantNames, defaultVariant, discriminants } from './enumItems';
 import { argumentFor, lowerArrayType, lowerConstArg, withDefaultArgs } from './genericArgs';
 import { Unifier } from './infer';
+import { checkFnSugarElision } from './lifetimeElision';
 import {
   BUILTIN_ENUMS,
   builtinStruct,
@@ -361,7 +362,7 @@ export class ItemCollector {
             item.span
           );
           // rustc checks an alias's type whether or not anything uses the alias.
-          this.lowering.push(() => void resolve());
+          this.lowering.push(() => checkFnSugarElision(resolve(), item.span));
           break;
         }
       }
@@ -798,7 +799,9 @@ function lowerImplAssocTypes(item: ImplItem, impl: ImplDef, trait: TraitRef, sco
       compileError(assoc.span, `関連型 ${assoc.name} の型引数の数が、トレイトの宣言と合いません（E0049）。`);
     }
     const params = new Map([...scope.params, ...own.map((param): [string, TypeParam] => [param.name, param])]);
-    impl.assocTypes.set(assoc.name, lowerType(assoc.type, { ...scope, params }));
+    const type = lowerType(assoc.type, { ...scope, params });
+    checkFnSugarElision(type, assoc.span);
+    impl.assocTypes.set(assoc.name, type);
     if (own.length > 0) (impl.assocTypeParams ??= new Map()).set(assoc.name, own);
   }
 }
@@ -1392,6 +1395,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
         params: ast.params.map((param) => lowerType(param, scope)),
         ret: ast.ret ? lowerType(ast.ret, scope) : UNIT,
         isUnsafe: ast.isUnsafe,
+        ...(ast.bound ? { boundLifetimes: ast.bound } : {}),
       };
     }
     case 'fnBound': {

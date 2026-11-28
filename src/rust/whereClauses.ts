@@ -1,11 +1,13 @@
 import type { Generics } from './ast';
 import { compileError, lowerBoundIfTrait, lowerType, type TypeScope } from './items';
+import { checkFnSugarBounds } from './lifetimeElision';
 import type { TraitRef, Type, TypeParam } from './types';
 
 export function lowerTypeParamBounds(params: TypeParam[], generics: Generics, scope: TypeScope): void {
   for (const [index, param] of generics.params.entries()) {
     const target = params[index];
     target.bounds = param.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, { kind: 'param', param: target }));
+    checkFnSugarBounds(target.bounds, param.span);
   }
 }
 
@@ -37,6 +39,7 @@ export function addWherePredicates(
     }
     if (predicate.bounds.some((bound) => bound.kind === 'maybeSized')) type.param.maybeUnsized = true;
     const bounds = predicate.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type));
+    checkFnSugarBounds(bounds, predicate.span);
     if (elsewhere?.(type.param, bounds)) continue;
     type.param.bounds.push(...bounds);
   }

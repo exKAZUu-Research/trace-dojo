@@ -59,7 +59,7 @@ function boundTypes(t: Extract<Type, { kind: 'dyn' | 'opaque' }>): Type[] {
  * its own inputs, as rustc does whatever the function around it has: `Fn() -> &str` and `fn(&str, &str) -> &str` are
  * E0106.
  */
-function checkFnSugarElision(type: Type, span: Span): void {
+export function checkFnSugarElision(type: Type, span: Span): void {
   const t = shallow(type);
   if (t.kind === 'fn') {
     checkOwnElision(t, span, 'fn');
@@ -85,7 +85,7 @@ export function checkFnTypeElision(type: Type, span: Span): void {
   if (t.kind === 'dyn' || t.kind === 'opaque') checkFnSugarBounds(t.kind === 'dyn' ? [t.trait] : t.opaque.bounds, span);
 }
 
-function checkFnSugarBounds(bounds: readonly TraitRef[], span: Span): void {
+export function checkFnSugarBounds(bounds: readonly TraitRef[], span: Span): void {
   for (const { fnSig } of bounds) if (fnSig) checkOwnElision(fnSig, span, 'Fn');
 }
 
@@ -113,10 +113,28 @@ export function checkFieldLifetimes(type: Type, span: Span, declared: string[]):
     }
     for (const lifetime of lifetimes) checkFieldLifetime(lifetime, span, declared);
   }
-  // A function pointer's references are its own parameters' and result's, which it elides by its own rules.
-  if (t.kind === 'fn') return;
+  // A function pointer's references are its own parameters' and result's, which it elides by its own rules; a lifetime
+  // it names is one its `for<'a>` binds or the item declares.
+  if (t.kind === 'fn') {
+    const known = [...declared, ...(t.boundLifetimes ?? [])];
+    for (const part of [...t.params, t.ret]) checkNamedLifetimes(part, span, known);
+    return;
+  }
   const stored = t.kind === 'dyn' ? t.trait.args : childTypes(t);
   for (const child of stored) checkFieldLifetimes(child, span, declared);
+}
+
+/** Requires each lifetime a type names to be declared, leaving those it leaves out alone. */
+function checkNamedLifetimes(type: Type, span: Span, declared: string[]): void {
+  const t = shallow(type);
+  const named = t.kind === 'ref' ? [t.lifetime] : t.kind === 'adt' ? (t.lifetimes ?? []) : [];
+  for (const lifetime of named) if (lifetime && lifetime !== "'_") checkFieldLifetime(lifetime, span, declared);
+  if (t.kind === 'fn') {
+    const known = [...declared, ...(t.boundLifetimes ?? [])];
+    for (const part of [...t.params, t.ret]) checkNamedLifetimes(part, span, known);
+    return;
+  }
+  for (const child of childTypes(t)) checkNamedLifetimes(child, span, declared);
 }
 
 function checkFieldLifetime(lifetime: string | undefined, span: Span, declared: string[]): void {

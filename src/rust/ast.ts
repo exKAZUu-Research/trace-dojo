@@ -231,7 +231,15 @@ export type TypeAst =
   /** A raw pointer type (`*const T`, `*mut T`). */
   | { kind: 'pointer'; mutable: boolean; target: TypeAst; span: Span }
   /** A function pointer type (`fn(i32) -> i32`). */
-  | { kind: 'fnPointer'; params: TypeAst[]; ret: TypeAst | undefined; isUnsafe?: boolean; span: Span };
+  | {
+      kind: 'fnPointer';
+      params: TypeAst[];
+      ret: TypeAst | undefined;
+      isUnsafe?: boolean;
+      /** The lifetimes `for<'a>` binds for its own parameters and result. */
+      bound?: string[];
+      span: Span;
+    };
 
 export interface PathAst {
   segments: PathSegment[];

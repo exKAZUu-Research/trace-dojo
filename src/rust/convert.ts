@@ -812,7 +812,9 @@ export class Converter extends ExpressionConverter {
       .map((child) => this.type(child.type === 'parameter' ? this.field(child, 'type') : child));
     const ret = node.childForFieldName('return_type');
     const isUnsafe = modifiers?.text.includes('unsafe');
-    return { kind: 'fnPointer', params, ret: ret ? this.returnType(ret) : undefined, isUnsafe, span };
+    const forLifetimes = node.namedChildren.find((child) => child.type === 'for_lifetimes');
+    const bound = forLifetimes?.namedChildren.filter((child) => child.type === 'lifetime').map((child) => child.text);
+    return { kind: 'fnPointer', params, ret: ret ? this.returnType(ret) : undefined, isUnsafe, bound, span };
   }
 
   private boundedType(node: Node, span: Span): TypeAst {

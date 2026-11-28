@@ -32,7 +32,15 @@ export type Type =
   | { kind: 'param'; param: TypeParam }
   | { kind: 'var'; v: TypeVar }
   /** `isUnsafe`: an `unsafe fn(..)` pointer, whose calls need `unsafe`. */
-  | { kind: 'fn'; params: Type[]; ret: Type; item?: FnDef | VariantDef; isUnsafe?: boolean }
+  | {
+      kind: 'fn';
+      params: Type[];
+      ret: Type;
+      item?: FnDef | VariantDef;
+      isUnsafe?: boolean;
+      /** The lifetimes a pointer's `for<'a>` binds for its own parameters and result. */
+      boundLifetimes?: string[];
+    }
   | { kind: 'closure'; closure: ClosureType }
   | {
       kind: 'dyn';
