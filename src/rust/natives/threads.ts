@@ -206,8 +206,17 @@ function threadScope(ctx: NativeContext, f: Value): Value {
     result = call(ctx, f, [UNIT_VALUE]);
   } catch (error) {
     // The scope waits for its threads when its body panics too, before the panic goes on, but not when the process
-    // exits.
-    if (!(error instanceof ProcessExit)) threads.runAll(ctx);
+    // exits. The body's unwinding is not theirs, so a lock they let go stays unpoisoned.
+    if (!(error instanceof ProcessExit)) {
+      const { runtime } = ctx;
+      const unwinding = runtime.unwinding;
+      runtime.unwinding = false;
+      try {
+        threads.runAll(ctx);
+      } finally {
+        runtime.unwinding = unwinding;
+      }
+    }
     throw error;
   }
   threads.runAll(ctx);
