@@ -1011,7 +1011,11 @@ pub mod error {
 }
 pub mod iter {
     pub struct IterImpl<'a, T, S>;
-    pub trait Iterator { type Item; fn next(&mut self) -> Option<Self::Item>; }
+    pub trait Iterator {
+        type Item;
+        fn next(&mut self) -> Option<Self::Item>;
+        fn size_hint(&self) -> (usize, Option<usize>);
+    }
     pub trait IntoIterator {}
     pub trait FromIterator<A>: Sized { fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self; }
     pub trait Extend<A> {}

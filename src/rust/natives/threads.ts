@@ -267,8 +267,16 @@ function waitOnCondvar(ctx: NativeContext, held: Value, waiting: (place: Value) 
   if (!once && !waiting(guard.place())) return ok(ctx, guard);
   guard.release();
   for (;;) {
-    if (!scheduler(ctx).runAll(ctx))
+    const threads = scheduler(ctx);
+    if (!threads.runAll(ctx)) {
+      if (threads.belowCouldGoOn()) {
+        throw new UnsupportedAtRun(
+          '途中で待っているスレッドが通知するのを待つ Condvar は、この採点環境では使えません。',
+          ctx.span
+        );
+      }
       deadlock(ctx, 'デッドロックしました（通知するスレッドがないまま、Condvar を待っています）。');
+    }
     const result = lock(ctx, guard.cell, true) as EnumValue;
     // A poisoned lock still gives its guard, inside the `PoisonError`.
     const relocked = (
@@ -373,7 +381,12 @@ define({
   },
   'std::thread::scope': ([f], ctx) => threadScope(ctx, f),
   'std::thread::sleep': (_args, ctx) => {
-    scheduler(ctx).runAll(ctx);
+    // A sleeping thread could go on at any time, which a thread it runs on top of may be waiting for.
+    const threads = scheduler(ctx);
+    threads.waiting(
+      () => true,
+      () => threads.runAll(ctx)
+    );
     return UNIT_VALUE;
   },
   'std::thread::yield_now': (_args, ctx) => {
