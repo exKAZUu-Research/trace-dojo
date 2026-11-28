@@ -94,6 +94,12 @@ export class Scope {
   readonly namespaces = new Map<string, Sym>();
   readonly typeOnlyValues = new Map<string, Sym>();
   defaultTypeSymbol?: Sym;
+  readonly defaultDeclaredNames: {
+    name: string;
+    kind: 'interface' | 'class';
+    declaration: TreeNode;
+    nameNode: TreeNode;
+  }[] = [];
   private hasDefaultTypeLocalName = false;
 
   private readonly clauseOnlyValues = new Set<string>();
@@ -291,6 +297,9 @@ export class Scope {
     const name = canonicalIdentifier(rawName, nameNode);
     if (this.augments)
       return this.forwardAugmented(name, (augments) => augments.declareType(name, kind, declaration, nameNode));
+    if (this.defaultTypeSymbol && this.types.get(name) === this.defaultTypeSymbol) {
+      this.types.delete(name);
+    }
     // A class or an enum is a value and a type of the same name.
     const symbol = this.resolveDeclaredSymbol(name, 'type', declaration, () =>
       kind === 'class' || kind === 'enum' ? this.values.get(name) : undefined
@@ -308,6 +317,14 @@ export class Scope {
     declaration: TreeNode,
     nameNode: TreeNode
   ): Sym {
+    if (rawName) {
+      this.defaultDeclaredNames.push({
+        name: canonicalIdentifier(rawName, nameNode),
+        kind,
+        declaration,
+        nameNode,
+      });
+    }
     const shared = this.defaultTypeSymbol;
     const canMerge =
       shared !== undefined &&
@@ -329,7 +346,15 @@ export class Scope {
     declaration: TreeNode,
     nameNode: TreeNode
   ): Sym {
+    const name = canonicalIdentifier(rawName, nameNode);
     this.hasDefaultTypeLocalName = true;
+    if (this.types.has(name)) {
+      const symbol = new Sym(name, this);
+      symbol.typeKind = kind;
+      symbol.typeDeclarations.push(declaration);
+      symbol.typeEntries.push({ kind, name: nameNode });
+      return symbol;
+    }
     return this.declareType(rawName, kind, declaration, nameNode);
   }
 

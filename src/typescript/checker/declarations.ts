@@ -15,12 +15,16 @@ export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
   checkBuiltinUndefinedDeclaration(c);
   checkNamespaceClauseExportConflicts(c, scopes);
   const reportedExportMix = new Set<number>();
+  checkDefaultDeclarationNameConflicts(c, scopes, reportedExportMix);
   for (const symbol of uniqueSymbols(scopes, (scope) => scope.values.values())) {
     if (!symbol.valueEntries.some((entry) => !c.isLibrary(entry.name))) continue;
     checkValueDuplicates(c, symbol);
     checkMergedValueExportConsistency(c, symbol, reportedExportMix);
   }
-  for (const symbol of uniqueSymbols(scopes, (scope) => scope.types.values())) {
+  for (const symbol of uniqueSymbols(scopes, (scope) => [
+    ...scope.types.values(),
+    ...(scope.defaultTypeSymbol ? [scope.defaultTypeSymbol] : []),
+  ])) {
     if (!symbol.typeEntries.some((entry) => !c.isLibrary(entry.name))) continue;
     checkTypeDuplicates(c, symbol);
     checkMergedTypeExportConsistency(c, symbol, reportedExportMix);
@@ -31,6 +35,90 @@ export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
     checkNamespaceDuplicates(c, symbol);
     checkMergedNamespaceExportConsistency(c, symbol, reportedExportMix);
   }
+}
+
+function checkDefaultDeclarationNameConflicts(c: Checker, scopes: Scope[], reported: Set<number>): void {
+  const visited = new Set<Scope>();
+  for (const scope of scopes) {
+    if (visited.has(scope) || scope.defaultDeclaredNames.length === 0) continue;
+    visited.add(scope);
+    reportScopeDefaultNameConflicts(c, scope, reported);
+  }
+}
+
+function reportScopeDefaultNameConflicts(c: Checker, scope: Scope, reported: Set<number>): void {
+  const byName = new Map<string, Scope['defaultDeclaredNames']>();
+  for (const entry of scope.defaultDeclaredNames) {
+    const list = byName.get(entry.name) ?? [];
+    list.push(entry);
+    byName.set(entry.name, list);
+  }
+  for (const [name, defaults] of byName) {
+    const nonDefaults = collectNonDefaultNameDeclarations(c, scope, name, defaults);
+    if (nonDefaults.length === 0) continue;
+    const message = defaultNameConflictMessage(name, nonDefaults);
+    for (const site of [...nonDefaults.map((item) => item.site), ...defaults.map((item) => item.nameNode)]) {
+      if (reported.has(site.id)) continue;
+      reported.add(site.id);
+      c.error(site, message);
+    }
+  }
+}
+
+function collectNonDefaultNameDeclarations(
+  c: Checker,
+  scope: Scope,
+  name: string,
+  defaults: Scope['defaultDeclaredNames']
+): { kind: string; site: TreeNode }[] {
+  const onlyDefaultClasses = defaults.every((item) => item.kind === 'class');
+  const found = collectNonDefaultTypeEntries(c, scope, name, onlyDefaultClasses);
+  if (defaults.some((item) => item.kind === 'class')) {
+    collectNonDefaultNamespaceEntries(c, scope.namespaces.get(name), found);
+  }
+  return found;
+}
+
+function collectNonDefaultTypeEntries(
+  c: Checker,
+  scope: Scope,
+  name: string,
+  onlyDefaultClasses: boolean
+): { kind: string; site: TreeNode }[] {
+  const found: { kind: string; site: TreeNode }[] = [];
+  const typeSymbol = scope.types.get(name);
+  if (!typeSymbol || typeSymbol === scope.defaultTypeSymbol) return found;
+  for (const [index, entry] of typeSymbol.typeEntries.entries()) {
+    const decl = typeSymbol.typeDeclarations[index];
+    if (c.isLibrary(entry.name) || isDefaultExportDeclarationNode(decl)) continue;
+    if (entry.kind === 'class' && onlyDefaultClasses) continue;
+    found.push({ kind: entry.kind, site: entry.name });
+  }
+  return found;
+}
+
+function collectNonDefaultNamespaceEntries(
+  c: Checker,
+  nsSymbol: Sym | undefined,
+  found: { kind: string; site: TreeNode }[]
+): void {
+  for (const [index, entry] of (nsSymbol?.namespaceEntries ?? []).entries()) {
+    const decl = nsSymbol?.namespaceDeclarations[index];
+    if (!c.isLibrary(entry.name) && !isDefaultExportDeclarationNode(decl)) {
+      found.push({ kind: entry.kind, site: entry.name });
+    }
+  }
+}
+
+function defaultNameConflictMessage(name: string, nonDefaults: { kind: string }[]): string {
+  if (nonDefaults.some((item) => item.kind === 'alias' || item.kind === 'enum')) {
+    return 'モジュールに複数の既定のエクスポートを含めることはできません。';
+  }
+  return defaultMergeConflictMessage(name);
+}
+
+function defaultMergeConflictMessage(name: string): string {
+  return `マージされた宣言 '${name}' に既定のエクスポート宣言を含めることはできません。代わりに、'export default ${name}' 宣言を別個に追加することを検討してください。`;
 }
 
 function checkNamespaceClauseExportConflicts(c: Checker, scopes: Scope[]): void {
@@ -379,17 +467,39 @@ function reportMixedExports(
 ): void {
   const userIndices = entries.map((_, index) => index).filter((index) => !c.isLibrary(entries[index].name));
   if (userIndices.length < 2) return;
+  const defaultFlags = userIndices.map((index) => isDefaultExportDeclarationNode(declarations[index]));
+  if (defaultFlags.some(Boolean) && defaultFlags.some((flag) => !flag)) {
+    reportAtDeclarationSites(c, userIndices, entries, reported, defaultMergeConflictMessage(name));
+    return;
+  }
   const flags = userIndices.map((index) => isExportedDeclaration(declarations[index], entries[index].name));
   if (flags.every(Boolean) || flags.every((flag) => !flag)) return;
-  for (const index of userIndices) {
+  const message = `マージされた宣言 '${name}' の個々の宣言はすべてエクスポートされるか、すべてローカルであるかのどちらかである必要があります。`;
+  reportAtDeclarationSites(c, userIndices, entries, reported, message);
+}
+
+function reportAtDeclarationSites(
+  c: Checker,
+  indices: number[],
+  entries: { name: TreeNode }[],
+  reported: Set<number>,
+  message: string
+): void {
+  for (const index of indices) {
     const site = entries[index].name;
     if (reported.has(site.id)) continue;
     reported.add(site.id);
-    c.error(
-      site,
-      `マージされた宣言 '${name}' の個々の宣言はすべてエクスポートされるか、すべてローカルであるかのどちらかである必要があります。`
-    );
+    c.error(site, message);
   }
+}
+
+function isDefaultExportDeclarationNode(declaration: TreeNode | undefined): boolean {
+  if (!declaration) return false;
+  const outer = declaration.parent?.type === 'ambient_declaration' ? declaration.parent : declaration;
+  return (
+    outer.parent?.type === 'export_statement' &&
+    outer.parent.children.some((child) => !child.isNamed && child.type === 'default')
+  );
 }
 
 function isExportedDeclaration(declaration: TreeNode | undefined, entryName: TreeNode): boolean {
