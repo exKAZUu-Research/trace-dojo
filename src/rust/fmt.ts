@@ -685,7 +685,6 @@ function integerText(value: bigint, spec: Spec): string {
   return (spec.sign === '+' && value >= 0n ? '+' : '') + value.toString();
 }
 
-/** Pads a number, with `0` padding after its sign and radix prefix. */
 /**
  * std's `Pointer` formatting: the address in hex with `0x`, which `#` pads with zeros to 16 digits; a pointer to a
  * slice or `str` is `Pointer { addr, metadata }` with its length.
@@ -698,7 +697,8 @@ function pointerDebug(
   write?: WriteChunk
 ): string {
   const addressSpec = spec.alternate ? { ...spec, zero: true, width: spec.width ?? 18 } : spec;
-  const address = (sink?: WriteChunk): string => padNumber(`0x${pointer.address.toString(16)}`, addressSpec, 2, sink);
+  const address = (sink?: WriteChunk): string =>
+    padNumber(`${spec.sign === '+' ? '+' : ''}0x${pointer.address.toString(16)}`, addressSpec, 2, sink);
   if (pointee.kind !== 'slice' && pointee.kind !== 'str') return address(write);
   const target = pointer.place?.get();
   const metadata = target === undefined ? 0 : pointee.kind === 'str' ? stringByteLength(target) : sliceLength(target);
@@ -714,6 +714,7 @@ function pointerDebug(
   );
 }
 
+/** Pads a number, with `0` padding after its sign and radix prefix. */
 function padNumber(shown: string, spec: Spec, prefixLength = 0, write?: WriteChunk): string {
   if (spec.zero && spec.width !== undefined) {
     const signLength = shown.startsWith('-') || shown.startsWith('+') ? 1 : 0;
