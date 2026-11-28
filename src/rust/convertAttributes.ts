@@ -166,10 +166,12 @@ export class AttributeReader {
       case 'cfg_attr': {
         return this.cfgAttr(args, attrs, span);
       }
-      case 'test':
-      case 'bench': {
+      case 'test': {
         // A program built without `--test` leaves out its tests.
         return false;
+      }
+      case 'bench': {
+        return syntaxError(span, '#[bench] は、不安定な機能なので使えません（E0658）。');
       }
       case 'default': {
         attrs.isDefault = true;
