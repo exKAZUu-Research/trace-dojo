@@ -9,6 +9,8 @@ import { compileError } from './items';
 import { derefOnce } from './methods';
 import {
   BOOL,
+  F32,
+  F64,
   freshVar,
   INT_NAMES,
   intType,
@@ -280,9 +282,10 @@ function arithmeticOrBitwise(c: Checker, expr: Extract<Expr, { kind: 'binary' }>
  * (`3 * Duration::from_millis(7)` is a `u32`), as rustc picks it before falling back to `i32`.
  */
 function literalSelf(c: Checker, left: Type & { kind: 'var' }, traitName: string, right: Type): Type | undefined {
-  if (left.v.literal !== 'int') return undefined;
+  if (left.v.literal !== 'int' && left.v.literal !== 'float') return undefined;
   const ref = { trait: c.program.traitDef(traitName), args: [right] };
-  const [only, ...others] = INT_NAMES.map(intType).filter((type) => c.solver.implements(type, ref) === 'yes');
+  const candidates = left.v.literal === 'int' ? INT_NAMES.map(intType) : [F32, F64];
+  const [only, ...others] = candidates.filter((type) => c.solver.implements(type, ref) === 'yes');
   if (!only || others.length > 0) return undefined;
   c.unifier.tryUnify(left, only);
   return only;
