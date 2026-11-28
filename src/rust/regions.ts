@@ -65,12 +65,11 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
         unwrittenObject: t.objectLifetime === undefined && t.lifetime === undefined,
       };
     }
-    case 'param': {
-      const fixed = t.param.bounds.some(({ trait }) => trait.builtin === 'Static');
-      return { kind: 'opaque', region: fixed ? staticRegion() : fresh() };
-    }
+    case 'param':
     case 'opaque': {
-      return { kind: 'opaque', region: fresh() };
+      const bounds = t.kind === 'param' ? t.param.bounds : t.opaque.bounds;
+      const fixed = bounds.some(({ trait }) => trait.builtin === 'Static');
+      return { kind: 'opaque', region: fixed ? staticRegion() : fresh() };
     }
     default: {
       return NONE;

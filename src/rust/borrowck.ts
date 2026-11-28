@@ -69,7 +69,13 @@ export class BorrowChecker {
     );
   }
 
-  checkFn(item: FnItem, context: FnContext, ret: Type, implBounds: Generics['lifetimeBounds'] = []): void {
+  checkFn(
+    item: FnItem,
+    context: FnContext,
+    ret: Type,
+    implBounds: Generics['lifetimeBounds'] = [],
+    declaredRet?: Type
+  ): void {
     if (!item.body) return;
     const moveError = this.checkMoves(item, item.body, context);
     const loanErrors: LoanError[] = [];
@@ -84,6 +90,7 @@ export class BorrowChecker {
           span: param.span,
         })),
         bounds: [...(item.generics.lifetimeBounds ?? []), ...implBounds],
+        staticReturn: declaredRet !== undefined && isStaticOpaque(declaredRet),
         span: item.span,
       },
     };
@@ -972,6 +979,12 @@ function isReference(type: Type | undefined): boolean {
   if (!type) return false;
   const t = normalize(shallow(type));
   return t.kind === 'ref' || (t.kind === 'adt' && t.def.builtin !== 'Box');
+}
+
+/** Whether a function returns an `impl Trait + 'static`. */
+function isStaticOpaque(ret: Type): boolean {
+  const t = shallow(ret);
+  return t.kind === 'opaque' && t.opaque.bounds.some(({ trait }) => trait.builtin === 'Static');
 }
 
 function diverges(ret: Type): boolean {

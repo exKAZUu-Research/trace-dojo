@@ -163,6 +163,8 @@ export class LoanBuilder {
     this.returnVar = this.newVar('{return}', ret);
     this.returnType = ret;
     this.makeUniversal(this.returnVar);
+    if (signature?.staticReturn)
+      for (const region of this.graph.varRegions[this.returnVar]) this.outlives(region, this.static());
     const receiver = this.context.locals.filter((local) => local.isSelf);
     const defs = receiver.map((local) => this.universalLocal(local));
     const parameterLocals = [

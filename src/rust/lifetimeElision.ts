@@ -55,11 +55,17 @@ function boundTypes(t: Extract<Type, { kind: 'dyn' | 'opaque' }>): Type[] {
 }
 
 /**
- * Requires the output of each `Fn(..) -> ..` bound in a type to elide its lifetimes from the bound's own inputs, as
- * rustc does whatever the function around it has: `Fn() -> &str` and `Fn(&str, &str) -> &str` are E0106.
+ * Requires the output of each `Fn(..) -> ..` bound and `fn(..) -> ..` pointer in a type to elide its lifetimes from
+ * its own inputs, as rustc does whatever the function around it has: `Fn() -> &str` and `fn(&str, &str) -> &str` are
+ * E0106.
  */
 function checkFnSugarElision(type: Type, span: Span): void {
   const t = shallow(type);
+  if (t.kind === 'fn') {
+    checkOwnElision(t, span, 'fn');
+    for (const part of [...t.params, t.ret]) checkFnSugarElision(part, span);
+    return;
+  }
   if (t.kind === 'dyn' || t.kind === 'opaque') {
     checkFnSugarBounds(t.kind === 'dyn' ? [t.trait] : t.opaque.bounds, span);
     for (const part of boundTypes(t)) checkFnSugarElision(part, span);
@@ -70,11 +76,13 @@ function checkFnSugarElision(type: Type, span: Span): void {
 }
 
 function checkFnSugarBounds(bounds: readonly TraitRef[], span: Span): void {
-  for (const { fnSig } of bounds) {
-    if (!fnSig || lifetimePlaces(fnSig.ret, true) === 0) continue;
-    const inputs = fnSig.params.reduce((places, param) => places + lifetimePlaces(param, false), 0);
-    if (inputs !== 1) compileError(span, 'Fn(..) -> .. の戻り値の参照には、ライフタイムを書いてください（E0106）。');
-  }
+  for (const { fnSig } of bounds) if (fnSig) checkOwnElision(fnSig, span, 'Fn');
+}
+
+function checkOwnElision(sig: { params: readonly Type[]; ret: Type }, span: Span, form: 'fn' | 'Fn'): void {
+  if (lifetimePlaces(sig.ret, true) === 0) return;
+  const inputs = sig.params.reduce((places, param) => places + lifetimePlaces(param, false), 0);
+  if (inputs !== 1) compileError(span, `${form}(..) -> .. の戻り値の参照には、ライフタイムを書いてください（E0106）。`);
 }
 
 function childTypesOf(t: Type): Type[] {

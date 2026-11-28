@@ -696,7 +696,8 @@ export class Checker {
         item,
         this.body.fn,
         this.body.retType,
-        def.impl?.lifetimeBounds
+        def.impl?.lifetimeBounds,
+        def.ret
       )
     );
     new ConstLint(this.annotations).check(body);
