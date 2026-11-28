@@ -175,11 +175,8 @@ export class FunctionChecker {
     const typed: Signature = {
       ...signature,
       returnType: () => {
-        if (!returnType && immediate)
-          return this.c.flow.probe(() =>
-            this.c.silently(() => this.checkFunctionBody(node, signature, contextualReturn, false))
-          );
-        returnType ??= this.checkFunctionBody(node, signature, contextualReturn, true);
+        if (!returnType && immediate) return this.inferBodyReturnType(node, signature, contextualReturn, false);
+        returnType ??= this.inferBodyReturnType(node, signature, contextualReturn, true);
         return returnType;
       },
       checkImmediateBody: immediate
@@ -194,8 +191,22 @@ export class FunctionChecker {
     const ownName = node.childForFieldName('name');
     const self = ownName ? this.c.ownScope(node)?.lookupValue(ownName.text) : undefined;
     if (self?.valueDeclaration?.id === node.id) self.valueType = type;
-    if (!immediate) this.checkFunctionLike(node, signature, contextualSignature);
+    if (!immediate) {
+      const checked = this.checkFunctionLike(node, signature, contextualSignature);
+      returnType ??= checked;
+    }
     return type;
+  }
+
+  private inferBodyReturnType(
+    node: TreeNode,
+    signature: Signature,
+    contextualReturn: Type | undefined,
+    isolated: boolean
+  ): Type {
+    return this.c.flow.probe(() =>
+      this.c.silently(() => this.checkFunctionBody(node, signature, contextualReturn, isolated))
+    );
   }
 
   addInferredPredicate(node: TreeNode, signature: Signature): void {
