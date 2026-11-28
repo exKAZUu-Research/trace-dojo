@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -18,15 +17,19 @@ import type {
   FunctionDeclaration,
   Label,
   Parameter,
+  PointerQualifiers,
   SourceFile,
   Span,
   Statement,
   SwitchCase,
   SwitchItem,
+  TestDeclaration,
   UnaryOperator,
   VariableDeclaration,
 } from './ast';
 import { LiteralDecoder, parseFloatText, parseIntegerText, validateCommentText } from './literals';
+// code-gauge-allow-file fileNcss -- The file holds one layer of the compiler, whose parts share its private state.
+import { unavailableMessage } from './unavailable';
 
 /** Converts tree-sitter's tree of a file into the AST, rejecting the syntax this grader does not run. */
 export function convertFile(root: Node, budget = new ExecutionBudget()): SourceFile {
@@ -35,8 +38,8 @@ export function convertFile(root: Node, budget = new ExecutionBudget()): SourceF
   validateCommentText(root, source, budget);
   literals = new LiteralDecoder(budget);
   functions = [];
-  const { members, fields } = containerMembers(root);
-  return { members, fields, functions };
+  const { members, fields, tests, comptimeBlocks } = containerBody(root.namedChildren);
+  return { members, fields, functions, tests, comptimeBlocks };
 }
 
 /** The text of the file being converted, for checks of the spaces around operators. */
@@ -65,8 +68,8 @@ function fail(node: Node, message: string): never {
   throw new CompileError([{ row: node.startPosition.row, message }]);
 }
 
-export function unavailable(node: Node, what: string): never {
-  fail(node, `${what}は、この採点環境では使えません。`);
+export function unavailable(node: Node, key: string): never {
+  fail(node, unavailableMessage(key));
 }
 
 /** The children that stand for expressions: named nodes other than comments, and keyword values such as `null`. */
@@ -89,67 +92,96 @@ function hasToken(node: Node, token: string): boolean {
 
 // Containers ----------------------------------------------------------------------------------------------------------
 
-function containerMembers(node: Node): { members: ContainerMember[]; fields: ContainerField[] } {
-  const members: ContainerMember[] = [];
-  const fields: ContainerField[] = [];
-  conversionBudget.spend(node.namedChildCount);
-  for (const child of node.namedChildren) {
+interface ContainerBody {
+  members: ContainerMember[];
+  fields: ContainerField[];
+  tests: TestDeclaration[];
+  comptimeBlocks: Block[];
+}
+
+function containerBody(children: readonly Node[], containerKind?: Container['containerKind']): ContainerBody {
+  const body: ContainerBody = { members: [], fields: [], tests: [], comptimeBlocks: [] };
+  conversionBudget.spend(children.length);
+  for (const child of children) {
+    if (!child.isNamed || isComment(child)) continue;
     switch (child.type) {
       case 'function_declaration': {
-        members.push(functionDeclaration(child));
+        body.members.push(functionDeclaration(child));
         break;
       }
       case 'variable_declaration': {
-        members.push(containerVariable(child));
+        body.members.push(containerVariable(child));
         break;
       }
       case 'container_field': {
-        fields.push(containerField(child));
+        body.fields.push(containerField(child, containerKind === 'struct'));
         break;
       }
       case 'test_declaration': {
-        unavailable(child, 'test 宣言');
+        body.tests.push(testDeclaration(child));
         break;
       }
       case 'comptime_declaration': {
-        unavailable(child, 'comptime');
+        body.comptimeBlocks.push(block(child.namedChildren.find((part) => part.type === 'block') as Node));
         break;
       }
       default: {
-        if (!isComment(child)) fail(child, '書き方に誤りがあります。');
+        fail(child, '書き方に誤りがあります。');
       }
     }
   }
-  return { members, fields };
+  return body;
 }
 
-function rejectDeclarationModifiers(node: Node): void {
+function testDeclaration(node: Node): TestDeclaration {
+  const nameNode = node.namedChildren.find((child) => child.type === 'identifier');
+  const titleNode = node.namedChildren.find((child) => child.type === 'string');
+  return {
+    ...spanOf(node),
+    decl: nameNode ? { ...spanOf(nameNode), name: literals.decodeIdentifier(nameNode) } : undefined,
+    title: titleNode ? literals.decodeString(titleNode).join(',') : undefined,
+    body: block(node.namedChildren.find((child) => child.type === 'block') as Node),
+  };
+}
+
+/**
+ * Rejects `extern` and `export`, which link with C code; `noinline` and `threadlocal` change only how the program
+ * runs on its one thread, which a run does not observe.
+ */
+function rejectExtern(node: Node): void {
   for (const child of node.children) {
-    if (child.isNamed) continue;
-    if (child.type === 'export') unavailable(child, 'export');
-    if (child.type === 'extern') unavailable(child, 'extern');
-    if (child.type === 'threadlocal') unavailable(child, 'threadlocal');
-    if (child.type === 'noinline') unavailable(child, 'noinline');
+    if (!child.isNamed && child.type === 'extern') unavailable(child, 'syntax:extern');
+    if (!child.isNamed && child.type === 'export') unavailable(child, 'syntax:export');
+    if (!child.isNamed && child.type === 'threadlocal' && node.children.some((part) => part.type === 'const'))
+      fail(child, 'threadlocal は、const の宣言には付けられません。');
   }
 }
 
-function rejectAttributes(node: Node): void {
+interface Attributes {
+  alignment?: Expression;
+  addressSpace?: Expression;
+}
+
+/** `align(...)` and `addrspace(...)`; `linksection` and `callconv` depend on the object file's format and the CPU. */
+function attributesOf(node: Node): Attributes {
+  const attributes: Attributes = {};
   for (const child of node.namedChildren) {
-    if (child.type === 'byte_alignment') unavailable(child, 'align による整列の指定');
-    if (child.type === 'address_space') unavailable(child, 'addrspace');
-    if (child.type === 'link_section') unavailable(child, 'linksection');
-    if (child.type === 'calling_convention') unavailable(child, 'callconv');
+    if (child.type === 'link_section') unavailable(child, 'syntax:linksection');
+    else if (child.type === 'byte_alignment') attributes.alignment = onlyChild(child);
+    else if (child.type === 'address_space') attributes.addressSpace = onlyChild(child);
+    else if (child.type === 'calling_convention') unavailable(child, 'syntax:callconv');
   }
+  return attributes;
 }
 
 function functionDeclaration(node: Node): FunctionDeclaration {
-  rejectDeclarationModifiers(node);
-  rejectAttributes(node);
+  rejectExtern(node);
   const nameNode = node.childForFieldName('name');
   const body = node.childForFieldName('body');
   if (!nameNode) fail(node, '関数の名前がありません。');
-  if (!body) unavailable(node, '本体のない関数の宣言');
+  if (!body) fail(node, '関数の本体がありません。');
   const { returnType, inferredErrorSet } = returnTypeOf(node);
+  const attributes = attributesOf(node);
   const declaration: FunctionDeclaration = {
     kind: 'fn',
     ...spanOf(node),
@@ -161,6 +193,7 @@ function functionDeclaration(node: Node): FunctionDeclaration {
     inferredErrorSet,
     body: block(body),
     bodyRow: body.startPosition.row,
+    ...attributes,
   };
   functions.push(declaration);
   return declaration;
@@ -179,27 +212,30 @@ function returnTypeOf(node: Node): { returnType: Expression; inferredErrorSet: b
 }
 
 function parameters(node: Node): Parameter[] {
-  return node.namedChildren
-    .filter((child) => child.type === 'parameter')
-    .map((child) => {
-      if (hasToken(child, 'comptime')) unavailable(child, 'comptime の引数');
-      if (hasToken(child, 'noalias')) unavailable(child, 'noalias');
-      if (hasToken(child, '...')) unavailable(child, '可変個の引数（...）');
-      const nameNode = child.childForFieldName('name');
-      const typeNode = child.childForFieldName('type');
-      if (!typeNode) fail(child, '引数の型がありません。');
-      const isAnytype = typeNode.type === 'builtin_type' && typeNode.text === 'anytype';
-      return {
-        ...spanOf(child),
-        ...(nameNode ? identifierName(nameNode) : { name: '_' }),
-        type: isAnytype ? undefined : typeExpression(typeNode),
-      };
+  const result: Parameter[] = [];
+  for (const child of node.namedChildren) {
+    if (child.type !== 'parameter') continue;
+    if (hasToken(child, '...')) {
+      result.push({ ...spanOf(child), name: '_', isComptime: false, isNoalias: false, isVarargs: true });
+      continue;
+    }
+    const nameNode = child.childForFieldName('name');
+    const typeNode = child.childForFieldName('type');
+    if (!typeNode) fail(child, '引数の型がありません。');
+    const isAnytype = typeNode.type === 'builtin_type' && typeNode.text === 'anytype';
+    result.push({
+      ...spanOf(child),
+      ...(nameNode ? identifierName(nameNode) : { name: '_' }),
+      type: isAnytype ? undefined : typeExpression(typeNode),
+      isComptime: hasToken(child, 'comptime'),
+      isNoalias: hasToken(child, 'noalias'),
     });
+  }
+  return result;
 }
 
 function containerVariable(node: Node): VariableDeclaration {
-  rejectDeclarationModifiers(node);
-  rejectAttributes(node);
+  rejectExtern(node);
   const declaration = variableHeader(node);
   if (!declaration) fail(node, '書き方に誤りがあります。');
   return declaration;
@@ -214,6 +250,7 @@ function variableHeader(node: Node): VariableDeclaration | undefined {
   const typeNode = node.childForFieldName('type');
   const equals = node.children.findIndex((child) => child.type === '=');
   const valueNode = equals === -1 ? undefined : node.children.slice(equals + 1).find((c) => isExpressionNode(c));
+  const { alignment, addressSpace } = attributesOf(node);
   return {
     kind: 'var',
     ...spanOf(node),
@@ -222,12 +259,14 @@ function variableHeader(node: Node): VariableDeclaration | undefined {
     isPub: hasToken(node, 'pub'),
     type: typeNode ? typeExpression(typeNode) : undefined,
     value: valueNode ? expression(valueNode) : undefined,
+    alignment,
+    addressSpace,
   };
 }
 
 function containerField(node: Node, tupleElement = false): ContainerField {
-  if (hasToken(node, 'comptime')) unavailable(node, 'comptime のフィールド');
-  rejectAttributes(node);
+  const { alignment } = attributesOf(node);
+  const isComptime = hasToken(node, 'comptime');
   const nameNode = node.childForFieldName('name');
   const typeNode = node.childForFieldName('type');
   const equals = node.children.findIndex((child) => child.type === '=');
@@ -239,19 +278,24 @@ function containerField(node: Node, tupleElement = false): ContainerField {
       ...identifierName(nameNode),
       type: typeExpression(typeNode),
       value,
+      isComptime,
+      alignment,
     };
   }
   if (!nameNode) fail(node, '書き方に誤りがあります。');
-  if (!tupleElement) return { ...spanOf(node), ...identifierName(nameNode), value };
-  return { ...spanOf(node), type: typeExpression(nameNode), value };
+  if (!tupleElement) return { ...spanOf(node), ...identifierName(nameNode), value, isComptime, alignment };
+  return { ...spanOf(node), type: typeExpression(nameNode), value, isComptime, alignment };
 }
 
-// code-gauge-allow functionNcss -- Walks the parts of one syntax node in source order.
-// code-gauge-allow functionCognitiveComplexity -- Walks the parts of one syntax node in source order.
 function container(node: Node): Container {
-  if (node.type === 'opaque_declaration') unavailable(node, 'opaque 型');
   const containerKind =
-    node.type === 'struct_declaration' ? 'struct' : node.type === 'enum_declaration' ? 'enum' : 'union';
+    node.type === 'struct_declaration'
+      ? 'struct'
+      : node.type === 'enum_declaration'
+        ? 'enum'
+        : node.type === 'union_declaration'
+          ? 'union'
+          : 'opaque';
   const layout = hasToken(node, 'extern') ? 'extern' : hasToken(node, 'packed') ? 'packed' : 'auto';
   // `union(enum)` holds the keyword `enum`, and `union(enum(u8))` an argument after it.
   const children = node.children;
@@ -259,18 +303,6 @@ function container(node: Node): Container {
   const header = children.slice(0, brace);
   const taggedByEnum = containerKind === 'union' && header.some((child) => child.type === 'enum');
   const argumentNode = header.find((child) => isExpressionNode(child));
-  const body = children.slice(brace + 1);
-  const members: ContainerMember[] = [];
-  const fields: ContainerField[] = [];
-  for (const child of body) {
-    if (!child.isNamed || isComment(child)) continue;
-    if (child.type === 'function_declaration') members.push(functionDeclaration(child));
-    else if (child.type === 'variable_declaration') members.push(containerVariable(child));
-    else if (child.type === 'container_field') fields.push(containerField(child, containerKind === 'struct'));
-    else if (child.type === 'test_declaration') unavailable(child, 'test 宣言');
-    else if (child.type === 'comptime_declaration') unavailable(child, 'comptime');
-    else fail(child, '書き方に誤りがあります。');
-  }
   return {
     kind: 'container',
     ...spanOf(node),
@@ -278,8 +310,7 @@ function container(node: Node): Container {
     layout,
     argument: argumentNode ? expression(argumentNode) : undefined,
     taggedByEnum,
-    fields,
-    members,
+    ...containerBody(children.slice(brace + 1), containerKind),
   };
 }
 
@@ -309,22 +340,30 @@ function statement(node: Node): Statement {
       return { kind: 'defer', ...spanOf(node), isErrdefer: node.type === 'errdefer_statement', body: deferBody(node) };
     }
     case 'comptime_statement': {
-      unavailable(node, 'comptime');
-      break;
+      const inner = node.namedChildren.find((child) => !isComment(child)) as Node;
+      if (inner.type === 'variable_declaration') {
+        const converted = variableStatement(inner);
+        if (converted.kind === 'var') return { ...converted, ...spanOf(node), isComptime: true };
+        if (converted.kind === 'expression') return { kind: 'comptime', ...spanOf(node), body: converted.expression };
+        if (converted.kind === 'destructure') return { ...converted, ...spanOf(node), isComptime: true };
+        return fail(node, 'comptime の後には、変数の宣言を書いてください。');
+      }
+      return { kind: 'comptime', ...spanOf(node), body: deferBody(node) };
     }
     case 'nosuspend_statement': {
-      unavailable(node, 'nosuspend');
-      break;
+      return {
+        kind: 'expression',
+        ...spanOf(node),
+        expression: { kind: 'nosuspend', ...spanOf(node), operand: deferBody(node) },
+      };
     }
     case 'suspend_statement': {
-      unavailable(node, 'suspend');
-      break;
+      return { kind: 'expression', ...spanOf(node), expression: { kind: 'async', ...spanOf(node) } };
     }
     default: {
       return { kind: 'expression', ...spanOf(node), expression: expression(node) };
     }
   }
-  return fail(node, '書き方に誤りがあります。');
 }
 
 function deferBody(node: Node): Expression {
@@ -351,8 +390,7 @@ function expressionStatementBody(node: Node): Expression {
 }
 
 function variableStatement(node: Node): Statement {
-  rejectDeclarationModifiers(node);
-  rejectAttributes(node);
+  rejectExtern(node);
   const equals = node.children.findIndex((child) => child.type === '=');
   const commas = node.children.filter((child) => child.type === ',');
   if (
@@ -446,8 +484,6 @@ function destructure(node: Node, equals: number): Statement {
 // Expressions ---------------------------------------------------------------------------------------------------------
 
 function typeExpression(node: Node): Expression {
-  if (node.type === 'if_type_expression') unavailable(node, '型の位置の if 式');
-  if (node.type === 'comptime_type_expression') unavailable(node, 'comptime');
   return expression(node);
 }
 
@@ -465,8 +501,7 @@ export function expression(node: Node): Expression {
         return { kind: 'unreachable', ...span };
       }
       case 'anyframe': {
-        unavailable(node, 'anyframe');
-        break;
+        return { kind: 'async', ...span };
       }
       default: {
         fail(node, '書き方に誤りがあります。');
@@ -562,12 +597,9 @@ export function expression(node: Node): Expression {
       };
     }
     case 'if_statement':
-    case 'if_expression': {
-      return ifExpression(node, span);
-    }
+    case 'if_expression':
     case 'if_type_expression': {
-      unavailable(node, '型の位置の if 式');
-      break;
+      return ifExpression(node, span);
     }
     case 'while_statement':
     case 'while_expression': {
@@ -646,7 +678,9 @@ export function expression(node: Node): Expression {
       return { kind: 'errorSetType', ...span, names };
     }
     case 'function_signature': {
-      rejectAttributes(node);
+      const { alignment, addressSpace } = attributesOf(node);
+      if (alignment) unavailable(node, 'syntax:fnTypeAlign');
+      if (addressSpace) unavailable(node, 'syntax:fnTypeAddrspace');
       const { returnType, inferredErrorSet } = returnTypeOf(node);
       if (inferredErrorSet) fail(node, '関数の型の戻り値に、推論されるエラー集合（!T）は書けません。');
       return {
@@ -669,24 +703,21 @@ export function expression(node: Node): Expression {
     case 'assignment_expression': {
       return assignment(node, span);
     }
-    case 'comptime_expression': {
-      unavailable(node, 'comptime');
-      break;
+    case 'comptime_expression':
+    case 'comptime_type_expression': {
+      return { kind: 'comptime', ...span, operand: onlyChild(node) };
     }
     case 'nosuspend_expression': {
-      unavailable(node, 'nosuspend');
-      break;
+      return { kind: 'nosuspend', ...span, operand: onlyChild(node) };
     }
     case 'resume_expression': {
-      unavailable(node, 'resume');
-      break;
+      return { kind: 'async', ...span, operand: onlyChild(node) };
     }
     case 'anyframe_type': {
-      unavailable(node, 'anyframe');
-      break;
+      return { kind: 'async', ...span };
     }
     case 'asm_expression': {
-      unavailable(node, 'インラインアセンブリ（asm）');
+      unavailable(node, 'syntax:asm');
       break;
     }
     case 'expression_statement': {
@@ -1126,37 +1157,76 @@ function initializer(list: Node, span: Span, type: Expression | undefined): Expr
   return { kind: 'arrayInit', ...span, type, elements };
 }
 
-function pointerQualifiers(node: Node, after: number): { isConst: boolean } {
-  let isConst = false;
-  for (const child of node.children.slice(after)) {
-    if (child.type === 'const') isConst = true;
-    else if (child.type === 'volatile') unavailable(child, 'volatile');
-    else if (child.type === 'allowzero') unavailable(child, 'allowzero');
-    else if (child.type === 'align') unavailable(child, 'align による整列の指定');
-    else if (child.type === 'address_space') unavailable(child, 'addrspace');
-    else if (child.type === 'byte_alignment') unavailable(child, 'align による整列の指定');
+/** The qualifiers after a pointer's `*` or `[*]`, or a slice's `[]`, and the pointee type that ends them. */
+// code-gauge-allow functionNcss -- Walks the parts of one syntax node in source order.
+function pointerParts(node: Node, after: number): PointerQualifiers & { child: Expression } {
+  const qualifiers: PointerQualifiers = { isConst: false, isVolatile: false, allowZero: false };
+  const children = node.children.slice(after);
+  let child: Node | undefined;
+  for (let index = 0; index < children.length; index++) {
+    const part = children[index];
+    switch (part.type) {
+      case 'const': {
+        qualifiers.isConst = true;
+        break;
+      }
+      case 'volatile': {
+        qualifiers.isVolatile = true;
+        break;
+      }
+      case 'allowzero': {
+        qualifiers.allowZero = true;
+        break;
+      }
+      case 'align': {
+        const close = children.findIndex((each, position) => position > index && each.type === ')');
+        const operands = children.slice(index + 1, close).filter((each) => isExpressionNode(each));
+        qualifiers.alignment = expression(operands[0]);
+        if (operands.length === 3) qualifiers.bitRange = [expression(operands[1]), expression(operands[2])];
+        index = close;
+        break;
+      }
+      case 'byte_alignment': {
+        qualifiers.alignment = onlyChild(part);
+        break;
+      }
+      case 'address_space': {
+        qualifiers.addressSpace = onlyChild(part);
+        break;
+      }
+      default: {
+        if (isExpressionNode(part)) child = part;
+      }
+    }
   }
-  return { isConst };
+  if (!child) fail(node, '書き方に誤りがあります。');
+  return { ...qualifiers, child: typeExpression(child) };
 }
 
 function pointerType(node: Node, span: Span): Expression {
-  if (node.children[0].type === '[') unavailable(node, '多要素のポインタ（[*]T）');
-  const childNode = expressionChildren(node).at(-1) as Node;
-  const { isConst } = pointerQualifiers(node, 1);
-  return { kind: 'pointerType', ...span, isConst, child: typeExpression(childNode) };
+  if (node.children[0].type !== '[') return { kind: 'pointerType', ...span, size: 'one', ...pointerParts(node, 1) };
+  // `[*]T`, `[*c]T`, or `[*:s]T`.
+  const close = node.children.findIndex((child) => child.type === ']');
+  const inside = node.children.slice(1, close);
+  const isC = inside.some((child) => child.type === 'c');
+  const sentinelNode = inside.find((child) => isExpressionNode(child));
+  return {
+    kind: 'pointerType',
+    ...span,
+    size: isC ? 'c' : 'many',
+    sentinel: sentinelNode ? expression(sentinelNode) : undefined,
+    ...pointerParts(node, close + 1),
+  };
 }
 
 function sliceType(node: Node, span: Span): Expression {
   const close = node.children.findIndex((child) => child.type === ']');
   const sentinelNode = node.childForFieldName('sentinel');
-  const { isConst } = pointerQualifiers(node, close + 1);
-  const childNode = expressionChildren(node).at(-1) as Node;
   return {
     kind: 'sliceType',
     ...span,
-    isConst,
     sentinel: sentinelNode ? expression(sentinelNode) : undefined,
-    child: typeExpression(childNode),
+    ...pointerParts(node, close + 1),
   };
 }
 

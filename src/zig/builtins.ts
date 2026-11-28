@@ -81,6 +81,7 @@ import {
   VOID,
   wrapInt,
 } from './types';
+import { UNAVAILABLE, unavailableMessage } from './unavailable';
 import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText, identifierTextByteLength } from './utf8';
 import {
   arrayPointerView,
@@ -97,84 +98,6 @@ import {
   ZStruct,
   type ZUnion,
 } from './values';
-
-/** Builtins of stages C and D, which this grader rejects with the stage's message. */
-const UNAVAILABLE = new Map<string, string>([
-  ['@cImport', 'C との連携（@cImport）'],
-  ['@cInclude', 'C との連携（@cInclude）'],
-  ['@cDefine', 'C との連携（@cDefine）'],
-  ['@cUndef', 'C との連携（@cUndef）'],
-  ['@embedFile', '@embedFile（ファイルの読み込み）'],
-  ['@extern', '@extern'],
-  ['@export', '@export'],
-  ['@ptrCast', '@ptrCast（メモリの表現に依存する変換）'],
-  ['@intFromPtr', '@intFromPtr（メモリの表現に依存する変換）'],
-  ['@ptrFromInt', '@ptrFromInt（メモリの表現に依存する変換）'],
-  ['@fieldParentPtr', '@fieldParentPtr（メモリの表現に依存する変換）'],
-  ['@alignCast', '@alignCast'],
-  ['@addrSpaceCast', '@addrSpaceCast'],
-  ['@atomicLoad', 'アトミック操作（@atomicLoad）'],
-  ['@atomicStore', 'アトミック操作（@atomicStore）'],
-  ['@atomicRmw', 'アトミック操作（@atomicRmw）'],
-  ['@cmpxchgStrong', 'アトミック操作（@cmpxchgStrong）'],
-  ['@cmpxchgWeak', 'アトミック操作（@cmpxchgWeak）'],
-  ['@frameAddress', '@frameAddress'],
-  ['@returnAddress', '@returnAddress'],
-  ['@breakpoint', '@breakpoint'],
-  ['@trap', '@trap'],
-  ['@wasmMemorySize', 'WebAssembly の組み込み関数'],
-  ['@wasmMemoryGrow', 'WebAssembly の組み込み関数'],
-  ['@workGroupId', 'GPU の組み込み関数'],
-  ['@workGroupSize', 'GPU の組み込み関数'],
-  ['@workItemId', 'GPU の組み込み関数'],
-  ['@SpirvType', 'GPU の組み込み関数'],
-  ['@cVaArg', '可変個の引数'],
-  ['@cVaCopy', '可変個の引数'],
-  ['@cVaEnd', '可変個の引数'],
-  ['@cVaStart', '可変個の引数'],
-  ['@prefetch', '@prefetch'],
-  ['@setFloatMode', '@setFloatMode'],
-  ['@setRuntimeSafety', '@setRuntimeSafety'],
-  ['@setEvalBranchQuota', '@setEvalBranchQuota（comptime）'],
-  ['@compileError', '@compileError（comptime）'],
-  ['@compileLog', '@compileLog（comptime）'],
-  ['@inComptime', '@inComptime（comptime）'],
-  ['@typeInfo', '@typeInfo（リフレクション）'],
-  ['@typeName', '@typeName（リフレクション）'],
-  ['@Type', '@Type（リフレクション）'],
-  ['@field', '@field（リフレクション）'],
-  ['@hasDecl', '@hasDecl（リフレクション）'],
-  ['@hasField', '@hasField（リフレクション）'],
-  ['@FieldType', '@FieldType（リフレクション）'],
-  ['@src', '@src（リフレクション）'],
-  ['@call', '@call'],
-  ['@bitCast', '@bitCast（メモリの表現に依存する変換）'],
-  ['@sizeOf', '@sizeOf（メモリの表現）'],
-  ['@bitSizeOf', '@bitSizeOf（メモリの表現）'],
-  ['@alignOf', '@alignOf（メモリの表現）'],
-  ['@offsetOf', '@offsetOf（メモリの表現）'],
-  ['@bitOffsetOf', '@bitOffsetOf（メモリの表現）'],
-  ['@Vector', 'ベクトル（@Vector）'],
-  ['@reduce', 'ベクトル（@reduce）'],
-  ['@shuffle', 'ベクトル（@shuffle）'],
-  ['@select', 'ベクトル（@select）'],
-  ['@constCast', '@constCast'],
-  ['@volatileCast', '@volatileCast'],
-  ['@intFromError', '@intFromError（エラーの番号）'],
-  ['@errorFromInt', '@errorFromInt（エラーの番号）'],
-  ['@errorReturnTrace', '@errorReturnTrace'],
-  ['@branchHint', '@branchHint'],
-  ['@Int', '@Int（型の操作）'],
-  ['@Tuple', '@Tuple（型の操作）'],
-  ['@Pointer', '@Pointer（型の操作）'],
-  ['@Fn', '@Fn（型の操作）'],
-  ['@Struct', '@Struct（型の操作）'],
-  ['@Union', '@Union（型の操作）'],
-  ['@Enum', '@Enum（型の操作）'],
-  ['@EnumLiteral', '@EnumLiteral（型の操作）'],
-  ['@backingInt', '@backingInt'],
-  ['@fromBackingInt', '@fromBackingInt'],
-]);
 
 const ARGUMENT_COUNTS: Record<string, number> = {
   '@as': 2,
@@ -250,10 +173,15 @@ const MATH_OPERATIONS: Record<string, UnaryOperation> = {
 
 export abstract class BuiltinCompiler extends ExpressionCompiler {
   private readonly nameSlices = new Map<string, Slice>();
+
+  /** Refuses a builtin that this grader does not run, before any class of the compiler handles the call. */
+  protected checkBuiltinAvailable(expression: ExpressionOf<'builtinCall'>): void {
+    const unavailable = UNAVAILABLE.get(expression.name);
+    if (unavailable) this.error(expression, unavailableMessage(expression.name));
+  }
+
   protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     const { name, args } = expression;
-    const unavailable = UNAVAILABLE.get(name);
-    if (unavailable) return this.error(expression, `${unavailable}は、この採点環境では使えません。`);
     const count = ARGUMENT_COUNTS[name];
     if (count === undefined && name !== '@min' && name !== '@max' && name !== '@TypeOf') {
       return this.error(expression, `組み込み関数 ${name} はありません。`);
@@ -405,24 +333,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         return this.bitBuiltin(name, expression);
       }
       case '@mulAdd': {
-        const type = this.compileType(args[0]);
-        if (type.kind !== 'float' && type.kind !== 'comptime_float')
-          this.error(args[0], '@mulAdd は浮動小数点数の型にだけ使えます。');
-        const [a, b, c] = args.slice(1).map((arg) => this.coerce(this.compile(arg, type), type, arg));
-        const bits = type.kind === 'float' ? type.bits : 128;
-        return this.combine(
-          [a, b, c],
-          type,
-          ([x, y, z], frame) =>
-            fusedMultiplyAdd(
-              asBigFloat(x as AnyFloat),
-              asBigFloat(y as AnyFloat),
-              asBigFloat(z as AnyFloat),
-              bits,
-              (cost) => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost))
-            ),
-          expression
-        );
+        return this.mulAdd(expression);
       }
       case '@intFromEnum': {
         const operand = this.compile(args[0]);
@@ -796,7 +707,29 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.derived(operand, type, apply);
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Keeps checked overflow arithmetic and phase-specific work accounting together.
+  /** `@mulAdd(T, a, b, c)`: `a * b + c` rounded once. */
+  private mulAdd(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { args } = expression;
+    const type = this.compileType(args[0]);
+    if (type.kind !== 'float' && type.kind !== 'comptime_float')
+      this.error(args[0], '@mulAdd は浮動小数点数の型にだけ使えます。');
+    const [a, b, c] = args.slice(1).map((arg) => this.coerce(this.compile(arg, type), type, arg));
+    const bits = type.kind === 'float' ? type.bits : 128;
+    return this.combine(
+      [a, b, c],
+      type,
+      ([x, y, z], frame) =>
+        fusedMultiplyAdd(
+          asBigFloat(x as AnyFloat),
+          asBigFloat(y as AnyFloat),
+          asBigFloat(z as AnyFloat),
+          bits,
+          (cost) => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost))
+        ),
+      expression
+    );
+  }
+
   private overflowBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
     let left = this.compile(leftSyntax);
@@ -814,26 +747,14 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       { name: '1', type: bit, hasDefault: false },
     ]);
     const work = integerOperationWork(name);
-    const compute = (a: Value, b: Value, frame?: Frame): Value => {
-      const x = a as bigint;
-      const y = b as bigint;
-      const spend = (cost: number): void => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost));
+    const compute = (x: bigint, y: bigint, frame?: Frame): Value => {
       if (name === '@shlWithOverflow') {
         checkShiftAmount(y, type);
-        spendIntegerShift(x, y, true, spend);
+        spendIntegerShift(x, y, true, (cost) => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost)));
       } else this.integerWork(x, y, work, frame);
-      const exact =
-        name === '@addWithOverflow'
-          ? x + y
-          : name === '@subWithOverflow'
-            ? x - y
-            : name === '@mulWithOverflow'
-              ? x * y
-              : x << y;
-      const wrapped = wrapInt(exact, type);
-      return new ZStruct([wrapped, wrapped === exact ? 0n : 1n]);
+      return new ZStruct(wrappedWithOverflowBit(name, x, y, type));
     };
-    return this.combine([left, right], tuple, ([a, b], frame) => compute(a, b, frame), expression);
+    return this.combine([left, right], tuple, ([a, b], frame) => compute(a as bigint, b as bigint, frame), expression);
   }
 
   private exactShift(name: string, expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
@@ -1200,3 +1121,17 @@ export function intFittingRange(low: bigint, high: bigint, sema: SemaApi, span: 
 }
 
 export { COMPTIME_INT, USIZE };
+
+/** The wrapped result of an overflow builtin on integers of the type, with 1 when it overflowed. */
+function wrappedWithOverflowBit(name: string, x: bigint, y: bigint, type: IntType): [bigint, bigint] {
+  const exact =
+    name === '@addWithOverflow'
+      ? x + y
+      : name === '@subWithOverflow'
+        ? x - y
+        : name === '@mulWithOverflow'
+          ? x * y
+          : x << y;
+  const wrapped = wrapInt(exact, type);
+  return [wrapped, wrapped === exact ? 0n : 1n];
+}

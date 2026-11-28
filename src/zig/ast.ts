@@ -77,6 +77,9 @@ export interface ContainerField extends NamedSpan {
   name?: string;
   type?: Expression;
   value?: Expression;
+  /** Whether the field is written `comptime x: T = v`, whose value every instance shares and none stores. */
+  isComptime?: boolean;
+  alignment?: Expression;
 }
 
 export interface FunctionDeclaration extends NamedSpan {
@@ -91,12 +94,18 @@ export interface FunctionDeclaration extends NamedSpan {
   body: Block;
   /** The row of the body's `{`, the last row of the header, where `// atomic` may stand. */
   bodyRow: number;
+  alignment?: Expression;
+  addressSpace?: Expression;
 }
 
 export interface Parameter extends NamedSpan {
   name: string;
   /** Undefined for `anytype`. */
   type?: Expression;
+  isComptime: boolean;
+  isNoalias: boolean;
+  /** `...`, which Zig rejects in a function that does not use the C calling convention. */
+  isVarargs?: boolean;
 }
 
 export interface VariableDeclaration extends NamedSpan {
@@ -104,15 +113,28 @@ export interface VariableDeclaration extends NamedSpan {
   name: string;
   isConst: boolean;
   isPub: boolean;
+  /** Whether a local is written `comptime var x = v;`, whose value the compiler keeps and changes as it analyzes. */
+  isComptime?: boolean;
   type?: Expression;
   value?: Expression;
+  alignment?: Expression;
+  addressSpace?: Expression;
 }
 
 export type ContainerMember = FunctionDeclaration | VariableDeclaration;
 
+/** A `test` declaration, which `zig run` does not analyze, though its body must pass AstGen's checks. */
+export interface TestDeclaration extends Span {
+  /** The declaration that `test name {}` documents. */
+  decl?: { name: string } & Span;
+  /** The name that `test "name" {}` gives, as its bytes joined into a key. */
+  title?: string;
+  body: Block;
+}
+
 export interface Container extends Span {
   kind: 'container';
-  containerKind: 'struct' | 'enum' | 'union';
+  containerKind: 'struct' | 'enum' | 'union' | 'opaque';
   layout: 'auto' | 'extern' | 'packed';
   /** The tag type of `enum(u8)` or `union(Tag)`, or the backing integer of `packed struct(u8)`. */
   argument?: Expression;
@@ -120,6 +142,20 @@ export interface Container extends Span {
   taggedByEnum: boolean;
   fields: ContainerField[];
   members: ContainerMember[];
+  tests: TestDeclaration[];
+  /** The bodies of `comptime { ... }` declarations, which run when the container's type is analyzed. */
+  comptimeBlocks: Block[];
+}
+
+/** The qualifiers of a pointer or slice type, after `*` or `[]`. */
+export interface PointerQualifiers {
+  isConst: boolean;
+  isVolatile: boolean;
+  allowZero: boolean;
+  alignment?: Expression;
+  /** The bit offset and host size of `align(a:b:h)`, a pointer to a field of a packed struct. */
+  bitRange?: [Expression, Expression];
+  addressSpace?: Expression;
 }
 
 export type Expression = Span &
@@ -189,14 +225,23 @@ export type Expression = Span &
     | { kind: 'arrayInit'; type?: Expression; elements: Expression[] }
     | { kind: 'builtinType'; name: string }
     | { kind: 'optionalType'; child: Expression }
-    | { kind: 'pointerType'; isConst: boolean; child: Expression }
-    | { kind: 'sliceType'; isConst: boolean; sentinel?: Expression; child: Expression }
+    | ({
+        kind: 'pointerType';
+        size: 'one' | 'many' | 'c';
+        sentinel?: Expression;
+        child: Expression;
+      } & PointerQualifiers)
+    | ({ kind: 'sliceType'; sentinel?: Expression; child: Expression } & PointerQualifiers)
     | { kind: 'arrayType'; count?: Expression; sentinel?: Expression; child: Expression }
     | { kind: 'errorUnionType'; errorSet: Expression; payload: Expression }
     | { kind: 'errorSetType'; names: string[] }
     | { kind: 'fnType'; params: Parameter[]; returnType: Expression }
     | Container
     | { kind: 'paren'; operand: Expression }
+    | { kind: 'comptime'; operand: Expression }
+    | { kind: 'nosuspend'; operand: Expression }
+    /** `suspend`, `resume`, and `anyframe`, which Zig 0.17 rejects when it analyzes them. */
+    | { kind: 'async'; operand?: Expression }
     | { kind: 'assign'; operator: AssignOperator; targets: Expression[]; value: Expression }
   );
 
@@ -242,15 +287,19 @@ export interface DestructureTarget extends Span {
 export type Statement = Span &
   (
     | VariableDeclaration
-    | { kind: 'destructure'; targets: DestructureTarget[]; value: Expression }
+    | { kind: 'destructure'; targets: DestructureTarget[]; value: Expression; isComptime?: boolean }
     | { kind: 'expression'; expression: Expression }
     | { kind: 'defer'; isErrdefer: boolean; body: Expression }
+    /** `comptime { ... }` or `comptime expr;` in a block, which runs while the compiler analyzes the function. */
+    | { kind: 'comptime'; body: Expression }
   );
 
 export interface SourceFile {
   functions: FunctionDeclaration[];
   members: ContainerMember[];
   fields: ContainerField[];
+  tests: TestDeclaration[];
+  comptimeBlocks: Block[];
 }
 
 export function isDiscardName(node: { name?: string; quotedName?: boolean }): boolean {

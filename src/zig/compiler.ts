@@ -13,11 +13,11 @@ import { parseZig } from './parse';
 import './library/registry';
 import { PROCESS_INIT } from './library/std';
 import { TURTLE } from './library/turtle';
-import { Frame, Runtime, ZigPanic } from './runtime';
+import { BranchQuotaExceeded, CompileTimeCallDepthExceeded, Frame, Runtime, ZigPanic } from './runtime';
 import { addDecls, FnRef, type TExpr } from './semaBase';
 import { StatementCompiler } from './statements';
 import { type Decl, type Namespace, type StructType, TYPE, type Type, typeName } from './types';
-import type { Slots, Value } from './values';
+import { type Slots, UNASSIGNED, type Value } from './values';
 
 /** A container-level variable, which the trace shows as Java shows a static field. */
 export interface GlobalVariable {
@@ -116,6 +116,7 @@ class Compiler extends StatementCompiler {
         this.error(syntax.params[0], 'main の引数は (init: std.process.Init) にしてください。');
       argTypes.push(PROCESS_INIT);
     }
+    this.runComptimeBlocks(this.file.comptimeBlocks, this.root);
     const main = this.instantiate(new FnRef(decl), argTypes, syntax);
     this.compilePendingBodies();
     this.checkMainReturn(main, syntax);
@@ -183,30 +184,48 @@ class Compiler extends StatementCompiler {
     return this.root_;
   }
 
-  /** Runs code at compile time, as a container-level declaration's initializer runs. */
-  protected evaluateAtCompileTime(expression: TExpr): Value {
+  /**
+   * Runs code at compile time, as a container-level declaration's initializer runs. The code may use only the slots
+   * from `ownSlots.from`, those of the locals it declares; another local's value is not known at compile time.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Maps each way compile-time evaluation can fail to the compile error Zig gives.
+  protected evaluateAtCompileTime(expression: TExpr, ownSlots?: { from: number; count: number }): Value {
     this.compilePendingBodies();
     const runtime = new Runtime(undefined, this.compilationBudget);
     runtime.bufferMemory = this.bufferMemory;
+    runtime.branchCount = this.context.evalBranches;
+    const firstOwnSlot = ownSlots?.from ?? Number.POSITIVE_INFINITY;
     const frame = new Frame(
       runtime,
       { name: 'comptime', locals: [], isAtomic: false } as unknown as FunctionInstance,
       undefined,
-      0
+      ownSlots ? ownSlots.from + ownSlots.count : 0
     );
+    const outsideOwn = (key: string | symbol): boolean =>
+      typeof key === 'string' && /^\d+$/.test(key) && Number(key) < firstOwnSlot;
     frame.slots = new Proxy(frame.slots, {
       get: (target, key, receiver) => {
-        if (typeof key === 'string' && /^\d+$/.test(key)) panic('unable to resolve comptime value');
+        if (outsideOwn(key)) panic('unable to resolve comptime value');
         return Reflect.get(target, key, receiver);
       },
-      set: () => panic('unable to resolve comptime value'),
+      set: (target, key, value, receiver) => {
+        if (outsideOwn(key)) panic('unable to resolve comptime value');
+        // A block's locals outlive it here, as a pointer to one may leave the code with its value (no slot is reused).
+        if (value === UNASSIGNED) return true;
+        return Reflect.set(target, key, value, receiver);
+      },
     });
     try {
       return duringComptime(() => expression.eval(frame));
     } catch (error) {
       if (error instanceof MemoryFault) return this.error(expression.span, 'undefined のポインタは参照できません。');
-      if (error instanceof ZigPanic)
+      if (error instanceof BranchQuotaExceeded || error instanceof CompileTimeCallDepthExceeded)
+        return this.error({ ...expression.span, row: error.row ?? expression.span.row }, error.message);
+      if (error instanceof ZigPanic) {
+        if (error.text === 'unable to resolve comptime value')
+          return this.error(expression.span, 'コンパイルのときに値が決まりません（実行時に決まる値を使っています）。');
         return this.error(expression.span, `コンパイルのときの計算が失敗しました: ${error.text}`);
+      }
       throw error;
     }
   }

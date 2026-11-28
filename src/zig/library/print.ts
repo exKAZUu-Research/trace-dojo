@@ -13,7 +13,7 @@ import {
   type TypeInfo,
 } from '../fmt';
 import { type Frame, withHeldValues } from '../runtime';
-import { copyForFrame, known, runtime, type SemaApi } from '../semaBase';
+import { copyForFrame, known, runtime, type SemaApi, staticResultOf } from '../semaBase';
 import {
   arrayOf,
   CONST_U8_SLICE,
@@ -68,7 +68,10 @@ const templates = new WeakMap<SemaApi, WeakMap<object, Map<string, FormatTemplat
 // code-gauge-allow functionCognitiveComplexity -- Checks the complete format against its argument types.
 // code-gauge-allow functionNcss -- Keeps format checking and the resulting formatter together.
 export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expression, span: Span): CompiledPrint {
-  const format = sema.coerce(sema.compile(formatArg, CONST_U8_SLICE), CONST_U8_SLICE, formatArg);
+  const compiled = sema.coerce(sema.compile(formatArg, CONST_U8_SLICE), CONST_U8_SLICE, formatArg);
+  // A format built from constants, as `"x: " ++ spec` is, is known though its expression copies them at run time.
+  const fact = staticResultOf(compiled);
+  const format = fact && !compiled.known ? known(compiled.type, fact.value, formatArg) : compiled;
   if (!format.known || !compileTimeReadable(format.value))
     sema.error(
       formatArg,

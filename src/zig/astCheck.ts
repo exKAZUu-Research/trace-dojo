@@ -3,6 +3,7 @@ import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { isDiscardName } from './ast';
 import type {
+  Block,
   Capture,
   Container,
   ContainerField,
@@ -14,6 +15,7 @@ import type {
   SourceFile,
   Span,
   Statement,
+  TestDeclaration,
 } from './ast';
 import { primitiveType } from './types';
 
@@ -33,7 +35,7 @@ export function checkSource(
     names: new Set(predeclared),
     parent: undefined,
   };
-  checker.checkContainer(file.members, file.fields, environment, undefined);
+  checker.checkContainer(file, environment, undefined);
   return { errors: checker.errors, fatal: checker.fatal };
 }
 
@@ -104,7 +106,14 @@ interface FunctionScope {
   parent: Scope | undefined;
 }
 
-type Scope = NamespaceScope | BlockScope | LabelScope | LoopScope | DeferScope | FunctionScope;
+/** Code that runs at compile time, where another `comptime` is redundant, or a `nosuspend` block. */
+interface MarkerScope {
+  kind: 'comptime' | 'nosuspend';
+  span: Span;
+  parent: Scope | undefined;
+}
+
+type Scope = NamespaceScope | BlockScope | LabelScope | LoopScope | DeferScope | FunctionScope | MarkerScope;
 
 /** How an expression's value is used: read, referred to by address (which counts as mutating a `var`), or discarded. */
 type Use = 'value' | 'ref' | 'discard';
@@ -114,6 +123,10 @@ class AstChecker {
   /** Whether an error other than an unused or never-mutated local, a pointless discard, or unreachable code arose. */
   fatal = false;
   private scope: Scope | undefined;
+  /** Whether the statement being checked is the first of a function's or a branch's body. */
+  private hintable = false;
+  /** The blocks that are the bodies of conditional branches and loops. */
+  private readonly branchBodies = new WeakSet<Expression>();
   private functionDepth = 0;
 
   constructor(private readonly budget: ExecutionBudget) {}
@@ -134,11 +147,16 @@ class AstChecker {
   // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
   // code-gauge-allow functionNcss -- Checks declarations and fields in their shared container scope.
   checkContainer(
-    members: readonly ContainerMember[],
-    fields: readonly ContainerField[],
+    body: {
+      members: readonly ContainerMember[];
+      fields: readonly ContainerField[];
+      tests: readonly TestDeclaration[];
+      comptimeBlocks: readonly Block[];
+    },
     parent: Scope | undefined,
     container: Container | undefined
   ): void {
+    const { members, fields } = body;
     const names = new Set<string>();
     const seen = new Map<string, Span>();
     for (const member of members) {
@@ -174,10 +192,27 @@ class AstChecker {
     const outer = this.scope;
     this.scope = namespace;
     try {
-      this.checkFields(fields, container);
+      this.withComptime(container ?? { row: 0, col: 0, endRow: 0 }, () => this.checkFields(fields, container));
       for (const member of members) {
         if (member.kind === 'fn') this.checkFunction(member);
-        else this.checkContainerVariable(member);
+        else this.withComptime(member, () => this.checkContainerVariable(member));
+      }
+      for (const block of body.comptimeBlocks)
+        this.checkBody(() => this.withComptime(block, () => this.expression(block, 'value')));
+      // Zig reports a repeated name once, at the test that first has it.
+      const titles = new Map<string, TestDeclaration>();
+      const repeated = new Set<string>();
+      for (const test of body.tests) {
+        if (test.title !== undefined) {
+          const first = titles.get(test.title);
+          if (!first) titles.set(test.title, test);
+          else if (!repeated.has(test.title)) {
+            repeated.add(test.title);
+            this.error(first, 'テストの名前が、ほかのテストと同じです。');
+          }
+        }
+        if (test.decl && !names.has(test.decl.name)) this.reference(test.decl.name, test.decl, 'value');
+        this.checkBody(() => this.blockStatements(test.body.statements), true);
       }
     } finally {
       this.scope = outer;
@@ -195,30 +230,40 @@ class AstChecker {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
   private checkFields(fields: readonly ContainerField[], container: Container | undefined): void {
     if (container?.containerKind === 'enum') {
-      for (const [index, field] of fields.entries()) {
-        if (field.type) this.error(field, 'enum のフィールドには型を書けません。');
-        if (isDiscardName(field) && index !== fields.length - 1) {
-          this.error(field, '「_」は enum の最後のフィールドにだけ書けます。');
-        }
-        if (isDiscardName(field) && field.value) this.error(field, '「_」には値を書けません。');
-        if (field.value && !container.argument) {
-          this.error(field, '値を指定する enum には、enum(u8) のように整数の型を書いてください。');
-        }
-        if (isDiscardName(field) && !container.argument) {
-          this.error(field, '「_」で終わる enum には、enum(u8) のように整数の型を書いてください。');
-        }
-        if (field.value) this.expression(field.value, 'value');
-      }
+      this.checkEnumFields(fields, container);
       return;
     }
+    if (container?.containerKind === 'opaque' && fields.length > 0)
+      this.error(fields[0], 'opaque 型にはフィールドを書けません。');
     for (const field of fields) {
       if (field.type) this.expression(field.type, 'value');
       if (field.value) this.expression(field.value, 'value');
+      if (field.alignment) this.expression(field.alignment, 'value');
+      if (field.isComptime && !field.value) this.error(field, 'comptime のフィールドには初期値を書いてください。');
       if (container?.containerKind === 'struct' && !field.type && field.name !== undefined) {
         this.error(field, '構造体のフィールドには型を書いてください。');
       }
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
+  private checkEnumFields(fields: readonly ContainerField[], container: Container): void {
+    for (const [index, field] of fields.entries()) {
+      if (field.type) this.error(field, 'enum のフィールドには型を書けません。');
+      if (isDiscardName(field) && index !== fields.length - 1) {
+        this.error(field, '「_」は enum の最後のフィールドにだけ書けます。');
+      }
+      if (isDiscardName(field) && field.value) this.error(field, '「_」には値を書けません。');
+      if (field.value && !container.argument) {
+        this.error(field, '値を指定する enum には、enum(u8) のように整数の型を書いてください。');
+      }
+      if (isDiscardName(field) && !container.argument) {
+        this.error(field, '「_」で終わる enum には、enum(u8) のように整数の型を書いてください。');
+      }
+      if (field.value) this.expression(field.value, 'value');
     }
   }
 
@@ -233,6 +278,50 @@ class AstChecker {
     }
   }
 
+  /** Checks the body of a test or a `comptime` declaration, which AstGen checks as it checks a function's. */
+  private checkBody(check: () => void, isFunction = false): void {
+    const outer = this.scope;
+    if (isFunction) this.scope = { kind: 'function', parent: outer };
+    this.functionDepth++;
+    try {
+      this.withBlock(check);
+    } catch (error) {
+      if (error !== FATAL) throw error;
+    } finally {
+      this.functionDepth--;
+      this.scope = outer;
+    }
+  }
+
+  /** A type, which Zig evaluates at compile time wherever it stands. */
+  private typeExpression(expression: Expression): void {
+    this.withComptime(expression, () => this.expression(expression, 'value'));
+  }
+
+  private withComptime<T>(span: Span, run: () => T): T {
+    return this.withScope({ kind: 'comptime', span, parent: this.scope }, run);
+  }
+
+  /** Whether code runs at compile time: in a `comptime` block or expression, or outside any function. */
+  private inComptime(): boolean {
+    for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
+      if (scope.kind === 'comptime') return true;
+      if (scope.kind === 'function') return false;
+      if (scope.kind === 'namespace') return true;
+    }
+    return true;
+  }
+
+  private nosuspendScope(): MarkerScope | undefined {
+    for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
+      if (scope.kind === 'nosuspend') return scope;
+      if (scope.kind === 'function' || scope.kind === 'namespace') return undefined;
+    }
+    return undefined;
+  }
+
   private checkFunction(fn: FunctionDeclaration): void {
     const outer = this.scope;
     this.scope = { kind: 'function', parent: outer };
@@ -242,11 +331,13 @@ class AstChecker {
       // Each parameter is in scope for the types of the later ones and the return type.
       this.scope = params;
       for (const param of fn.params) {
-        if (param.type) this.expression(param.type, 'value');
+        if (param.type) this.typeExpression(param.type);
         if (!isDiscardName(param)) this.declare(param.name, 'function parameter', param);
+        if (param.isComptime && param.isNoalias) this.error(param, 'comptime と noalias は一緒に書けません。');
       }
-      this.expression(fn.returnType, 'value');
-      this.blockStatements(fn.body.statements);
+      for (const attribute of [fn.alignment, fn.addressSpace]) if (attribute) this.expression(attribute, 'value');
+      this.typeExpression(fn.returnType);
+      this.blockStatements(fn.body.statements, true);
       this.checkUsed(params);
     } catch (error) {
       if (error !== FATAL) throw error;
@@ -369,43 +460,44 @@ class AstChecker {
 
   // Statements ------------------------------------------------------------------------------------------------------
 
-  private blockStatements(statements: readonly Statement[]): void {
+  /** @param opensBranch Whether the block is a function's or a branch's body, whose first statement may hint it. */
+  private blockStatements(statements: readonly Statement[], opensBranch = false): void {
     let diverted = false;
-    for (const statement of statements) {
+    for (const [index, statement] of statements.entries()) {
       if (diverted) {
         this.minorError(statement, 'この文には、決して実行がたどり着きません。');
         diverted = false;
       }
+      // Only the first statement itself may be the hint, not a call or a declaration it stands in.
+      this.hintable =
+        opensBranch &&
+        index === 0 &&
+        statement.kind === 'expression' &&
+        statement.expression.kind === 'builtinCall' &&
+        statement.expression.name === '@branchHint';
       this.statement(statement);
       if (statement.kind === 'expression' && divertsControl(statement.expression)) diverted = true;
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionNcss -- Mirrors one AstGen check over the constructs it covers.
   private statement(statement: Statement): void {
     this.budget.spend();
     switch (statement.kind) {
       case 'var': {
-        if (statement.type) this.expression(statement.type, 'value');
-        if (statement.value) this.expression(statement.value, 'value');
-        else this.error(statement, '変数は初期化してください（値が決まらないときは = undefined と書きます）。');
-        if (!statement.type && statement.value?.kind === 'undefined') {
-          this.error(statement, 'undefined で初期化する変数には、型を書いてください。');
-        }
-        if (statement.type?.kind === 'arrayType' && statement.type.count === undefined) {
-          this.error(statement.type, '配列の長さを [_] で省くのは、[_]i32{ 1, 2 } のような初期化のときだけです。');
-        }
-        if (!isDiscardName(statement)) {
-          this.declare(statement.name, statement.isConst ? 'local constant' : 'local variable', statement);
-        } else {
-          this.error(statement, '「_」という名前の変数は宣言できません。');
-        }
+        this.localVariable(statement);
         break;
       }
       case 'destructure': {
-        this.expression(statement.value, 'value');
+        if (statement.isComptime) this.comptimeKeyword(statement);
+        if (statement.isComptime && statement.targets.every((target) => target.declaration?.isConst))
+          this.error(statement, 'comptime const は冗長です（初期化の式を comptime で囲んでください）。');
+        if (statement.isComptime) this.withComptime(statement, () => this.expression(statement.value, 'value'));
+        else this.expression(statement.value, 'value');
         for (const target of statement.targets) {
           if (target.declaration) {
-            if (target.declaration.type) this.expression(target.declaration.type, 'value');
+            if (target.declaration.type) this.typeExpression(target.declaration.type);
             if (!isDiscardName(target.declaration)) {
               this.declare(target.declaration.name, target.declaration.isConst ? 'local constant' : 'local variable', {
                 ...target,
@@ -428,7 +520,48 @@ class AstChecker {
         );
         break;
       }
+      case 'comptime': {
+        this.comptimeKeyword(statement);
+        this.withComptime(statement, () => this.expression(statement.body, 'value'));
+        break;
+      }
     }
+  }
+
+  private localVariable(statement: Extract<Statement, { kind: 'var' }>): void {
+    if (statement.isComptime) this.comptimeKeyword(statement);
+    if (statement.isComptime && statement.isConst)
+      this.error(statement, 'comptime const は冗長です（初期化の式を comptime で囲んでください）。');
+    if (statement.alignment) this.expression(statement.alignment, 'value');
+    if (statement.type) this.typeExpression(statement.type);
+    const { value } = statement;
+    if (value) this.initializer(statement, value);
+    else this.error(statement, '変数は初期化してください（値が決まらないときは = undefined と書きます）。');
+    if (!statement.type && statement.value?.kind === 'undefined') {
+      this.error(statement, 'undefined で初期化する変数には、型を書いてください。');
+    }
+    if (statement.type?.kind === 'arrayType' && statement.type.count === undefined) {
+      this.error(statement.type, '配列の長さを [_] で省くのは、[_]i32{ 1, 2 } のような初期化のときだけです。');
+    }
+    if (!isDiscardName(statement)) {
+      this.declare(statement.name, statement.isConst ? 'local constant' : 'local variable', statement);
+    } else {
+      this.error(statement, '「_」という名前の変数は宣言できません。');
+    }
+  }
+
+  /** A local's initializer, which runs at compile time for a `comptime var`. */
+  private initializer(statement: Extract<Statement, { kind: 'var' }>, value: Expression): void {
+    if (statement.isComptime) this.withComptime(statement, () => this.expression(value, 'value'));
+    else this.expression(value, 'value');
+  }
+
+  private comptimeKeyword(span: Span): void {
+    if (this.inComptime()) this.error(span, 'すでにコンパイルのときに実行される場所なので、comptime は要りません。');
+  }
+
+  private inlineKeyword(span: Span): void {
+    if (this.inComptime()) this.error(span, 'すでにコンパイルのときに実行される場所なので、inline は要りません。');
   }
 
   // Expressions -----------------------------------------------------------------------------------------------------
@@ -474,6 +607,11 @@ class AstChecker {
         break;
       }
       case 'builtinCall': {
+        if (expression.name === '@field' && use === 'ref' && expression.args.length === 2) {
+          this.expression(expression.args[0], 'ref');
+          this.expression(expression.args[1], 'value');
+          break;
+        }
         this.builtinCall(expression);
         break;
       }
@@ -485,7 +623,9 @@ class AstChecker {
       }
       case 'binary': {
         this.expression(expression.left, 'value');
-        this.expression(expression.right, 'value');
+        // The right side of `orelse` is the branch taken on null.
+        if (expression.operator === 'orelse') this.branchBody(expression.right);
+        else this.expression(expression.right, 'value');
         break;
       }
       case 'try': {
@@ -501,7 +641,7 @@ class AstChecker {
             this.error(expression.capture, 'エラーを捨てる |_| は、書かずに省いてください。');
           }
           this.capture(expression.capture);
-          this.expression(expression.handler, 'value');
+          this.branchBody(expression.handler);
         });
         break;
       }
@@ -509,22 +649,24 @@ class AstChecker {
         this.expression(expression.condition, expression.capture?.byPointer ? 'ref' : 'value');
         this.withBlock(() => {
           this.capture(expression.capture);
-          this.expression(expression.consequent, 'value');
+          this.branchBody(expression.consequent);
         });
         if (expression.otherwise) {
           const otherwise = expression.otherwise;
           this.withBlock(() => {
             this.capture(expression.elseCapture);
-            this.expression(otherwise, 'value');
+            this.branchBody(otherwise);
           });
         }
         break;
       }
       case 'while': {
+        if (expression.isInline) this.inlineKeyword(expression);
         this.whileExpression(expression);
         break;
       }
       case 'for': {
+        if (expression.isInline) this.inlineKeyword(expression);
         this.forExpression(expression);
         break;
       }
@@ -570,7 +712,19 @@ class AstChecker {
       case 'pointerType':
       case 'sliceType': {
         this.expression(expression.child, 'value');
-        if (expression.kind === 'sliceType' && expression.sentinel) this.expression(expression.sentinel, 'value');
+        for (const part of [
+          expression.sentinel,
+          expression.alignment,
+          ...(expression.bitRange ?? []),
+          expression.addressSpace,
+        ])
+          if (part) this.expression(part, 'value');
+        break;
+      }
+      case 'comptime':
+      case 'nosuspend':
+      case 'async': {
+        this.scopeMarker(expression, use);
         break;
       }
       case 'arrayType': {
@@ -590,7 +744,7 @@ class AstChecker {
         break;
       }
       case 'container': {
-        this.checkContainer(expression.members, expression.fields, this.scope, expression);
+        this.checkContainer(expression, this.scope, expression);
         if (expression.argument) this.expression(expression.argument, 'value');
         break;
       }
@@ -617,7 +771,36 @@ class AstChecker {
     }
   }
 
+  /** `comptime`, `nosuspend`, and the async syntax, which AstGen checks for the scope they stand in. */
+  private scopeMarker(expression: Extract<Expression, { kind: 'comptime' | 'nosuspend' | 'async' }>, use: Use): void {
+    switch (expression.kind) {
+      case 'comptime': {
+        this.comptimeKeyword(expression);
+        this.withComptime(expression, () => this.expression(expression.operand, use));
+        break;
+      }
+      case 'nosuspend': {
+        if (this.nosuspendScope()) this.error(expression, 'nosuspend の中に、もう一度 nosuspend を書いています。');
+        this.withScope({ kind: 'nosuspend', span: expression, parent: this.scope }, () =>
+          this.expression(expression.operand, use)
+        );
+        break;
+      }
+      case 'async': {
+        if (!expression.operand && this.nosuspendScope())
+          this.error(expression, 'nosuspend の中には suspend を書けません。');
+        if (expression.operand) this.expression(expression.operand, 'value');
+        break;
+      }
+    }
+  }
+
   private builtinCall(expression: Extract<Expression, { kind: 'builtinCall' }>): void {
+    if (expression.name === '@branchHint') {
+      if (!this.hintable) this.error(expression, '@branchHint は、関数か条件の分岐の最初の文に書いてください。');
+      // The hint uses up its place, so another hint in the same statement is not first.
+      this.hintable = false;
+    }
     if (expression.name === '@import') {
       const [path] = expression.args;
       if (expression.args.length !== 1 || path.kind !== 'string') {
@@ -644,13 +827,20 @@ class AstChecker {
   }
 
   private blockExpression(expression: Extract<Expression, { kind: 'block' }>): void {
+    const opensBranch = this.branchBodies.has(expression);
     if (!expression.label) {
-      this.withBlock(() => this.blockStatements(expression.statements));
+      this.withBlock(() => this.blockStatements(expression.statements, opensBranch));
       return;
     }
     this.withLabel(expression.label, 'block', false, () =>
-      this.withBlock(() => this.blockStatements(expression.statements))
+      this.withBlock(() => this.blockStatements(expression.statements, opensBranch))
     );
+  }
+
+  /** The body of a conditional branch or a loop, whose first statement may be `@branchHint`. */
+  private branchBody(body: Expression): void {
+    if (body.kind === 'block') this.branchBodies.add(body);
+    this.expression(body, 'value');
   }
 
   private withLabel(label: Label, target: LabelScope['target'], isLoop: boolean, run: () => void): void {
@@ -680,7 +870,7 @@ class AstChecker {
       this.withBlock(() => {
         this.capture(expression.capture);
         if (expression.continueExpression) this.expression(expression.continueExpression, 'value');
-        this.expression(expression.body, 'value');
+        this.branchBody(expression.body);
       });
     };
     const loop: LoopScope = { kind: 'loop', parent: this.scope };
@@ -693,7 +883,7 @@ class AstChecker {
       const otherwise = expression.otherwise;
       this.withBlock(() => {
         this.capture(expression.elseCapture);
-        this.expression(otherwise, 'value');
+        this.branchBody(otherwise);
       });
     }
   }
@@ -725,7 +915,7 @@ class AstChecker {
     const body = (): void => {
       this.withBlock(() => {
         for (const capture of expression.captures) this.capture(capture);
-        this.expression(expression.body, 'value');
+        this.branchBody(expression.body);
       });
     };
     const loop: LoopScope = { kind: 'loop', parent: this.scope };
@@ -736,7 +926,7 @@ class AstChecker {
     }
     if (expression.otherwise) {
       const otherwise = expression.otherwise;
-      this.withBlock(() => this.expression(otherwise, 'value'));
+      this.withBlock(() => this.branchBody(otherwise));
     }
   }
 
@@ -761,7 +951,7 @@ class AstChecker {
           }
           this.capture(each.capture);
           this.capture(each.tagCapture);
-          this.expression(each.body, 'value');
+          this.branchBody(each.body);
         });
       }
     };
@@ -844,7 +1034,8 @@ function isAssignable(expression: Expression): boolean {
     inner.kind === 'field' ||
     inner.kind === 'index' ||
     inner.kind === 'deref' ||
-    inner.kind === 'unwrap'
+    inner.kind === 'unwrap' ||
+    (inner.kind === 'builtinCall' && inner.name === '@field')
   );
 }
 

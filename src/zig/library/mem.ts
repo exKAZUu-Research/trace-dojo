@@ -6,9 +6,20 @@ import { zeroPhysicalValue } from '../bufferMemory';
 import { enumLookup } from '../enumLookup';
 import { type AnyFloat, BigFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
 import { sizeOf } from '../layout';
+import { MemoryFault } from '../memoryFault';
 import { isArithmeticType } from '../operands';
 import type { Frame } from '../runtime';
-import { copyForStorage, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import {
+  copyForStorage,
+  known,
+  newArray,
+  POINTER_OPERATIONS,
+  pointerShapeOf,
+  runtime,
+  type SemaApi,
+  type TExpr,
+  undefinedValue,
+} from '../semaBase';
 import { singleValueOf } from '../singleValue';
 import {
   arrayOf,
@@ -17,6 +28,7 @@ import {
   fnType,
   optionalOf,
   pointerTo,
+  Sentinel,
   sliceOf,
   type StructType,
   TYPE,
@@ -31,6 +43,7 @@ import {
   isUndefinedMemory,
   NULL,
   type Pointer,
+  scalarValuesEqual,
   Slice,
   storageByteLocation,
   storageLocation,
@@ -463,8 +476,127 @@ function iteratorFactory(name: string, kind: 'split' | 'token', delimiter: Delim
 
 // The namespace ---------------------------------------------------------------------------------------------------------
 
+/**
+ * Where the elements a slice, an array pointer, or a many-item pointer points to start, and how many precede the
+ * first that equals `stop`, or `guard`, which a many-item pointer must reach.
+ */
+function elementsUntil(
+  value: Value,
+  isArray: boolean,
+  stop: Value | undefined,
+  frame: Frame,
+  guard?: Value
+): { target: { slots: Value[] }; start: number; length: number } {
+  let target: { slots: Value[] };
+  let start: number;
+  let limit: number | undefined;
+  if (value instanceof Slice) {
+    target = value.target;
+    start = value.start;
+    limit = start + value.length;
+  } else if (isArray) {
+    const view = (value as Pointer).load() as ZArray;
+    target = view;
+    start = view.offset;
+    limit = start + view.length;
+  } else {
+    target = (value as Pointer).target;
+    start = (value as Pointer).index;
+  }
+  let position = start;
+  const end = limit ?? target.slots.length;
+  const stopsAt = (element: Value): boolean =>
+    (stop !== undefined && scalarValuesEqual(element, stop)) ||
+    (guard !== undefined && scalarValuesEqual(element, guard));
+  while (position < end && !stopsAt(target.slots[position])) {
+    frame.runtime.spend();
+    position++;
+  }
+  if (limit === undefined && position >= target.slots.length) throw new MemoryFault();
+  return { target, start, length: position - start };
+}
+
+/** A pointer or slice that `std.mem.span` and the like take, seen through an optional, and what it points to. */
+function pointerOperand(sema: SemaApi, operandType: Type, span: Span, name: string): PointerOperand {
+  const optional = operandType.kind === 'optional';
+  const type = operandType.kind === 'optional' ? operandType.child : operandType;
+  if (type.kind !== 'pointer') return sema.error(span, `${name} にはポインタかスライスを渡してください。`);
+  const array = type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
+  const child = array ? array.child : type.child;
+  // `std.mem` takes a C pointer to end at 0.
+  const zero: Expression = { kind: 'integer', row: span.row, col: span.col, endRow: span.endRow, value: 0n };
+  const sentinel =
+    type.size === 'c'
+      ? new Sentinel(sema.knownValue(sema.coerce(sema.compile(zero, child), child, span), '番兵'))
+      : (array ?? type).sentinel;
+  return { type, optional, array, child, sentinel };
+}
+
+interface PointerOperand {
+  type: Extract<Type, { kind: 'pointer' }>;
+  optional: boolean;
+  array: Extract<Type, { kind: 'array' }> | undefined;
+  child: Type;
+  sentinel: Sentinel | undefined;
+}
+
+/** The elements from a pointer up to a sentinel value, for `std.mem.span`, `len`, and `sliceTo`. */
+// code-gauge-allow functionCognitiveComplexity -- Checks the operand and the end value as Zig's std.mem does before scanning.
+function sentinelSpan(name: string, kind: SentinelSpanKind): () => Member {
+  return fnMember(name, (sema, call) => {
+    const args = expectArgs(sema, call, kind === 'sliceTo' ? 2 : 1, name);
+    const operand = sema.compile(args[0]);
+    const pointer = pointerOperand(sema, operand.type, call.span, name);
+    const { type, optional, array, child, sentinel } = pointer;
+    const end =
+      kind === 'sliceTo'
+        ? sema.knownValue(sema.coerce(sema.compile(args[1], child), child, args[1]), '終わりの値')
+        : undefined;
+    if (!acceptsOperand(kind, pointer))
+      return sema.error(call.span, `${name} には、番兵付きのポインタ（[*:0]u8 など）を渡してください。`);
+    const stop = end ?? sentinel?.value;
+    // A many-item pointer's scan for another value also stops at its sentinel, which Zig never reads past.
+    const guard = end !== undefined && type.size === 'many' ? sentinel?.value : undefined;
+    const sliceType = sliceOf(child, type.isConst, resultSentinel(pointer, end));
+    const resultType = kind === 'len' ? USIZE : optional ? optionalOf(sliceType) : sliceType;
+    const evaluate = operand.eval;
+    const span = (value: Value, frame: Frame): Value => {
+      // A C pointer has no null to give back, which std.mem asserts against.
+      if (value === NULL) return optional ? NULL : panic(PANIC.unreachable);
+      const { target, start, length } = elementsUntil(value, array !== undefined, stop, frame, guard);
+      return kind === 'len' ? BigInt(length) : new Slice(target, start, length);
+    };
+    return runtime(resultType, (frame) => span(evaluate(frame), frame), call.span);
+  });
+}
+
+type SentinelSpanKind = 'span' | 'len' | 'sliceTo';
+
+/**
+ * Whether `std.mem` takes the pointer: `span` and `len` take a many-item pointer with a sentinel or a C pointer, and
+ * only `span` sees through an optional; `sliceTo` also takes a slice or a pointer to an array.
+ */
+function acceptsOperand(kind: SentinelSpanKind, { type, optional, sentinel }: PointerOperand): boolean {
+  const shape = pointerShapeOf(type);
+  if (kind === 'sliceTo') return shape !== 'one';
+  if (kind === 'len' && optional) return false;
+  const { span } = POINTER_OPERATIONS[shape];
+  return span === 'always' || (span === 'sentinel' && sentinel !== undefined);
+}
+
+/** The sentinel of the slice that `std.mem.span` or `sliceTo(…, end)` returns, which only an end it can rely on gets. */
+function resultSentinel({ type, sentinel }: PointerOperand, end: Value | undefined): Value | undefined {
+  if (end === undefined) return sentinel?.value;
+  if (type.size === 'c') return end;
+  if (sentinel) return scalarValuesEqual(end, sentinel.value) ? end : undefined;
+  return type.size === 'many' ? end : undefined;
+}
+
 const MEMBERS: Record<string, () => Member> = {
   Allocator: typeMember(() => ALLOCATOR),
+  span: sentinelSpan('std.mem.span', 'span'),
+  len: sentinelSpan('std.mem.len', 'len'),
+  sliceTo: sentinelSpan('std.mem.sliceTo', 'sliceTo'),
   eql: generic('std.mem.eql', 3, (sema, call, type, [a, b]) => {
     const left = constSlice(sema, a, type);
     const right = constSlice(sema, b, type);

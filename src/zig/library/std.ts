@@ -4,6 +4,7 @@ import { bytesToText, CONST_U8 } from '../builtins';
 import { rejectRuntimeEffect } from '../comptimeMemory';
 import { known, type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
+  ANYERROR,
   BOOL,
   CONST_U8_SLICE,
   errorSetOf,
@@ -17,12 +18,17 @@ import {
   TYPE,
   type Type,
   U8,
+  U64,
   USIZE,
   VOID,
 } from '../types';
 import { decodeUtf8 } from '../utf8';
 import { ErrorValue, NativeHandle, Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
+import { addDirMembers, DIR, FILE_KIND, FILE_OPEN_ERROR, FILE_STAT, fileDescriptor, openFileLength } from './dir';
+import { configureIo, FILE_READER, LIMIT, READER, readerValue } from './files';
 import { ALLOCATOR, allocatorMembers, ARENA_ALLOCATOR, arenaValue, heapNamespace } from './heap';
+import { asyncMember, futureType, GROUP } from './ioAsync';
+import { langNamespace } from './lang';
 import {
   addMembers,
   compileArgs,
@@ -39,6 +45,7 @@ import {
   unavailableMember,
 } from './native';
 import { compilePrint, printInto } from './print';
+import { testingNamespace } from './testing';
 import {
   bufferedBytes,
   bufferedSlice,
@@ -74,6 +81,9 @@ export function importStd(): StructType {
     meta: typeMember(() => lazyNamespace('meta')),
     enums: typeMember(() => lazyNamespace('enums')),
     Random: typeMember(() => lazyNamespace('Random')),
+    lang: typeMember(() => langNamespace()),
+    builtin: typeMember(() => langNamespace()),
+    testing: typeMember(() => testingNamespace()),
     ArrayList: lazyMember('ArrayList'),
     ArrayListUnmanaged: lazyMember('ArrayList'),
     AutoHashMap: lazyMember('AutoHashMap'),
@@ -96,12 +106,10 @@ export function importStd(): StructType {
       c: 'C との連携（std.c）',
       Build: 'std.Build',
       time: '時刻（std.time）',
-      testing: 'テスト（std.testing）',
       json: 'JSON（std.json）',
       crypto: '暗号（std.crypto）',
       compress: '圧縮（std.compress）',
       zig: 'std.zig',
-      builtin: 'std.builtin',
       start: 'std.start',
       log: 'ログ（std.log）',
       Target: 'std.Target',
@@ -229,14 +237,16 @@ const FILE_WRITER: StructType = nativeStruct(
 
 const WRITE_ERROR = errorSetOf(['WriteFailed']);
 
+configureIo(IO);
 addIoMembers();
+addDirMembers(IO, FILE, FILE_WRITE_ERROR);
 
+// code-gauge-allow functionNcss -- Declares the members of one library namespace, each a short closure.
 function addIoMembers(): void {
   addMembers(IO, {
     File: typeMember(() => FILE),
     Writer: typeMember(() => WRITER),
-    Reader: unavailableMember('標準入力やファイルからの読み込み（std.Io.Reader）'),
-    Dir: unavailableMember('ファイルの読み書き（std.Io.Dir）'),
+
     net: unavailableMember('ネットワーク（std.Io.net）'),
     Clock: unavailableMember('時刻（std.Io.Clock）'),
   });
@@ -257,7 +267,42 @@ function addIoMembers(): void {
       },
       () => ({ type: fnType([], FILE) })
     ),
-    stdin: unavailableMember('標準入力（std.Io.File.stdin）'),
+    stdin: fnMember(
+      'std.Io.File.stdin',
+      (sema, call) => {
+        expectArgs(sema, call, 0, 'std.Io.File.stdin');
+        return known(FILE, handle('file', { fd: 0 }), call.span);
+      },
+      () => ({ type: fnType([], FILE) })
+    ),
+    reader: fnMember('File.reader', (sema, call) => fileReader(sema, call)),
+    readerStreaming: fnMember('File.readerStreaming', (sema, call) => fileReader(sema, call)),
+    close: fnMember('File.close', (sema, call) => {
+      const file = fileOf(sema, call);
+      const [io] = compileArgs(sema, expectArgs(sema, call, 1, 'close'), [IO]);
+      const evaluate = file.eval;
+      return runtime(
+        VOID,
+        (frame) => {
+          io.eval(frame);
+          frame.runtime.closeDescriptor(fileDescriptor(evaluate(frame)));
+        },
+        call.span
+      );
+    }),
+    length: fnMember('File.length', (sema, call) => {
+      const file = fileOf(sema, call);
+      const [io] = compileArgs(sema, expectArgs(sema, call, 1, 'length'), [IO]);
+      const evaluate = file.eval;
+      return runtime(
+        errorUnionOf(ANYERROR, U64),
+        (frame) => {
+          io.eval(frame);
+          return openFileLength(frame, fileDescriptor(evaluate(frame)));
+        },
+        call.span
+      );
+    }),
     Writer: typeMember(() => FILE_WRITER),
     writer: fnMember(
       'File.writer',
@@ -281,15 +326,32 @@ function addIoMembers(): void {
             const file = evaluate(frame) as NativeHandle;
             io.eval(frame);
             const value = bytes.eval(frame);
-            frame.runtime.writeOutput(file.state.fd as number, writerBytes(frame, value as Slice));
-            return;
+            const written = frame.runtime.writeOutput(file.state.fd as number, writerBytes(frame, value as Slice));
+            return written ? undefined : ErrorValue.of('NotOpenForWriting');
           },
           call.span
         );
       },
       () => ({ type: fnType([FILE, IO, CONST_U8_SLICE], errorUnionOf(FILE_WRITE_ERROR, VOID)), receiver: true })
     ),
-    reader: unavailableMember('標準入力やファイルからの読み込み'),
+  });
+  addMembers(IO, {
+    Reader: typeMember(() => READER),
+    Dir: typeMember(() => DIR),
+    Limit: typeMember(() => LIMIT),
+    Group: typeMember(() => GROUP),
+    Future: fnMember('std.Io.Future', (sema, call) => {
+      const [result] = expectArgs(sema, call, 1, 'std.Io.Future');
+      return known(TYPE, futureType(sema.compileType(result)), call.span);
+    }),
+    async: asyncMember('async'),
+    concurrent: asyncMember('concurrent'),
+  });
+  addMembers(FILE, {
+    Reader: typeMember(() => FILE_READER),
+    OpenError: typeMember(() => FILE_OPEN_ERROR),
+    Kind: typeMember(() => FILE_KIND),
+    Stat: typeMember(() => FILE_STAT),
   });
   addWriterMembers();
 }
@@ -404,15 +466,7 @@ function addWriterMembers(): void {
       (sema, call) => {
         const writer = writerOf(sema, call);
         expectArgs(sema, call, 0, 'flush');
-        return runtime(
-          errorUnionOf(WRITE_ERROR, VOID),
-          (frame) => {
-            const state = writer(frame);
-            flushWriter(frame, state);
-            return;
-          },
-          call.span
-        );
+        return runtime(errorUnionOf(WRITE_ERROR, VOID), (frame) => flushWriter(frame, writer(frame)), call.span);
       },
       () => ({ type: fnType([pointerTo(WRITER, false)], errorUnionOf(WRITE_ERROR, VOID)), receiver: true })
     ),
@@ -457,6 +511,25 @@ function fileOf(sema: SemaApi, call: NativeCall): TExpr {
   if (receiver.type === FILE) return receiver;
   const evaluate = receiver.eval;
   return runtime(FILE, (frame) => (evaluate(frame) as Pointer).load(), receiver.span);
+}
+
+/** `file.reader(io, &buffer)`: a File.Reader whose interface reads into the buffer. */
+function fileReader(sema: SemaApi, call: NativeCall): TExpr {
+  const file = fileOf(sema, call);
+  const [, buffer] = expectArgs(sema, call, 2, 'reader');
+  const [io] = compileArgs(sema, [call.args[0]], [IO]);
+  const slice = sema.coerce(sema.compile(buffer, sliceOf(U8, false)), sliceOf(U8, false), buffer);
+  const evaluateFile = file.eval;
+  const evaluateBuffer = slice.eval;
+  return runtime(
+    FILE_READER,
+    (frame) => {
+      const descriptor = fileDescriptor(evaluateFile(frame));
+      io.eval(frame);
+      return new ZStruct([readerValue(evaluateBuffer(frame) as Slice, descriptor)]);
+    },
+    call.span
+  );
 }
 
 /** `file.writer(io, &buffer)`: a File.Writer whose interface buffers up to the buffer's length. */

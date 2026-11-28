@@ -16,6 +16,7 @@ import {
   shortestDecimal,
 } from './floats';
 import { spendMemory } from './memoryAccounting';
+import { POINTER_OPERATIONS, pointerShapeOf } from './semaBase';
 import { type EnumType, type StructField, type Type, typeName, type UnionType, USIZE } from './types';
 import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText } from './utf8';
 import {
@@ -279,75 +280,8 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
   };
   const kind = type.kind;
   if (kind === 'enum') info.enumFields(type);
-  const special = SPECIAL_SPECIFIERS.get(spec);
-  if (special) {
-    if (!special.accepts(type)) invalid();
-    return;
-  }
-  if (spec.length === 1) {
-    switch (spec) {
-      case '*': {
-        if (kind !== 'pointer' && !(kind === 'optional' && type.child.kind === 'pointer')) {
-          throw new FormatError(`cannot format non-pointer type ${typeName(type)} with * specifier`);
-        }
-        return;
-      }
-      case 'd': {
-        if (
-          kind === 'float' ||
-          kind === 'comptime_float' ||
-          kind === 'int' ||
-          kind === 'comptime_int' ||
-          kind === 'enum'
-        )
-          return;
-        return invalid();
-      }
-      case 'c':
-      case 'u': {
-        // The value goes to a `u8` or `u21` parameter, which only narrower unsigned integers coerce to.
-        const bits = spec === 'c' ? 8 : 21;
-        if (kind === 'comptime_int' || (kind === 'int' && !type.signed && type.bits <= bits)) return;
-        throw new FormatError(`expected type 'u${bits}', found '${typeName(type)}'`);
-      }
-      case 'b':
-      case 'o': {
-        if (kind === 'int' || kind === 'comptime_int' || kind === 'enum') return;
-        return invalid();
-      }
-      case 'x':
-      case 'X': {
-        if (
-          kind === 'float' ||
-          kind === 'comptime_float' ||
-          kind === 'int' ||
-          kind === 'comptime_int' ||
-          kind === 'enum'
-        )
-          return;
-        if (isByteString(type)) return;
-        return invalid();
-      }
-      case 's': {
-        if (isByteString(type)) return;
-        return invalid();
-      }
-      case 'e':
-      case 'E': {
-        if (kind === 'float' || kind === 'comptime_float') return;
-        return invalid();
-      }
-      case 't': {
-        if (kind === 'union') info.unionFields(type);
-        if (kind === 'error_set' || kind === 'enum' || kind === 'enum_literal' || (kind === 'union' && type.tagType))
-          return;
-        return invalid();
-      }
-      default: {
-        break;
-      }
-    }
-  }
+  const rule = SPECIFIERS.get(spec);
+  if (rule) return rule.check(type, info, invalid);
   const isAny = spec === ANY;
   switch (kind) {
     case 'float':
@@ -435,9 +369,19 @@ function isU8(child: Type): boolean {
 function isByteString(type: Type): boolean {
   if (type.kind === 'pointer') {
     if (type.size === 'slice') return isU8(type.child);
+    // A many-item or C pointer prints up to where std.mem.span ends it: its sentinel, or C's 0.
+    // Zig spans it as a `[:0]const u8`, so another sentinel does not do.
+    if (type.size === 'many' || type.size === 'c') return isU8(type.child) && sentinelOf(type) === 0n;
     return type.child.kind === 'array' && isU8(type.child.child);
   }
   return type.kind === 'array' && isU8(type.child);
+}
+
+/** Where `std.mem.span` ends an unbounded pointer: at its sentinel, and a C pointer at 0. */
+function sentinelOf(type: Extract<Type, { kind: 'pointer' }>): Value | undefined {
+  const { span } = POINTER_OPERATIONS[pointerShapeOf(type)];
+  if (span === 'always') return 0n;
+  return span === 'sentinel' ? type.sentinel?.value : undefined;
 }
 
 // Printing ------------------------------------------------------------------------------------------------------------
@@ -453,70 +397,8 @@ export function printValue(
   depth = MAX_DEPTH
 ): void {
   const kind = type.kind;
-  const special = SPECIAL_SPECIFIERS.get(spec);
-  if (special) return special.print(out, value, type, options);
-  if (spec.length === 1) {
-    switch (spec) {
-      case '*': {
-        if (kind === 'pointer' || kind === 'optional') {
-          appendBytes(out, utf8(`${typeName(type.child)}@`));
-          printInt(out, addressOf(value), USIZE, 16, false, { fill: 32, alignment: 'right' });
-          return;
-        }
-        break;
-      }
-      case 'd': {
-        if (kind === 'float' || kind === 'comptime_float')
-          return printFloat(out, value as AnyFloat, floatBits(type), 'decimal', options);
-        if (kind === 'int' || kind === 'comptime_int') return printInt(out, value as bigint, type, 10, false, options);
-        if (kind === 'enum') return printInt(out, value as bigint, type.tagType as Type, 10, false, options);
-        break;
-      }
-      case 'c': {
-        return alignBuffer(out, [Number(BigInt.asUintN(8, value as bigint))], options);
-      }
-      case 'u': {
-        return printUnicodeCodepoint(out, Number(value as bigint));
-      }
-      case 'b':
-      case 'o':
-      case 'x':
-      case 'X': {
-        const base = spec === 'b' ? 2 : spec === 'o' ? 8 : 16;
-        const upper = spec === 'X';
-        if (kind === 'int' || kind === 'comptime_int')
-          return printInt(out, value as bigint, type, base, upper, options);
-        if (kind === 'enum') return printInt(out, value as bigint, type.tagType as Type, base, upper, options);
-        if (kind === 'float' || kind === 'comptime_float')
-          return printFloatHex(out, value as AnyFloat, floatBits(type), upper, options);
-        // A byte string in hexadecimal, which Zig asserts has no width or precision.
-        forbidOptions(options);
-        const bytes = stringBytes(value);
-        checkFormatSize(out, out.length + bytes.length * 2);
-        for (const byte of bytes) for (const digit of hexDigits(byte, upper)) out.push(digit);
-        return;
-      }
-      case 's': {
-        return alignBuffer(out, stringBytes(value), options);
-      }
-      case 'e':
-      case 'E': {
-        return printFloat(out, value as AnyFloat, floatBits(type), 'scientific', options);
-      }
-      case 't': {
-        if (kind === 'error_set') return alignBuffer(out, utf8((value as ErrorValue).name), options);
-        if (kind === 'enum_literal') return alignBuffer(out, utf8((value as EnumLiteral).name), options);
-        if (kind === 'union')
-          return alignBuffer(out, utf8(info.unionFields(type)[activeUnionIndex(value as ZUnion)].name), options);
-        const name = enumName(value as bigint, type as EnumType, info);
-        if (name === undefined) panic(PANIC.invalidEnum);
-        return alignBuffer(out, utf8(name), options);
-      }
-      default: {
-        break;
-      }
-    }
-  }
+  const rule = SPECIFIERS.get(spec);
+  if (rule) return rule.print(out, value, type, options, info);
   const isAny = spec === ANY;
   switch (kind) {
     case 'float':
@@ -614,6 +496,12 @@ export function printValue(
         printInt(out, addressOf(value), USIZE, 16, false, options);
         return;
       }
+      // An unbounded pointer has no length to print elements to, so it prints as its address.
+      if (type.size === 'many' || type.size === 'c') {
+        appendBytes(out, utf8(`${typeName(type.child)}@`));
+        printInt(out, addressOf(value), USIZE, 16, false, options);
+        return;
+      }
       if (depth === 0) {
         appendBytes(out, utf8('{ ... }'));
         return;
@@ -664,17 +552,142 @@ function addressOf(value: Value): bigint {
   return 0n;
 }
 
-/** Specifiers for strings and byte counts, which `printValue` handles before the others. */
-const SPECIAL_SPECIFIERS = new Map<
-  string,
-  { accepts: (type: Type) => boolean; print: (out: FormatOutput, value: Value, type: Type, options: Options) => void }
->([
+/** What a specifier accepts and how it prints, which both `checkFormat` and `printValue` read. */
+interface SpecifierRule {
+  /** Reports the compile error that the specifier gives for a value of the type, through `invalid` or its own. */
+  check: (type: Type, info: TypeInfo, invalid: () => never) => void;
+  print: (out: FormatOutput, value: Value, type: Type, options: Options, info: TypeInfo) => void;
+}
+
+function accepting(accepts: (type: Type) => boolean): SpecifierRule['check'] {
+  return (type, _info, invalid) => {
+    if (!accepts(type)) invalid();
+  };
+}
+
+function isNumber(type: Type): boolean {
+  return type.kind === 'float' || type.kind === 'comptime_float' || isInteger(type);
+}
+
+function isInteger(type: Type): boolean {
+  return type.kind === 'int' || type.kind === 'comptime_int';
+}
+
+/** A specifier that prints an integer, an enum's tag, or a float in a base, as `{b}`, `{o}`, `{x}`, and `{X}` do. */
+function baseSpecifier(base: 2 | 8 | 16, upper: boolean): SpecifierRule {
+  return {
+    check: accepting(
+      (type) =>
+        isInteger(type) ||
+        type.kind === 'enum' ||
+        (base === 16 && (type.kind === 'float' || type.kind === 'comptime_float' || isByteString(type)))
+    ),
+    print: (out, value, type, options) => {
+      if (isInteger(type)) return printInt(out, value as bigint, type, base, upper, options);
+      if (type.kind === 'enum') return printInt(out, value as bigint, type.tagType as Type, base, upper, options);
+      if (type.kind === 'float' || type.kind === 'comptime_float')
+        return printFloatHex(out, value as AnyFloat, floatBits(type), upper, options);
+      // A byte string in hexadecimal, which Zig asserts has no width or precision.
+      forbidOptions(options);
+      const bytes = stringBytes(value, type);
+      checkFormatSize(out, out.length + bytes.length * 2);
+      for (const byte of bytes) for (const digit of hexDigits(byte, upper)) out.push(digit);
+    },
+  };
+}
+
+/** A specifier that takes a codepoint, `{c}` as a `u8` and `{u}` as a `u21`, which only narrower unsigned integers coerce to. */
+function codepointSpecifier(bits: 8 | 21, print: SpecifierRule['print']): SpecifierRule {
+  return {
+    check: (type) => {
+      if (type.kind === 'comptime_int' || (type.kind === 'int' && !type.signed && type.bits <= bits)) return;
+      throw new FormatError(`expected type 'u${bits}', found '${typeName(type)}'`);
+    },
+    print,
+  };
+}
+
+/** The specifiers that `printValue` handles before the general printing of each kind of type. */
+const SPECIFIERS = new Map<string, SpecifierRule>([
+  [
+    '*',
+    {
+      check: (type) => {
+        if (type.kind !== 'pointer' && !(type.kind === 'optional' && type.child.kind === 'pointer'))
+          throw new FormatError(`cannot format non-pointer type ${typeName(type)} with * specifier`);
+      },
+      print: (out, value, type) => {
+        appendBytes(out, utf8(`${typeName((type as Extract<Type, { kind: 'pointer' | 'optional' }>).child)}@`));
+        printInt(out, addressOf(value), USIZE, 16, false, { fill: 32, alignment: 'right' });
+      },
+    },
+  ],
+  [
+    'd',
+    {
+      check: accepting((type) => isNumber(type) || type.kind === 'enum'),
+      print: (out, value, type, options) => {
+        if (type.kind === 'float' || type.kind === 'comptime_float')
+          return printFloat(out, value as AnyFloat, floatBits(type), 'decimal', options);
+        if (type.kind === 'enum') return printInt(out, value as bigint, type.tagType as Type, 10, false, options);
+        return printInt(out, value as bigint, type, 10, false, options);
+      },
+    },
+  ],
+  [
+    'c',
+    codepointSpecifier(8, (out, value, _type, options) =>
+      alignBuffer(out, [Number(BigInt.asUintN(8, value as bigint))], options)
+    ),
+  ],
+  ['u', codepointSpecifier(21, (out, value) => printUnicodeCodepoint(out, Number(value as bigint)))],
+  ['b', baseSpecifier(2, false)],
+  ['o', baseSpecifier(8, false)],
+  ['x', baseSpecifier(16, false)],
+  ['X', baseSpecifier(16, true)],
+  [
+    's',
+    {
+      check: accepting(isByteString),
+      print: (out, value, type, options) => alignBuffer(out, stringBytes(value, type), options),
+    },
+  ],
+  ...(['e', 'E'] as const).map((spec): [string, SpecifierRule] => [
+    spec,
+    {
+      check: accepting((type) => type.kind === 'float' || type.kind === 'comptime_float'),
+      print: (out, value, type, options) => printFloat(out, value as AnyFloat, floatBits(type), 'scientific', options),
+    },
+  ]),
+  [
+    't',
+    {
+      check: (type, info, invalid) => {
+        if (type.kind === 'union') info.unionFields(type);
+        const named =
+          type.kind === 'error_set' ||
+          type.kind === 'enum' ||
+          type.kind === 'enum_literal' ||
+          (type.kind === 'union' && type.tagType !== undefined);
+        if (!named) invalid();
+      },
+      print: (out, value, type, options, info) => {
+        if (type.kind === 'error_set') return alignBuffer(out, utf8((value as ErrorValue).name), options);
+        if (type.kind === 'enum_literal') return alignBuffer(out, utf8((value as EnumLiteral).name), options);
+        if (type.kind === 'union')
+          return alignBuffer(out, utf8(info.unionFields(type)[activeUnionIndex(value as ZUnion)].name), options);
+        const name = enumName(value as bigint, type as EnumType, info);
+        if (name === undefined) panic(PANIC.invalidEnum);
+        return alignBuffer(out, utf8(name), options);
+      },
+    },
+  ],
   [
     'q',
     {
-      accepts: isByteString,
-      print: (out, value) => {
-        const bytes = stringBytes(value);
+      check: accepting(isByteString),
+      print: (out, value, type) => {
+        const bytes = stringBytes(value, type);
         checkFormatSize(out, out.length + bytes.length + 2);
         out.push(0x22);
         appendEscapedString(out, bytes);
@@ -685,24 +698,24 @@ const SPECIAL_SPECIFIERS = new Map<
   [
     'B',
     {
-      accepts: (type) => type.kind === 'int' || type.kind === 'comptime_int',
+      check: accepting((type) => type.kind === 'int' || type.kind === 'comptime_int'),
       print: (out, value, _type, options) => printByteSize(out, value as bigint, false, options),
     },
   ],
   [
     'Bi',
     {
-      accepts: (type) => type.kind === 'int' || type.kind === 'comptime_int',
+      check: accepting((type) => type.kind === 'int' || type.kind === 'comptime_int'),
       print: (out, value, _type, options) => printByteSize(out, value as bigint, true, options),
     },
   ],
   [
     'b64',
     {
-      accepts: isByteString,
-      print: (out, value, _type, options) => {
+      check: accepting(isByteString),
+      print: (out, value, type, options) => {
         forbidOptions(options);
-        const bytes = base64Bytes(stringBytes(value));
+        const bytes = base64Bytes(stringBytes(value, type));
         checkFormatSize(out, out.length + bytes.length);
         appendBuffer(out, bytes, 4);
       },
@@ -805,8 +818,16 @@ interface ByteView extends Iterable<number> {
   readonly source?: Slice;
 }
 
-export function stringBytes(value: Value): ByteView {
-  const source = value instanceof Pointer ? (value.load() as ZArray) : (value as Slice | ZArray);
+export function stringBytes(value: Value, type?: Type): ByteView {
+  // std.mem.span asserts that a C pointer is not null.
+  if (value === NULL) panic(PANIC.unreachable);
+  const end = type?.kind === 'pointer' && type.size !== 'one' && type.size !== 'slice' ? sentinelOf(type) : undefined;
+  const source =
+    end === undefined
+      ? value instanceof Pointer
+        ? (value.load() as ZArray)
+        : (value as Slice | ZArray)
+      : sentinelSlice(value as Pointer, end);
   return byteView(
     source.length,
     (index) => {
@@ -815,6 +836,17 @@ export function stringBytes(value: Value): ByteView {
     },
     source instanceof Slice ? source : new Slice(source, source.offset, source.lengthValue)
   );
+}
+
+/** The bytes from a many-item or C pointer up to the value that ends them. */
+function sentinelSlice(pointer: Pointer, end: Value): Slice {
+  const { target, index } = pointer;
+  let length = 0;
+  while (index + length < target.slots.length && target.slots[index + length] !== end) {
+    spendMemory();
+    length++;
+  }
+  return new Slice(target, index, length);
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Streams three input bytes per quartet with bounded lazy reads and explicit padding.

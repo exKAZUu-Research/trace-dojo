@@ -1,3 +1,4 @@
+import { alignmentOperand } from './admissibility';
 import { valueSlots } from './allocation';
 import {
   checked,
@@ -30,17 +31,21 @@ import {
 } from './floats';
 import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
 import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import { isPublicStdMember } from './library/native';
+import { valuesEqual } from './library/valueEquality';
 import { memorySpace, spendMemory } from './memoryAccounting';
+import { MemoryFault } from './memoryFault';
 import { callableNative } from './nativeAdapter';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { sliceLengthPointer } from './pointerViews';
-import { type Frame, Jump, withHeldValues } from './runtime';
+import { type Frame, Jump, UnavailableOperation, withHeldValues } from './runtime';
 import {
   addDecls,
   copyForFrame,
   copyForStorage,
   evaluateHeld,
   FnRef,
+  inMemoryCoercible,
   isAnonymous,
   isType,
   known,
@@ -51,6 +56,8 @@ import {
   newArray,
   nullUnwrapPanic,
   type Place,
+  POINTER_OPERATIONS,
+  pointerShapeOf,
   runtime,
   type Scope,
   SemaBase,
@@ -80,6 +87,7 @@ import {
   minInt,
   NULL_TYPE,
   optionalOf,
+  pointerOf,
   pointerTo,
   primitiveType,
   sameSentinel,
@@ -96,6 +104,7 @@ import {
   USIZE,
   wrapInt,
 } from './types';
+import { unavailableMessage } from './unavailable';
 import { concatenatedFacts, fieldFacts, payloadFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
@@ -104,6 +113,7 @@ import {
   ErrorValue,
   FnValue,
   hasAggregateStorage,
+  hasUndefinedHeader,
   markConstantStorage,
   NULL,
   optionalPayload,
@@ -140,12 +150,15 @@ const rawArithmeticOperations: Partial<Record<ExpressionOf<'binary'>['operator']
   '%': (a, b) => a % b,
 };
 
+const RUNTIME_COMPTIME_VAR_POSITION = '実行時に決まる位置で、comptime var を指すことはできません。';
+
 export abstract class ExpressionCompiler extends SemaBase {
   private readonly constants = new Map<string, Constant>();
 
   // Abstract parts that later layers compile.
   protected abstract compileCall(expression: ExpressionOf<'call'>, resultType: Type | undefined): TExpr;
   protected abstract compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr;
+  protected abstract checkBuiltinAvailable(expression: ExpressionOf<'builtinCall'>): void;
   protected abstract compileControl(expression: Expression, resultType: Type | undefined): TExpr;
   protected abstract compileTry(expression: ExpressionOf<'try'>, resultType: Type | undefined): TExpr;
   protected abstract compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined): TExpr;
@@ -209,6 +222,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         return this.compileCall(expression, resultType);
       }
       case 'builtinCall': {
+        this.checkBuiltinAvailable(expression);
         return this.compileBuiltin(expression, resultType);
       }
       case 'unary': {
@@ -242,13 +256,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       case 'optionalType': {
         return known(TYPE, optionalOf(this.compileType(expression.child)), expression);
       }
-      case 'pointerType': {
-        return known(TYPE, pointerTo(this.compileType(expression.child), expression.isConst), expression);
-      }
+      case 'pointerType':
       case 'sliceType': {
-        const child = this.compileType(expression.child);
-        const sentinel = expression.sentinel ? this.sentinelValue(expression.sentinel, child) : undefined;
-        return known(TYPE, sliceOf(child, expression.isConst, sentinel), expression);
+        return known(TYPE, this.pointerTypeExpression(expression), expression);
       }
       case 'arrayType': {
         return this.arrayTypeExpression(expression);
@@ -278,7 +288,40 @@ export abstract class ExpressionCompiler extends SemaBase {
       case 'assign': {
         return this.error(expression, '代入は式の中には書けません。');
       }
+      case 'comptime': {
+        return this.comptimeValue(() => this.compile(expression.operand, resultType), expression);
+      }
+      case 'nosuspend': {
+        return this.compile(expression.operand, resultType);
+      }
+      case 'async': {
+        return this.error(
+          expression,
+          'async の機能（suspend・resume・anyframe）は、Zig 0.17 の処理系でまだ実装されていません。'
+        );
+      }
     }
+  }
+
+  private pointerTypeExpression(expression: ExpressionOf<'pointerType' | 'sliceType'>): Type {
+    const child = this.compileType(expression.child);
+    const size = expression.kind === 'sliceType' ? 'slice' : expression.size;
+    if (expression.bitRange) this.error(expression, unavailableMessage('syntax:packedFieldPointer'));
+    if (expression.addressSpace) this.addressSpace(expression.addressSpace);
+    const sentinel = expression.sentinel ? this.sentinelValue(expression.sentinel, child) : undefined;
+    return pointerOf(size, child, {
+      isConst: expression.isConst,
+      isVolatile: expression.isVolatile,
+      allowZero: expression.allowZero,
+      alignment: expression.alignment ? alignmentOperand(this, expression.alignment) : undefined,
+      sentinel,
+    });
+  }
+
+  /** `addrspace(.generic)`; the others name address spaces of particular CPUs. */
+  protected addressSpace(expression: Expression): void {
+    if (expression.kind !== 'enumLiteral' || expression.name !== 'generic')
+      this.error(expression, unavailableMessage('syntax:addrspace'));
   }
 
   // Names -----------------------------------------------------------------------------------------------------------
@@ -295,7 +338,27 @@ export abstract class ExpressionCompiler extends SemaBase {
     return this.resolveDecl(binding, span);
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Distinguishes the kinds of locals that a name may refer to, as Zig's Sema does.
   protected localReference(binding: LocalBinding, span: Span): TExpr {
+    const cell = binding.comptimeCell;
+    if (cell) {
+      const place: Place = {
+        isConst: false,
+        locate: () => new Pointer(cell, 0),
+        compileTimePointer: new Pointer(cell, 0),
+        comptimeVar: binding,
+      };
+      // Code that the compiler runs reads the variable when it runs; other code, its value where the code stands.
+      if (this.readsComptimeVarLive(binding))
+        return { ...runtime(binding.type, () => cell.slots[0], span, place), local: binding };
+      // A value read here is a constant of the code that stands here, which later stores must not change: its parts
+      // come from a copy, while stores still reach the variable.
+      return {
+        ...known(binding.type, copyForStorage(cell.slots[0]), span),
+        place: { ...place, snapshot: true },
+        local: binding,
+      };
+    }
     const fact = binding.known
       ? { value: binding.value }
       : binding.isConst
@@ -314,7 +377,11 @@ export abstract class ExpressionCompiler extends SemaBase {
       crossedNamespace ||= scope.namespace !== undefined;
     }
     const { slot } = binding;
-    const place: Place = { isConst: binding.isConst, locate: (frame) => new Pointer(frame, slot) };
+    const place: Place = {
+      isConst: binding.isConst,
+      locate: (frame) => new Pointer(frame, slot),
+      alignment: binding.alignment,
+    };
     if (fact) return { ...known(binding.type, fact.value, span), place, local: binding };
     return {
       ...runtime(binding.type, (frame) => frame.slots[slot], span, place),
@@ -384,6 +451,19 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (type.kind === 'pointer' && type.size === 'one') {
       if (type.child.kind === 'array') {
         if (name === 'len') return this.fixedResult(object, USIZE, type.child.length, expression);
+        if (name === 'ptr' && POINTER_OPERATIONS[pointerShapeOf(type)].ptr) {
+          const array = type.child;
+          const many = pointerOf('many', array.child, {
+            isConst: type.isConst,
+            isVolatile: type.isVolatile,
+            alignment: type.alignment,
+            sentinel: array.sentinel,
+          });
+          return this.derived(object, many, (value) => {
+            const view = arrayPointerView(value as Pointer, array, sizeOf(array.child));
+            return new Pointer(view, view.offset);
+          });
+        }
         return this.error(expression, `配列へのポインタには、フィールド「${name}」がありません。`);
       }
       base = this.dereferenced(object, expression, false);
@@ -422,7 +502,16 @@ export abstract class ExpressionCompiler extends SemaBase {
             };
             return runtime(USIZE, (frame) => (evaluate(frame) as Slice).lengthValue, expression, lengthPlace);
           }
-          if (name === 'ptr') this.error(expression, '多要素のポインタ（.ptr）は、この採点環境では使えません。');
+          if (name === 'ptr' && POINTER_OPERATIONS[pointerShapeOf(type)].ptr) {
+            this.checkMemoryHeader(base, expression);
+            const many = pointerOf('many', type.child, {
+              isConst: type.isConst,
+              isVolatile: type.isVolatile,
+              alignment: type.alignment,
+              sentinel: type.sentinel,
+            });
+            return this.derived(base, many, (value) => new Pointer((value as Slice).target, (value as Slice).start));
+          }
         }
         break;
       }
@@ -452,6 +541,11 @@ export abstract class ExpressionCompiler extends SemaBase {
       const hasField = this.fieldIndexes(this.unionFields(type)).has(name);
       if (hasField && type.tagType) return this.typeMember(type.tagType, name, span);
     }
+    if (
+      (type.kind === 'struct' || type.kind === 'enum' || type.kind === 'union') &&
+      isPublicStdMember(type.namespace.name, name)
+    )
+      return this.error(span, `${type.namespace.name}.${name}は、この採点環境では使えません。`);
     return this.error(span, `${typeName(type)} には、「${name}」という宣言がありません。`);
   }
 
@@ -475,6 +569,8 @@ export abstract class ExpressionCompiler extends SemaBase {
       if (this.findDecl(type, name)) {
         this.error(span, `「${name}」はフィールドではなく宣言です。呼び出すときは ${name}(...) と書きます。`);
       }
+      if (type.native && isPublicStdMember(type.namespace.name, name))
+        return this.error(span, `${typeName(type)}.${name}は、この採点環境では使えません。`);
       return this.error(span, `${typeName(type)} 型には、フィールド「${name}」がありません。`);
     }
     if (field.comptimeValue !== undefined) return this.fixedResult(base, field.type, field.comptimeValue.value, span);
@@ -486,13 +582,19 @@ export abstract class ExpressionCompiler extends SemaBase {
       (parent) => new Pointer(parent.load() as ZStruct, index)
     );
     const parent = this.knownAddress(base);
-    if (parent) return knownAt(field.type, project(parent), span);
-    const fieldPlace = this.projectedPlace(base, field.type, project);
+    const { alignment } = field;
+    if (parent) return this.withFieldAlignment(knownAt(field.type, project(parent), span), alignment);
+    const fieldPlace = this.projectedPlace(base, field.type, project, alignment);
     const facts = fieldFacts(valueFactsOf(base), index);
     const result = facts?.exact
       ? this.fixedResult(base, field.type, facts.exact.value, span)
       : this.derived(base, field.type, (value) => (value as ZStruct).slots[index]);
     return { ...result, valueFacts: facts, knownLength: facts?.length, place: fieldPlace, span };
+  }
+
+  /** A field's place, whose pointer carries the alignment that `align(n)` gives the field. */
+  private withFieldAlignment(atField: TExpr, alignment: number | undefined): TExpr {
+    return alignment === undefined ? atField : { ...atField, place: { ...(atField.place as Place), alignment } };
   }
 
   private unionField(base: TExpr, type: Extract<Type, { kind: 'union' }>, name: string, span: Span): TExpr {
@@ -510,11 +612,11 @@ export abstract class ExpressionCompiler extends SemaBase {
         (parent) => new Pointer(view(parent.load()), 0)
       );
       const parent = this.knownAddress(base);
-      if (parent) return knownAt(field.type, project(parent), span);
+      if (parent) return this.withFieldAlignment(knownAt(field.type, project(parent), span), field.alignment);
       return {
         ...this.derived(base, field.type, (value) => view(value).slots[0]),
         span,
-        place: this.projectedPlace(base, field.type, project),
+        place: this.projectedPlace(base, field.type, project, field.alignment),
       };
     }
     const check = (value: Value): ZUnion => {
@@ -536,9 +638,9 @@ export abstract class ExpressionCompiler extends SemaBase {
         );
       }
       const parent = this.knownAddress(base);
-      if (parent) return knownAt(field.type, project(parent), span);
+      if (parent) return this.withFieldAlignment(knownAt(field.type, project(parent), span), field.alignment);
     }
-    const fieldPlace = this.projectedPlace(base, field.type, project);
+    const fieldPlace = this.projectedPlace(base, field.type, project, field.alignment);
     return {
       ...this.derived(base, field.type, (value) => check(value).slots[0]),
       valueFacts: fieldFacts(valueFactsOf(base), index),
@@ -589,13 +691,20 @@ export abstract class ExpressionCompiler extends SemaBase {
     };
   }
 
-  private projectedPlace(base: TExpr, child: Type, project: (parent: Pointer) => Pointer): Place | undefined {
+  private projectedPlace(
+    base: TExpr,
+    child: Type,
+    project: (parent: Pointer) => Pointer,
+    alignment?: number
+  ): Place | undefined {
     const place = base.place;
     if (!place) return undefined;
     const stable = base.type.kind !== 'union' || staticResultOf(base) !== undefined;
-    const addressType = pointerTo(child, place.isConst);
+    const addressType = pointerOf('one', child, { isConst: place.isConst, alignment });
     return {
       isConst: place.isConst,
+      alignment,
+      comptimeVar: place.comptimeVar,
       locate: (frame) => project(place.locate(frame)),
       compileTimePointer: stable && place.compileTimePointer ? project(place.compileTimePointer) : undefined,
       address: () => {
@@ -609,10 +718,60 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Pointers --------------------------------------------------------------------------------------------------------
 
+  /**
+   * A C pointer known to be null, as one the program holds when it runs: Zig checks a C pointer where the program uses
+   * it, so `.*`, `.?`, and an index of a known null fail when they run, not when they compile.
+   */
+  private nullCPointerAtRuntime(pointer: TExpr): TExpr {
+    const isNullC =
+      pointer.type.kind === 'pointer' && pointer.type.size === 'c' && staticResultOf(pointer)?.value === NULL;
+    if (!isNullC) return pointer;
+    const evaluate = pointer.eval;
+    return { ...runtime(pointer.type, (frame) => evaluate(frame), pointer.span), place: pointer.place };
+  }
+
+  /**
+   * A pointer or slice into a `comptime var`, which the compiler knows and remembers the variable of, since code that
+   * runs when the program runs holds none.
+   */
+  protected comptimeVarReference(reference: TExpr, variable: LocalBinding | undefined): TExpr {
+    if (!variable || this.context.comptimeDepth > 0) return reference;
+    if (!reference.known || !(reference.value instanceof Pointer || reference.value instanceof Slice))
+      return this.error(reference.span, RUNTIME_COMPTIME_VAR_POSITION);
+    this.comptimeVarReferences.set(reference.value, variable);
+    return reference;
+  }
+
+  /** A read through a place in a `comptime var`, which takes the value where the code stands unless it runs at compile time. */
+  protected comptimeVarRead(result: TExpr, place: Place): TExpr {
+    const variable = place.comptimeVar;
+    if (!variable || this.readsComptimeVarLive(variable) || !place.compileTimePointer) return result;
+    return {
+      ...known(result.type, copyForStorage(place.compileTimePointer.load()), result.span),
+      place: { ...place, snapshot: true },
+    };
+  }
+
   /** `p.*`, or a pointer that a field access or an index goes through. */
+  // code-gauge-allow functionCognitiveComplexity -- Checks each kind of pointer that `.*` may go through.
   protected dereferenced(pointer: TExpr, span: Span, load = true): TExpr {
     const type = pointer.type;
+    if (type.kind === 'pointer' && type.size === 'c') {
+      const single = this.derived(
+        this.nullCPointerAtRuntime(pointer),
+        pointerOf('one', type.child, { isConst: type.isConst }),
+        (value) => {
+          // Debug builds check a C pointer for null where it is used, as `.?` does.
+          if (value === NULL) return nullUnwrapPanic();
+          if (!(value instanceof Pointer)) throw new MemoryFault();
+          return value;
+        }
+      );
+      return this.dereferenced(single, span, load);
+    }
     if (type.kind !== 'pointer' || type.size !== 'one') {
+      if (type.kind === 'pointer' && type.size === 'many')
+        return this.error(span, '多要素のポインタは .* で参照できません（p[0] のように添字を使います）。');
       return this.error(span, `${typeName(type)} 型はポインタではないので、.* で参照できません。`);
     }
     if (type.child.kind === 'fn') return { ...pointer, type: type.child, place: undefined, local: undefined };
@@ -626,6 +785,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       locate: (frame) =>
         zero ? this.zeroPointer(evaluate(frame) as Pointer, type.child) : (evaluate(frame) as Pointer),
       compileTimePointer: pointer.known && pointer.value instanceof Pointer ? pointer.value : undefined,
+      comptimeVar: this.comptimeVarOf(pointer),
     };
     if (zero) return { ...this.fixedResult(pointer, type.child, undefinedValue(type.child), span), place };
     const fact = staticResultOf(pointer);
@@ -633,7 +793,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       type.isConst && isConstantData(fact?.value)
         ? { ...this.derived(pointer, type.child, (value) => (value as Pointer).load()), span, place }
         : runtime(type.child, (frame) => (evaluate(frame) as Pointer).load(), span, place);
-    return this.validateComptimeLoad(result, load);
+    return this.validateComptimeLoad(this.comptimeVarRead(result, place), load);
   }
 
   private validateComptimeLoad(expression: TExpr, load = true): TExpr {
@@ -691,6 +851,15 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   /** `&x`: a pointer to what an expression names, or to a temporary that holds its value. */
   addressOf(expression: TExpr): TExpr {
+    const address = this.placeAddress(expression);
+    const pointer = expression.place?.compileTimePointer;
+    // A place in a `comptime var` is where the compiler keeps it, which its address is known to be.
+    const fixed =
+      !address.known && pointer && expression.place?.comptimeVar ? known(address.type, pointer, address.span) : address;
+    return this.comptimeVarReference(fixed, expression.place?.comptimeVar);
+  }
+
+  private placeAddress(expression: TExpr): TExpr {
     const place = expression.place;
     const span = expression.span;
     if (expression.type.kind === 'fn' || expression.value instanceof FnRef) {
@@ -701,13 +870,13 @@ export abstract class ExpressionCompiler extends SemaBase {
       );
     }
     if (place?.address) return place.address();
-    if (place?.compileTimePointer)
-      return known(pointerTo(expression.type, place.isConst), place.compileTimePointer, span);
-    if (place && !expression.local)
-      return runtime(pointerTo(expression.type, place.isConst), (frame) => place.locate(frame), span);
-    if (expression.known)
+    const placeType = (): Type =>
+      pointerOf('one', expression.type, { isConst: place?.isConst ?? true, alignment: place?.alignment });
+    if (place?.compileTimePointer) return known(placeType(), place.compileTimePointer, span);
+    if (place && !expression.local) return runtime(placeType(), (frame) => place.locate(frame), span);
+    if (expression.known && !expression.local?.alignment)
       return known(pointerTo(expression.type, true), this.constantPointer(expression.type, expression.value), span);
-    if (place) return runtime(pointerTo(expression.type, place.isConst), (frame) => place.locate(frame), span);
+    if (place) return runtime(placeType(), (frame) => place.locate(frame), span);
     const result = staticResultOf(expression);
     if (result)
       return this.fixedResult(
@@ -720,7 +889,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected knownAddress(expression: TExpr): Pointer | undefined {
-    if (!expression.known) return undefined;
+    if (!expression.known || expression.place?.snapshot) return undefined;
     const address = this.addressOf(expression);
     return address.known && address.value instanceof Pointer ? address.value : undefined;
   }
@@ -742,6 +911,12 @@ export abstract class ExpressionCompiler extends SemaBase {
   private unwrapOptional(expression: ExpressionOf<'unwrap'>, location = false): TExpr {
     const operand = location ? this.compileLocation(expression.operand) : this.compile(expression.operand);
     const type = operand.type;
+    // `.?` checks a C pointer for null and keeps its type, though Zig refuses it where the result is a place.
+    if (type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(type)].unwrap && !location) {
+      // Zig checks a known C pointer only where the program uses what `.?` gives.
+      if (staticResultOf(operand)?.value === NULL) return this.nullCPointerAtRuntime(operand);
+      return this.derived(operand, type, (value) => (value === NULL ? nullUnwrapPanic() : value));
+    }
     if (type.kind !== 'optional')
       return this.error(expression, `${typeName(type)} 型は optional ではないので、.? は使えません。`);
     const child = type.child;
@@ -809,8 +984,10 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
   protected index(expression: ExpressionOf<'index'>, load = true): TExpr {
-    const object = this.compileLocation(expression.object);
+    const object = this.nullCPointerAtRuntime(this.compileLocation(expression.object));
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
+    // A runtime index reads through a pointer or slice into a comptime var when the program runs, which Zig refuses.
+    if (!staticResultOf(index)) this.refuseComptimeVarReference(object, expression);
     const type = object.type;
     if (type.kind === 'struct' && type.isTuple) {
       const position = Number(this.knownValue(index, 'タプルの添字') as bigint);
@@ -836,9 +1013,19 @@ export abstract class ExpressionCompiler extends SemaBase {
       const pointer = new Pointer(element.slots, element.position);
       return zero ? this.zeroPointer(pointer, child, source) : pointer;
     };
+    // Zig rejects a known index past the memory a known pointer points into, which reading it would fault on.
+    const projectKnown = (source: Value, position: bigint): Pointer => {
+      try {
+        return projectElement(source, position);
+      } catch (error) {
+        if (error instanceof MemoryFault)
+          this.error(expression, `添字 ${position} は、${typeName(type)} が指している先の範囲の外です。`);
+        throw error;
+      }
+    };
     const arrayAddress = index.known && type.kind === 'array' ? this.knownAddress(object) : undefined;
     if (index.known && (arrayAddress || (object.known && type.kind !== 'array' && isConstantData(object.value)))) {
-      const pointer = projectElement(arrayAddress ?? object.value, index.value as bigint);
+      const pointer = projectKnown(arrayAddress ?? object.value, index.value as bigint);
       return knownAt(child, pointer, expression);
     }
     const base = this.deferredLoad(object);
@@ -860,17 +1047,18 @@ export abstract class ExpressionCompiler extends SemaBase {
     const addressType = pointerTo(child, isConst);
     const place: Place = {
       isConst,
+      comptimeVar: this.comptimeVarOf(object),
       address: () => ({
         ...runtime(addressType, locatePointer, expression),
         staticResult: this.constantResult(
           [type.kind === 'array' ? base.operand : object, index],
-          ([value, position]) => projectElement(value, position as bigint),
+          ([value, position]) => projectKnown(value, position as bigint),
           expression
         ),
       }),
       locate: locatePointer,
       compileTimePointer:
-        index.known && staticSource !== undefined ? projectElement(staticSource, index.value as bigint) : undefined,
+        index.known && staticSource !== undefined ? projectKnown(staticSource, index.value as bigint) : undefined,
     };
     const facts =
       !zero && index.known && type.kind === 'array' ? fieldFacts(valueFactsOf(object), Number(index.value)) : undefined;
@@ -893,7 +1081,10 @@ export abstract class ExpressionCompiler extends SemaBase {
             )
           : undefined),
     };
-    return this.validateComptimeLoad(result, load || (type.kind === 'pointer' && type.size === 'one'));
+    return this.validateComptimeLoad(
+      this.comptimeVarRead(result, place),
+      load || (type.kind === 'pointer' && type.size === 'one')
+    );
   }
 
   /** Locates the element at an index of an array, a pointer to one, or a slice, checking the bounds. */
@@ -917,6 +1108,15 @@ export abstract class ExpressionCompiler extends SemaBase {
         const target = arrayPointerView(value as Pointer, array, stride);
         if (index >= limit) indexOutOfBounds(index, array.length);
         return { slots: target, position: target.offset + Number(index) };
+      };
+    }
+    if (type.kind === 'pointer' && (type.size === 'many' || type.size === 'c')) {
+      // A many-item pointer has no length: reading past the memory it points into crashes, as Zig's would.
+      return (value, index) => {
+        const pointer = manyPointer(value);
+        const position = pointer.index + Number(index);
+        if (position < 0 || position >= pointer.target.slots.length) throw new MemoryFault();
+        return { slots: pointer.target, position };
       };
     }
     const sentinel = type.kind === 'pointer' ? type.sentinel : undefined;
@@ -945,7 +1145,29 @@ export abstract class ExpressionCompiler extends SemaBase {
     let isConst: boolean;
     let staticLen: bigint | undefined;
     let sourceSentinel: Sentinel | undefined;
-    if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
+    const many = type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(type)].unbounded;
+    if (type.kind === 'pointer' && many) {
+      child = type.child;
+      isConst = type.isConst;
+      sourceSentinel = type.sentinel;
+      if (!end) {
+        // The open-ended slice keeps the pointer, so a sentinel must be the one it already has.
+        if (expression.sentinel && !sameSentinel(this.sentinelValue(expression.sentinel, type.child), sourceSentinel))
+          this.error(
+            expression,
+            '終わりのない多要素のポインタのスライスに書く番兵は、元のポインタの番兵と同じにしてください。'
+          );
+        return this.combine(
+          [operand, start],
+          type,
+          ([pointer, offset]) => {
+            const { target, index } = manyPointer(pointer);
+            return new Pointer(target, index + Number(offset as bigint));
+          },
+          expression
+        );
+      }
+    } else if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
       child = type.child.child;
       isConst = type.isConst;
       staticLen = type.child.length;
@@ -1011,6 +1233,12 @@ export abstract class ExpressionCompiler extends SemaBase {
         target = array;
         offset = array.offset;
         length = staticLen as bigint;
+      } else if (many) {
+        const pointer = manyPointer(value);
+        target = pointer.target;
+        offset = pointer.index;
+        length = BigInt(Math.max(target.slots.length - offset, 0));
+        if (BigInt(offset) + (last as bigint) + extra > BigInt(target.slots.length)) throw new MemoryFault();
       } else {
         const slice = value as Slice;
         target = slice.target;
@@ -1036,6 +1264,13 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       return new Pointer(view, 0);
     };
+    // A slice of a comptime var, or of a slice known to refer into one, refers into the same variable.
+    const variable = this.comptimeVarOf(loaded.operand) ?? this.comptimeVarOf(base);
+    if (variable && this.context.comptimeDepth === 0) {
+      if (!operands.every((each) => each.known)) return this.error(expression, RUNTIME_COMPTIME_VAR_POSITION);
+      const slice = known(resultType, render(operands.map((each) => each.value as Value)), expression);
+      return this.comptimeVarReference(slice, variable);
+    }
     const evaluators = valueEvaluators(operands, false);
     return {
       ...runtime(resultType, (frame) => render(evaluateHeld(frame, evaluators)), expression),
@@ -1135,25 +1370,25 @@ export abstract class ExpressionCompiler extends SemaBase {
   private addressOperand(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
     const pointerType = resultType && unwrapResult(resultType);
     let operandType = pointerType?.kind === 'pointer' ? pointerType.child : undefined;
-    if (
-      pointerType?.kind === 'pointer' &&
-      pointerType.size === 'slice' &&
-      expression.operand.kind === 'arrayInit' &&
-      !expression.operand.type
-    ) {
-      operandType = arrayOf(expression.operand.elements.length, pointerType.child, pointerType.sentinel);
+    // A slice or many-item pointer points to an array of its elements; a C pointer takes no array literal, as in Zig.
+    const many =
+      pointerType?.kind === 'pointer' && pointerType.size !== 'one' && pointerType.size !== 'c'
+        ? pointerType
+        : undefined;
+    if (many && expression.operand.kind === 'arrayInit' && !expression.operand.type) {
+      operandType = arrayOf(expression.operand.elements.length, many.child, many.sentinel);
     }
     if (
-      pointerType?.kind === 'pointer' &&
-      pointerType.size === 'slice' &&
+      many &&
       expression.operand.kind === 'structInit' &&
       !expression.operand.type &&
       expression.operand.fields.length === 0
     ) {
-      operandType = arrayOf(0, pointerType.child, pointerType.sentinel);
+      operandType = arrayOf(0, many.child, many.sentinel);
     }
     let operand = this.compileLocation(expression.operand, operandType);
-    const valueType = pointerType?.kind === 'pointer' && pointerType.size === 'slice' ? undefined : operandType;
+    // A pointer to many elements takes the operand's own type, which it then coerces from.
+    const valueType = pointerType?.kind === 'pointer' && pointerType.size !== 'one' ? undefined : operandType;
     if (!operand.place && valueType && operand.type !== valueType)
       operand = this.coerce(operand, valueType, expression.operand);
     return this.addressOf(operand);
@@ -1208,12 +1443,62 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
+  /** `p + n` and `p - n` on a many-item pointer, which moves it by `n` elements. */
+  private pointerArithmetic(pointer: TExpr, expression: ExpressionOf<'binary'>): TExpr {
+    const { operator } = expression;
+    if (operator !== '+' && operator !== '-')
+      return this.error(expression, `多要素のポインタには、${operator} は使えません（+ と - だけです）。`);
+    const right = this.compile(expression.right, operator === '-' ? undefined : USIZE);
+    const leftType = pointer.type as Extract<Type, { kind: 'pointer' }>;
+    if (operator === '-' && right.type.kind === 'pointer' && isManyOrC(right.type.size) && isManyOrC(leftType.size))
+      return this.pointerDifference(pointer, right, expression);
+    const offset = this.coerce(right, USIZE, expression.right);
+    const sign = operator === '+' ? 1 : -1;
+    return this.combine(
+      [pointer, offset],
+      pointer.type,
+      ([value, count]) => {
+        if (!(value instanceof Pointer)) throw new MemoryFault();
+        return new Pointer(value.target, value.index + sign * Number(count as bigint));
+      },
+      expression
+    );
+  }
+
+  /** `q - p` on many-item pointers into the same memory: how many elements `p` lies before `q`. */
+  private pointerDifference(left: TExpr, right: TExpr, expression: ExpressionOf<'binary'>): TExpr {
+    const child = (left.type as Extract<Type, { kind: 'pointer' }>).child;
+    if (!inMemoryCoercible(child, (right.type as Extract<Type, { kind: 'pointer' }>).child))
+      this.error(expression, mismatch(left.type, right.type));
+    const size = BigInt(sizeOf(child));
+    if (size === 0n)
+      this.error(
+        expression,
+        `ポインタどうしの引き算には、大きさのある要素の型が必要です（${typeName(child)} 型は大きさが 0 です）。`
+      );
+    return this.combine(
+      [left, right],
+      USIZE,
+      ([a, b]) => {
+        const [later, earlier] = [manyPointer(a), manyPointer(b)];
+        // Pointers into different memory differ by their addresses, which the grader does not model.
+        if (later.target !== earlier.target) throw new UnavailableOperation('pointer:differentMemory');
+        // Zig subtracts the addresses with wrapping, then divides by the element's size.
+        const bytes = BigInt.asUintN(64, BigInt(later.index - earlier.index) * size);
+        return bytes / size;
+      },
+      expression
+    );
+  }
+
   private logical(expression: ExpressionOf<'binary'>): TExpr {
     const left = this.coerce(this.compile(expression.left, BOOL), BOOL, expression.left);
     const isAnd = expression.operator === 'and';
     const leftResult = staticResultOf(left);
     if (leftResult && leftResult.value !== isAnd) return this.fixedResult(left, BOOL, !isAnd, expression);
-    const right = this.coerce(this.compile(expression.right, BOOL), BOOL, expression.right);
+    // The right side runs only when the left side lets it, a runtime condition unless the left side is known.
+    const compileRight = (): TExpr => this.coerce(this.compile(expression.right, BOOL), BOOL, expression.right);
+    const right = left.known ? compileRight() : this.underRuntimeCondition(compileRight);
     if (left.known) return right;
     const evaluateLeft = left.eval;
     const evaluateRight = right.eval;
@@ -1229,6 +1514,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     };
   }
 
+  // code-gauge-allow functionNcss -- Keeps the known, constant, and runtime forms of one `orelse` together.
   private orelse(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const left = this.compile(expression.left, resultType ? optionalOf(resultType) : undefined);
     if (left.type.kind !== 'optional') {
@@ -1236,7 +1522,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     this.checkMemoryHeader(left, expression);
     const child = left.type.child;
-    const right = this.compile(expression.right, child);
+    // Zig does not analyze the right side of an `orelse` whose left side it knows holds a value.
+    if (left.known && left.value !== NULL) return known(child, optionalPayload(left.value), expression);
+    const right = left.known
+      ? this.compile(expression.right, child)
+      : this.underRuntimeCondition(() => this.compile(expression.right, child));
     const type =
       right.type.kind === 'noreturn' ? child : this.peerType([known(child, undefined, expression), right], expression);
     const otherwise = this.coerce(right, type, expression.right);
@@ -1279,7 +1569,6 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps one operation of the interpreter in one place.
-  // code-gauge-allow functionNcss -- Keeps operand coercion and comparison validation together.
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left);
@@ -1291,17 +1580,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const rightTag = right.type.kind === 'union' ? right.type.tagType : undefined;
     if (leftTag && right.type === leftTag) left = this.coerce(left, leftTag, expression.left);
     if (rightTag && left.type === rightTag) right = this.coerce(right, rightTag, expression.right);
-    // `x == null` compares an optional with null.
-    if (right.type.kind === 'null' || left.type.kind === 'null') {
-      if (operator !== '==' && operator !== '!=') this.error(expression, 'null とは == と != でだけ比べられます。');
-      const optional = right.type.kind === 'null' ? left : right;
-      if (optional.type.kind !== 'optional' && optional.type.kind !== 'null') {
-        this.error(expression, `${typeName(optional.type)} 型は optional ではないので、null と比べられません。`);
-      }
-      const isEqual = operator === '==';
-      const index = right.type.kind === 'null' ? 0 : 1;
-      return this.combine([left, right], BOOL, (values) => (values[index] === NULL) === isEqual, expression);
-    }
+    if (right.type.kind === 'null' || left.type.kind === 'null') return this.nullComparison(expression, left, right);
     const ordered = operator !== '==' && operator !== '!=';
     const errorUnion = [left, right].find((operand) => operand.type.kind === 'error_union');
     const error = [left, right].find((operand) => operand.type.kind === 'error_set');
@@ -1320,6 +1599,23 @@ export abstract class ExpressionCompiler extends SemaBase {
     const compare = this.valueComparator(type, ordered, expression);
     const test = comparisonTest(operator);
     return this.combine([this.comparisonSnapshot(left), right], BOOL, ([a, b]) => test(compare(a, b)), expression);
+  }
+
+  /** `x == null`, which compares an optional or a C pointer with null. */
+  private nullComparison(expression: ExpressionOf<'binary'>, left: TExpr, right: TExpr): TExpr {
+    const { operator } = expression;
+    if (operator !== '==' && operator !== '!=') this.error(expression, 'null とは == と != でだけ比べられます。');
+    const isEqual = operator === '==';
+    const optional = right.type.kind === 'null' ? left : right;
+    if (optional.type.kind === 'pointer' && optional.type.size === 'c') {
+      const evaluate = optional.eval;
+      return runtime(BOOL, (frame) => (evaluate(frame) === NULL) === isEqual, expression);
+    }
+    if (optional.type.kind !== 'optional' && optional.type.kind !== 'null') {
+      this.error(expression, `${typeName(optional.type)} 型は optional ではないので、null と比べられません。`);
+    }
+    const index = right.type.kind === 'null' ? 0 : 1;
+    return this.combine([left, right], BOOL, (values) => (values[index] === NULL) === isEqual, expression);
   }
 
   private comparisonSnapshot(operand: TExpr): TExpr {
@@ -1398,6 +1694,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     // Zig gives the operands of arithmetic no result type, so `@floatFromInt(x) / 2` is an error.
     void resultType;
     let left = this.compile(expression.left);
+    if (left.type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(left.type)].unbounded)
+      return this.pointerArithmetic(left, expression);
     let right = this.compile(expression.right);
     const bitwise = operator === '&' || operator === '|' || operator === '^';
     if (bitwise && (left.type.kind === 'bool' || right.type.kind === 'bool')) {
@@ -1710,7 +2008,11 @@ export abstract class ExpressionCompiler extends SemaBase {
         [...x, ...y].map((value) => copyForStorage(value)),
         sentinel
       );
-      return viaPointer ? new Pointer(new Constant(array), 0) : array;
+      if (!viaPointer) return array;
+      // `"a" ++ b` of strings is constant data, as Zig computes it at compile time.
+      const storage = new Constant(array);
+      markConstantStorage(storage, arrayType);
+      return new Pointer(storage, 0);
     };
     const readable =
       (!a.viaPointer || isConstantData(staticResultOf(left)?.value)) &&
@@ -1787,6 +2089,29 @@ export abstract class ExpressionCompiler extends SemaBase {
         read: (value) => ((value as Pointer).load() as ZArray).values(),
       };
     }
+    // A slice known at compile time has a known length, as Zig reads it for `++`; so does a comptime var's slice,
+    // whose value the compiler holds as it analyzes the code.
+    const variablePlace = operand.place?.comptimeVar ? operand.place.compileTimePointer : undefined;
+    const known =
+      type.kind === 'pointer' && type.size === 'slice'
+        ? (staticResultOf(operand) ?? (variablePlace && { value: variablePlace.load() }))
+        : undefined;
+    if (type.kind === 'pointer' && known) {
+      if (hasUndefinedHeader(known.value)) return this.error(span, 'undefined のヘッダーは参照できません。');
+      const length = (known.value as Slice).lengthValue;
+      return {
+        child: type.child,
+        length,
+        sentinel: type.sentinel,
+        viaPointer: true,
+        read: (value) => {
+          const slice = value as Slice;
+          // Code that a `comptime` block runs after it changes the variable sees another length than its analysis.
+          if (slice.lengthValue !== length) panic('unable to resolve comptime value');
+          return Array.from({ length: slice.length }, (_, index) => slice.get(index));
+        },
+      };
+    }
     if (type.kind === 'struct' && type.isTuple) {
       const fields = type.fields ?? [];
       return {
@@ -1803,6 +2128,24 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   // Initializers ----------------------------------------------------------------------------------------------------
+
+  /** Whether two values known at compile time are one value, as Zig interns them: a slice by its elements. */
+  private sameComptimeValue(type: Type, a: Value, b: Value): boolean {
+    if (!(type.kind === 'pointer' && type.size === 'slice' && a instanceof Slice && b instanceof Slice))
+      return valuesEqual(type, a, b, () => this.spendCompilation());
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index++)
+      if (!this.sameComptimeValue(type.child, a.get(index), b.get(index))) return false;
+    return true;
+  }
+
+  /** A comptime field takes only its own value, which Zig checks where a literal gives it. */
+  protected checkComptimeField(compiled: TExpr, field: StructField, span: Span): void {
+    const fact = staticResultOf(compiled);
+    const expected = field.comptimeValue?.value;
+    if (!fact || !this.sameComptimeValue(field.type, fact.value, expected))
+      this.error(span, `comptime のフィールド「${field.name}」には、既定の値と同じ値しか入れられません。`);
+  }
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected structInit(expression: ExpressionOf<'structInit'>, resultType: Type | undefined): TExpr {
@@ -1823,11 +2166,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (expression.fields.length === 0 && type.native && this.structFields(type, expression).length === 0)
       return this.nativeDefault(type, expression);
     const plan = this.structInitializerPlan(expression, type);
-    const elements = plan.map(({ field, value }) =>
-      value
-        ? this.coerce(this.compile(value, field.type), field.type, value)
-        : known(field.type, field.defaultValue, expression)
-    );
+    const elements = plan.map(({ field, value }) => {
+      if (!value) return known(field.type, field.defaultValue, expression);
+      const compiled = this.coerce(this.compile(value, field.type), field.type, value);
+      if (field.comptimeValue) this.checkComptimeField(compiled, field, value);
+      return compiled;
+    });
     return this.aggregate(type, elements, expression, (values) => {
       const slots: Value[] = [];
       for (const [index, { position }] of plan.entries()) slots[position] = values[index];
@@ -1932,9 +2276,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (type?.kind === 'struct' && type.isTuple) {
       const fields = this.structFields(type, expression);
       if (fields.length !== expression.elements.length) this.error(expression, 'タプルの要素の数が合いません。');
-      const elements = expression.elements.map((element, index) =>
-        this.coerce(this.compile(element, fields[index].type), fields[index].type, element)
-      );
+      const elements = expression.elements.map((element, index) => {
+        const field = fields[index];
+        const compiled = this.coerce(this.compile(element, field.type), field.type, element);
+        if (field.comptimeValue) this.checkComptimeField(compiled, field, element);
+        return compiled;
+      });
       return this.aggregate(type, elements, expression, (values) => new ZStruct(values));
     }
     if (type && type.kind !== 'struct') {
@@ -2083,6 +2430,16 @@ function hasSentinel(type: Type): boolean {
       ? type.child.sentinel !== undefined
       : type.sentinel !== undefined;
   return false;
+}
+
+function isManyOrC(size: string): boolean {
+  return size === 'many' || size === 'c';
+}
+
+/** A many-item or C pointer's value, which must not be null. */
+function manyPointer(value: Value): Pointer {
+  if (!(value instanceof Pointer)) throw new MemoryFault();
+  return value;
 }
 
 function isConstIndexable(type: Type, place: Place | undefined): boolean {

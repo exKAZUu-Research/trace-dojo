@@ -30,7 +30,10 @@ function calculateFieldOffsets(type: StructType, query: LayoutQuery): number[] {
   if (type.layout === 'auto')
     ordered.sort((a, b) => {
       query.spend();
-      return query.layout(b.field.type).align - query.layout(a.field.type).align;
+      return (
+        (b.field.alignment ?? query.layout(b.field.type).align) -
+        (a.field.alignment ?? query.layout(a.field.type).align)
+      );
     });
   let offset = 0;
   for (const { field, index } of ordered) {
@@ -39,7 +42,7 @@ function calculateFieldOffsets(type: StructType, query: LayoutQuery): number[] {
       offsets[index] = offset;
       offset += query.bits(field.type);
     } else {
-      offset = alignTo(offset, query.layout(field.type).align);
+      offset = alignTo(offset, field.alignment ?? query.layout(field.type).align);
       offsets[index] = offset * 8;
       offset += query.layout(field.type).size;
     }
@@ -217,7 +220,8 @@ function computeLayout(type: Type, query: LayoutQuery): Layout {
         .filter((field) => field.comptimeValue === undefined)
         .map((field) => {
           query.spend();
-          return query.layout(field.type);
+          const layout = query.layout(field.type);
+          return field.alignment === undefined ? layout : { size: layout.size, align: field.alignment };
         });
       if (type.layout === 'packed') {
         let bits = 0;
@@ -311,7 +315,7 @@ function unionPayload(type: UnionType, query: LayoutQuery): Layout {
     query.spend();
     const child = query.layout(field.type);
     size = Math.max(size, child.size);
-    align = Math.max(align, child.align);
+    align = Math.max(align, field.alignment ?? child.align);
   }
   return { size, align };
 }

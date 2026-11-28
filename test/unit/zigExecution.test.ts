@@ -245,19 +245,16 @@ pub fn main() !void {
     const t = try std.Thread.spawn(.{}, work, .{});
     t.join();
 }`;
-  const comptimeParameter = `fn zero(comptime T: type) T {
-    return 0;
-}
-pub fn main() void {
-    _ = zero(i32);
+  const assembly = `pub fn main() void {
+    asm volatile ("nop");
 }`;
   expect(executeProgram('zig', thread)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 3, message: 'スレッド（std.Thread）は、この採点環境では使えません。' }],
   });
-  expect(executeProgram('zig', comptimeParameter)).toEqual({
+  expect(executeProgram('zig', assembly)).toEqual({
     kind: 'compileError',
-    diagnostics: [{ row: 0, message: 'comptime の引数は、この採点環境では使えません。' }],
+    diagnostics: [{ row: 1, message: 'インラインアセンブリ（asm）は、この採点環境では使えません。' }],
   });
 });
 
@@ -6653,7 +6650,7 @@ test('shared nested layouts reach storage limits without expanding the type grap
 });
 
 test('shared packed and ordinary nested layouts preserve allocator byte offsets', () => {
-  const source = `const std=@import("std");const A=packed struct{x:u3,y:u5};const B=extern struct{a:A,b:A};const C=extern struct{a:B,b:B};pub fn main()!void{var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const p=try f.allocator().create(C);p.*=.{.a=.{.a=.{.x=1,.y=2},.b=.{.x=3,.y=4}},.b=.{.a=.{.x=5,.y=6},.b=.{.x=7,.y=8}}};std.debug.print("{} {} {} {}",.{buf[0],buf[1],buf[2],buf[3]});}`;
+  const source = `const std=@import("std");const A=packed struct(u8){x:u3,y:u5};const B=extern struct{a:A,b:A};const C=extern struct{a:B,b:B};pub fn main()!void{var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const p=try f.allocator().create(C);p.*=.{.a=.{.a=.{.x=1,.y=2},.b=.{.x=3,.y=4}},.b=.{.a=.{.x=5,.y=6},.b=.{.x=7,.y=8}}};std.debug.print("{} {} {} {}",.{buf[0],buf[1],buf[2],buf[3]});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: '17 35 53 71',
@@ -10013,5 +10010,225 @@ test.each(['fixed', 'allocated'])('formatting keeps %s writer bytes separate fro
     kind: 'executed',
     stderr: `${length} a`,
     uncaughtException: undefined,
+  });
+});
+
+test('comptime parameters build generic types, and inline loops unroll over comptime variables', () => {
+  const program = `const std = @import("std");
+fn List(comptime T: type) type {
+    return struct {
+        items: [4]T = undefined,
+        len: usize = 0,
+        const Self = @This();
+        fn push(self: *Self, v: T) void {
+            self.items[self.len] = v;
+            self.len += 1;
+        }
+    };
+}
+fn rep(comptime n: usize, x: u8) [n]u8 {
+    return @splat(x);
+}
+pub fn main() void {
+    var l: List(i32) = .{};
+    l.push(5);
+    l.push(7);
+    comptime var i = 0;
+    const v = inline while (i < 5) : (i += 1) {
+        if (i == 3) break i * 10;
+    } else 0;
+    std.debug.print("{s} {} {s} {}\\n", .{ &rep(3, 'z'), l.items[1], @typeName(List(i32)), v });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({ stderr: 'zzz 7 main.List(i32) 30\n' });
+  const runtimeStore = `pub fn main() void {
+    comptime var c = 0;
+    var r: bool = true;
+    _ = &r;
+    if (r) {
+        c += 1;
+    }
+}`;
+  const quota = `fn fib(n: u32) u32 {
+    return if (n < 2) n else fib(n - 1) + fib(n - 2);
+}
+pub fn main() void {
+    _ = comptime fib(14);
+}`;
+  expect(rows(runtimeStore)).toEqual([5]);
+  expect(rows(quota)).toEqual([1]);
+});
+
+test('pointers into a comptime var read its value where they stand and store as the variable does', () => {
+  const program = `const std = @import("std");
+const S = struct { a: i32, b: [3]u8 };
+pub fn main() void {
+    comptime var s: S = .{ .a = 1, .b = .{ 1, 2, 3 } };
+    const p = &s;
+    const x = p.a;
+    p.a += 10;
+    const q = &s.b;
+    q[1] = 9;
+    const sl = s.b[0..2];
+    comptime var a: i32 = 0;
+    var y: i32 = 0;
+    y, a = .{ 7, 8 };
+    std.debug.print("{d} {d} {d} {d} {d} {d}\\n", .{ x, p.a, s.a, sl[1], a, y });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({ stderr: '1 11 11 9 8 7\n' });
+  const runtimeArgument = `fn f(p: *i32) void {
+    p.* += 1;
+}
+pub fn main() void {
+    comptime var c: i32 = 1;
+    f(&c);
+}`;
+  const runtimeStore = `pub fn main() void {
+    comptime var c: i32 = 1;
+    const p = &c;
+    var r: i32 = 0;
+    r += 1;
+    if (r > 0) p.* = 3;
+}`;
+  expect(rows(runtimeArgument)).toEqual([5]);
+  expect(rows(runtimeStore)).toEqual([5]);
+});
+
+test('standard input and files are read through std.Io.Reader into the reader buffer', () => {
+  const program = `const std = @import("std");
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    var buf: [8]u8 = undefined;
+    var r = std.Io.File.stdin().reader(io, &buf);
+    const in = &r.interface;
+    var sum: i64 = 0;
+    while (in.takeDelimiter('\\n')) |line| {
+        sum += try std.fmt.parseInt(i64, line orelse break, 10);
+    } else |err| std.debug.print("{s} {}\\n", .{ @errorName(err), sum });
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = "sum.txt", .data = "total" });
+    const file = try cwd.createFile(io, "out/sum.txt", .{});
+    defer file.close(io);
+}`;
+  expect(executeProgram('zig', program, { stdin: '10\n20\n123456789\n' })).toMatchObject({
+    stderr: 'StreamTooLong 30\n',
+    uncaughtException: 'error: FileNotFound',
+    finalFiles: { 'sum.txt': 'total' },
+  });
+});
+
+test('a directory reads a whole file into a buffer or an allocation', () => {
+  const program = `const std = @import("std");
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const cwd = std.Io.Dir.cwd();
+    var buf: [16]u8 = undefined;
+    const text = try cwd.readFile(io, "in.txt", &buf);
+    const all = try cwd.readFileAlloc(io, "in.txt", init.gpa, .unlimited);
+    defer init.gpa.free(all);
+    std.debug.print("{s}|{s}", .{ text, all });
+}`;
+  expect(executeProgram('zig', program, { files: { 'in.txt': 'hi\n' } })).toMatchObject({
+    stderr: 'hi\n|hi\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('std.testing checks values outside tests and reports a failure as Zig does', () => {
+  const program = `const std = @import("std");
+const P = struct { x: i32, y: ?u8 };
+fn div(a: i32, b: i32) !i32 {
+    if (b == 0) return error.DivisionByZero;
+    return @divTrunc(a, b);
+}
+pub fn main() !void {
+    try std.testing.expectEqual(P{ .x = 1, .y = 2 }, P{ .x = 1, .y = 2 });
+    try std.testing.expectError(error.DivisionByZero, div(1, 0));
+    std.debug.print("{any}\\n", .{std.testing.expectError(error.Overflow, div(7, 0))});
+    try std.testing.expectEqualSlices(i32, &.{ 1, 2, 3 }, &.{ 1, 5 });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    stderr: [
+      'expected error.Overflow, found error.DivisionByZero',
+      'error.TestUnexpectedError',
+      'slices differ. first difference occurs at index 1 (0x1)',
+      '',
+      '============ expected this output: =============  len: 3 (0x3)',
+      '',
+      '[0]: 1',
+      '[1]: 2',
+      '[2]: 3',
+      '',
+      '============= instead found this: ==============  len: 2 (0x2)',
+      '',
+      '[0]: 1',
+      '[1]: 5',
+      '',
+      '================================================',
+      '',
+      '',
+    ].join('\n'),
+    uncaughtException: 'error: TestExpectedEqual',
+  });
+});
+
+describe('pointers coerce between sizes as Zig 0.17.1 allows', () => {
+  const sources: [name: string, declarations: string, operand: string][] = [
+    ['*u8', 'var x: u8 = 65;', '&x'],
+    ['*const u8', 'const x: u8 = 65;', '&x'],
+    ['*[2:0]u8', 'var a = [_:0]u8{ 65, 66 };', '&a'],
+    ['*[2]u8', 'var a = [_]u8{ 65, 66 };', '&a'],
+    ['[*]u8', 'var a = [_]u8{ 65, 66 }; const m: [*]u8 = &a;', 'm'],
+    ['[*:0]u8', 'var a = [_:0]u8{ 65, 66 }; const m: [*:0]u8 = &a;', 'm'],
+    ['[]u8', 'var a = [_]u8{ 65, 66 }; const sl: []u8 = &a;', 'sl'],
+    ['[:0]u8', 'var a = [_:0]u8{ 65, 66 }; const sl: [:0]u8 = &a;', 'sl'],
+    ['[*c]u8', 'var a = [_]u8{ 65, 66 }; const cp: [*c]u8 = &a;', 'cp'],
+    ['?*u8', 'var x: u8 = 65; const o: ?*u8 = &x;', 'o'],
+    ['?*[2]u8', 'var a = [_]u8{ 65, 66 }; const o: ?*[2]u8 = &a;', 'o'],
+    ['?[*]u8', 'var a = [_]u8{ 65, 66 }; const o: ?[*]u8 = &a;', 'o'],
+    ['*const [0]u8', '', '&[_]u8{}'],
+  ];
+  const targets = [
+    '*u8',
+    '*const u8',
+    '[*]u8',
+    '[*:0]u8',
+    '[]u8',
+    '[:0]u8',
+    '[]const u8',
+    '[*c]u8',
+    '*[2]u8',
+    '[*c][2]u8',
+    '[*]const u8',
+  ];
+  // Whether a source converts to each of `targets`, as `zig run` reports.
+  const allowed: Record<string, string> = {
+    '*u8': '11000001000',
+    '*const u8': '01000000000',
+    '*[2:0]u8': '00111111111',
+    '*[2]u8': '00101011111',
+    '[*]u8': '00100001001',
+    '[*:0]u8': '00110001001',
+    '[]u8': '00001010000',
+    '[:0]u8': '00011111000',
+    '[*c]u8': '11110001001',
+    '?*u8': '00000001000',
+    '?*[2]u8': '00000000010',
+    '?[*]u8': '00000001000',
+    '*const [0]u8': '00101011001',
+  };
+  test.each(
+    sources.flatMap(([name, declarations, operand]) =>
+      targets.map((target, index) => ({ name, declarations, operand, target, converts: allowed[name][index] === '1' }))
+    )
+  )('$name to $target', ({ declarations, operand, target, converts }) => {
+    const program = `const std = @import("std");
+pub fn main() void {
+    ${declarations}
+    const y: ${target} = ${operand};
+    std.debug.print("{s}", .{@typeName(@TypeOf(y))});
+}`;
+    expect(executeProgram('zig', program)).toMatchObject(
+      converts ? { kind: 'executed', stderr: target } : { kind: 'compileError' }
+    );
   });
 });

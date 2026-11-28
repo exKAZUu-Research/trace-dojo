@@ -1,10 +1,11 @@
+import { alignmentOperand } from './admissibility';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type { Expression, ExpressionOf, FunctionDeclaration, SourceFile, Span } from './ast';
-import { BuiltinCompiler } from './builtins';
 import { constantKey, unwrapResult } from './expressions';
 import { FunctionInstance } from './functions';
 import { callableNative } from './nativeAdapter';
+import { ReflectionCompiler } from './reflection';
 import { type Frame, Jump } from './runtime';
 import {
   addDecls,
@@ -39,6 +40,9 @@ import {
 } from './types';
 import { FnValue, Pointer, type Value } from './values';
 
+/** The value of `std.lang.CallModifier.compile_time`, the seventh of its fields. */
+const COMPILE_TIME_MODIFIER = 6n;
+
 /** What a function body's compilation needs to know about the function. */
 export interface FunctionCompilation {
   instance: FunctionInstance;
@@ -51,7 +55,10 @@ export interface FunctionCompilation {
   isMethod: boolean;
 }
 
-export abstract class CallCompiler extends BuiltinCompiler {
+/** How deeply analyses of calls that the compiler runs for their argument values may nest. */
+const MAX_COMPILE_TIME_ANALYSIS_DEPTH = 64;
+
+export abstract class CallCompiler extends ReflectionCompiler {
   private readonly instances = new Map<string, FunctionInstance>();
   private readonly parameterScopes = new Map<string, Scope>();
   private readonly instanceIds = new WeakMap<object, number>();
@@ -61,6 +68,52 @@ export abstract class CallCompiler extends BuiltinCompiler {
   protected abstract atomicRow(fn: FunctionDeclaration): boolean;
 
   // Calls -------------------------------------------------------------------------------------------------------------
+
+  protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
+    if (expression.name !== '@call') return super.compileBuiltin(expression, resultType);
+    const { args } = expression;
+    if (args.length !== 3)
+      this.error(expression, `@call の引数の数が合いません（3 個が必要ですが、${args.length} 個です）。`);
+    const modifierType = this.langMember('CallModifier', expression);
+    const modifier = this.knownValue(
+      this.coerce(this.compile(args[0], modifierType), modifierType, args[0]),
+      '呼び出し方'
+    );
+    const tuple = this.compile(args[2]);
+    if (tuple.type.kind !== 'struct' || !tuple.type.isTuple)
+      return this.error(args[2], '@call の引数は、.{ 1, 2 } のようなタプルにしてください。');
+    const fields = this.structFields(tuple.type, args[2]);
+    // A runtime tuple is evaluated once into a slot that each argument reads, as Zig evaluates the tuple as one value.
+    const slot = tuple.known ? undefined : this.localSlot();
+    const source = slot === undefined ? tuple : runtime(tuple.type, (frame) => frame.slots[slot], args[2]);
+    const elements = fields.map((field, index) => this.tupleElement(source, index, field, args[2]));
+    const call: ExpressionOf<'call'> = {
+      kind: 'call',
+      row: expression.row,
+      col: expression.col,
+      endRow: expression.endRow,
+      callee: args[1],
+      args: elements as unknown as Expression[],
+    };
+    const callee = this.compile(args[1]);
+    if (callee.value instanceof NativeFn)
+      return this.error(args[1], '@call では、標準ライブラリの関数は呼び出せません。');
+    // `.compile_time` runs the call while the compiler analyzes it; the other modifiers only hint at optimizations.
+    if (modifier === COMPILE_TIME_MODIFIER)
+      return this.comptimeValue(() => this.compileCall(call, resultType), expression);
+    const result = this.compileCall(call, resultType);
+    if (slot === undefined) return result;
+    const evaluateTuple = tuple.eval;
+    const evaluateCall = result.eval;
+    return runtime(
+      result.type,
+      (frame) => {
+        frame.slots[slot] = evaluateTuple(frame);
+        return evaluateCall(frame);
+      },
+      expression
+    );
+  }
 
   protected compileCall(expression: ExpressionOf<'call'>, resultType: Type | undefined): TExpr {
     const { callee } = expression;
@@ -174,7 +227,13 @@ export abstract class CallCompiler extends BuiltinCompiler {
     );
   }
 
+  private compileArgument(arg: Expression, declared: Type | undefined): TExpr {
+    const compiled = this.compile(arg, declared);
+    return declared ? this.coerce(compiled, declared, arg) : compiled;
+  }
+
   // code-gauge-allow functionCognitiveComplexity -- Keeps one operation of the interpreter in one place.
+  // code-gauge-allow functionNcss -- Binds each argument to its parameter as Zig's Sema does, comptime and generic ones included.
   private callDeclaration(
     ref: FnRef,
     receiver: TExpr | undefined,
@@ -191,6 +250,12 @@ export abstract class CallCompiler extends BuiltinCompiler {
         `引数の数が合いません（${params.length - offset} 個が必要ですが、${argExpressions.length - offset} 個です）。`
       );
     }
+    // Zig analyzes a call that the compiler runs for its argument values, so a branch they do not take is not analyzed.
+    // Deeper calls share one analysis, which keeps nested analyses within the host's stack; their evaluation still
+    // counts against the branch quota.
+    const atCompileTime =
+      (this.context.comptimeDepth > 0 || this.analyzedFunction()?.atCompileTime === true) &&
+      this.compileTimeAnalyses < MAX_COMPILE_TIME_ANALYSIS_DEPTH;
     // A parameter's type may refer to earlier parameters, as `b: @TypeOf(a)` does.
     const declaredTypes: (Type | undefined)[] = [];
     const args: TExpr[] = [];
@@ -199,13 +264,23 @@ export abstract class CallCompiler extends BuiltinCompiler {
         ref.decl,
         index,
         args.map((each) => each.type),
-        args.map((arg) => this.comptimeArgument(arg))
+        args.map((arg, position) => this.comptimeArgument(arg, params[position].isComptime || atCompileTime))
       );
       declaredTypes.push(declared);
-      const compiled = isTExpr(arg) ? arg : this.compile(arg, declared);
-      if (index === 0 && receiver) args.push(this.bindReceiver(compiled, declared, expression));
-      else if (declared) args.push(this.coerce(compiled, declared, isTExpr(arg) ? arg.span : arg));
-      else args.push(compiled);
+      let bound: TExpr;
+      if (index === 0 && receiver)
+        bound = this.bindReceiver(isTExpr(arg) ? arg : this.compile(arg, declared), declared, expression);
+      else if (isTExpr(arg)) bound = declared ? this.coerce(arg, declared, arg.span) : arg;
+      else if (params[index].isComptime)
+        // Zig evaluates a comptime parameter's argument at compile time, as `comptime` before it would.
+        bound = this.comptimeValue(() => this.compileArgument(arg, declared), arg);
+      else bound = this.compileArgument(arg, declared);
+      if (params[index].isComptime && !staticResultOf(bound))
+        this.error(
+          bound.span,
+          `comptime の引数「${params[index].name}」には、コンパイルのときに決まる値を渡してください。`
+        );
+      args.push(bound);
     }
     const argTypes = args.map((arg) => arg.type);
     void resultType;
@@ -217,7 +292,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
         );
       }
     }
-    const instance = this.instantiate(ref, argTypes, expression, args);
+    const instance = this.instantiate(ref, argTypes, expression, args, atCompileTime);
+    if (!this.requiresComptime(instance.returnType, expression)) this.refuseRuntimeArguments(params, args);
     const evaluators = valueEvaluators(args);
     const row = expression.row;
     const call = runtime(
@@ -247,12 +323,19 @@ export abstract class CallCompiler extends BuiltinCompiler {
     return this.combine(args, instance.returnType, () => result, call.span);
   }
 
+  /** Refuses an argument to a parameter that the program receives when it runs, which holds a comptime var's address. */
+  private refuseRuntimeArguments(params: readonly { isComptime: boolean }[], args: readonly TExpr[]): void {
+    for (const [index, arg] of args.entries())
+      if (!params[index].isComptime) this.refuseComptimeVarReference(arg, arg.span);
+  }
+
   /** Passes a method's receiver, taking its address or dereferencing it to match the first parameter. */
   private bindReceiver(receiver: TExpr, declared: Type | undefined, span: Span): TExpr {
     if (!declared) return receiver;
     const type = receiver.type;
     if (declared.kind === 'pointer' && declared.size === 'one' && type === declared.child) {
       const address = this.addressOf(receiver);
+      this.refuseComptimeVarReference(address, receiver.span);
       if (address.type.kind === 'pointer' && address.type.isConst && !declared.isConst) {
         this.error(
           span,
@@ -276,16 +359,13 @@ export abstract class CallCompiler extends BuiltinCompiler {
     if (this.resolvingSignatures.has(decl)) return this.error(span, '関数の型が、それ自身に依存しています。');
     this.resolvingSignatures.add(decl);
     try {
-      const unknown = new Set<string>();
-      const params: Type[] = [];
-      for (const [index, param] of decl.syntax.params.entries()) {
-        const generic = !param.type || this.dependsOnParameters(param.type, unknown);
-        params.push(generic ? ANYTYPE : (this.parameterType(decl, index, params) as Type));
-        if (generic) unknown.add(param.name);
-      }
+      const { params, declared, unknown } = this.signatureParams(decl);
       let result = this.dependsOnParameters(decl.syntax.returnType, unknown)
         ? ANYTYPE
         : this.inParameterScope(decl, params, () => this.compileType(decl.syntax.returnType));
+      const syntax = decl.syntax;
+      if (syntax.alignment) alignmentOperand(this, syntax.alignment);
+      if (syntax.addressSpace) this.addressSpace(syntax.addressSpace);
       if (decl.syntax.inferredErrorSet && result !== ANYTYPE)
         result = errorUnionOf(
           {
@@ -296,12 +376,43 @@ export abstract class CallCompiler extends BuiltinCompiler {
           },
           result
         );
-      const type = fnType(params, result);
+      const isGeneric = unknown.size > 0 || result === ANYTYPE;
+      const type = fnType(params, result, isGeneric ? declared : undefined);
       this.declarationTypes.set(decl, type);
       return type;
     } finally {
       this.resolvingSignatures.delete(decl);
     }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Checks each parameter's syntax as Zig's Sema does for a declaration.
+  /**
+   * A function's parameter types, with anytype for a generic one; the types they declare, for `@typeInfo`; and the
+   * names of the generic ones, which make the types that use them generic too.
+   */
+  private signatureParams(decl: Extract<Decl, { kind: 'fn' }>): {
+    params: Type[];
+    declared: (Type | undefined)[];
+    unknown: Set<string>;
+  } {
+    const unknown = new Set<string>();
+    const params: Type[] = [];
+    const declared: (Type | undefined)[] = [];
+    for (const [index, param] of decl.syntax.params.entries()) {
+      if (param.isVarargs)
+        this.error(param, '可変個の引数（...）は、C の呼び出し規約（callconv(.c)）の関数にだけ書けます。');
+      const dependent = !param.type || this.dependsOnParameters(param.type, unknown);
+      const generic = dependent || param.isComptime;
+      declared.push(dependent ? undefined : (this.parameterType(decl, index, params) as Type));
+      params.push(generic ? ANYTYPE : (declared[index] as Type));
+      if (generic) unknown.add(param.name);
+      const type = params[index] === ANYTYPE ? undefined : params[index];
+      // An optional C pointer is no pointer to Zig, since a C pointer already holds null.
+      const pointee = type?.kind === 'optional' ? type.child : type;
+      const isPointer = pointee?.kind === 'pointer' && !(type?.kind === 'optional' && pointee.size === 'c');
+      if (param.isNoalias && pointee && !isPointer) this.error(param, 'noalias は、ポインタの引数にだけ書けます。');
+    }
+    return { params, declared, unknown };
   }
 
   private dependsOnParameters(node: unknown, names: ReadonlySet<string>): boolean {
@@ -363,18 +474,26 @@ export abstract class CallCompiler extends BuiltinCompiler {
   /** The instance of a function for argument types, compiling its body the first time. */
   // code-gauge-allow functionCognitiveComplexity -- Resolves parameter and return types in the same specialization scope.
   // code-gauge-allow functionNcss -- Keeps specialization identity and its compilation inputs together.
-  instantiate(ref: FnRef, argTypes: readonly Type[], span: Span, args: readonly TExpr[] = []): FunctionInstance {
+  instantiate(
+    ref: FnRef,
+    argTypes: readonly Type[],
+    span: Span,
+    args: readonly TExpr[] = [],
+    atCompileTime = false
+  ): FunctionInstance {
     const { decl } = ref;
     const syntax = decl.syntax;
     const paramTypes: Type[] = [];
-    const comptimeArgs = args.map((arg) => this.comptimeArgument(arg));
+    const comptimeArgs = args.map((arg, index) =>
+      this.comptimeArgument(arg, syntax.params[index]?.isComptime || atCompileTime)
+    );
     for (const [index, param] of syntax.params.entries()) {
       const type = param.type ? this.parameterType(decl, index, paramTypes, comptimeArgs) : argTypes[index];
       if (!type)
         this.error(span, `関数「${syntax.name}」は anytype の引数を持つので、呼び出さずに値としては使えません。`);
       paramTypes.push(type);
     }
-    const key = this.specializationKey(decl, paramTypes, comptimeArgs);
+    const key = `${this.specializationKey(decl, paramTypes, comptimeArgs)}${atCompileTime ? ' at compile time' : ''}`;
     const existing = this.instances.get(key);
     if (existing) {
       if (existing.state === 'pending' && this.resolvingFields === 0) this.compilePendingBodies();
@@ -392,6 +511,9 @@ export abstract class CallCompiler extends BuiltinCompiler {
               : declared
             : this.compileType(syntax.returnType);
         if (!syntax.inferredErrorSet) return { returnType: payload, inferredErrors: undefined };
+        // A function that is not generic has one inferred error set, which its type and its body's analysis share.
+        if (declared && declared !== ANYTYPE && declared.kind === 'error_union' && declared.errorSet.resolved === false)
+          return { returnType: declared, inferredErrors: declared.errorSet };
         const errors: ErrorSetType = {
           kind: 'error_set',
           names: new Set(),
@@ -403,6 +525,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
       comptimeArgs
     );
     const instance = new FunctionInstance(syntax.name, paramTypes, returnType);
+    instance.atCompileTime = atCompileTime;
     if (syntax.params.every((param) => param.type !== undefined)) instance.identity = decl;
     instance.internal = decl.namespace.internal ?? false;
     instance.isAtomic = !instance.internal && this.atomicRow(syntax);
@@ -420,18 +543,30 @@ export abstract class CallCompiler extends BuiltinCompiler {
         isMethod,
       });
     // A function that a struct's field defaults refer to compiles after the struct, as Zig analyzes it separately.
-    if (this.resolvingFields > 0) this.pendingBodies.push(compile);
-    else compile();
+    const analyze = atCompileTime
+      ? (): void => {
+          this.compileTimeAnalyses++;
+          try {
+            compile();
+          } finally {
+            this.compileTimeAnalyses--;
+          }
+        }
+      : compile;
+    if (this.resolvingFields > 0) this.pendingBodies.push(analyze);
+    else analyze();
     return instance;
   }
 
-  private comptimeArgument(argument: TExpr): TExpr | undefined {
-    if (!this.requiresComptime(argument.type, argument.span)) return undefined;
+  private comptimeArgument(argument: TExpr, isComptime = false): TExpr | undefined {
+    if (!isComptime && !this.requiresComptime(argument.type, argument.span)) return undefined;
     const fact = staticResultOf(argument);
     return fact ? known(argument.type, fact.value, argument.span) : undefined;
   }
 
   private readonly pendingBodies: (() => void)[] = [];
+  /** How many analyses of calls that the compiler runs for their argument values are nested now. */
+  private compileTimeAnalyses = 0;
 
   /** Compiles the bodies that waited for structs' fields. */
   protected compilePendingBodies(): void {
@@ -546,6 +681,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
   ): Value {
     const { runtime: rt } = caller;
     rt.spend();
+    rt.backwardBranch(callRow);
     if (fn.native) return copyForFrame(caller, fn.native(args, caller), fn.returnType);
     const body = fn.body;
     if (!body) return panic('関数がまだ準備できていません。');

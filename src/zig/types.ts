@@ -1,4 +1,4 @@
-import type { Container, FunctionDeclaration, VariableDeclaration } from './ast';
+import type { Container, FunctionDeclaration, Span, VariableDeclaration } from './ast';
 import { constantText } from './constantText';
 import { spendMemory } from './memoryAccounting';
 import { scalarValueKey, type Value } from './values';
@@ -59,11 +59,23 @@ export interface ArrayType {
 
 export interface PointerType {
   readonly kind: 'pointer';
-  /** `one` for `*T`, `slice` for `[]T`. */
-  readonly size: 'one' | 'slice';
+  /** `one` for `*T`, `many` for `[*]T`, `slice` for `[]T`, and `c` for `[*c]T`. */
+  readonly size: 'one' | 'many' | 'slice' | 'c';
   readonly child: Type;
   readonly isConst: boolean;
   readonly sentinel?: Sentinel;
+  readonly isVolatile?: boolean;
+  readonly allowZero?: boolean;
+  /** The alignment that `align(n)` gives, which Zig keeps in the type even when it is the child type's own. */
+  readonly alignment?: number;
+}
+
+export interface PointerAttributes {
+  isConst: boolean;
+  isVolatile?: boolean;
+  allowZero?: boolean;
+  alignment?: number;
+  sentinel?: Value | Sentinel;
 }
 
 export interface OptionalType {
@@ -96,6 +108,8 @@ export interface StructField {
   hasDefault: boolean;
   /** Whether a tuple's field holds a value known at compile time, which the tuple's type carries. */
   comptimeValue?: { value: Value };
+  /** The alignment that `align(n)` gives the field. */
+  alignment?: number;
 }
 
 /** What struct, enum, and union types share: their declarations, which the compiler analyzes on demand. */
@@ -117,6 +131,8 @@ export interface StructType {
   readonly layout: 'auto' | 'extern' | 'packed';
   /** Filled when the struct is first used, since fields may refer to types declared later. */
   fields: StructField[] | undefined;
+  /** The backing integer that `packed struct(i16)` names, filled when its fields are checked. */
+  backingInteger?: IntType;
   /** A struct that the grader implements natively, such as `Turtle` or `std.ArrayList(T)`. */
   native?: NativeStruct;
 }
@@ -149,6 +165,8 @@ export interface EnumType {
 export interface UnionField {
   name: string;
   type: Type;
+  /** The alignment that `align(n)` gives the field. */
+  alignment?: number;
 }
 
 export interface UnionType {
@@ -158,12 +176,19 @@ export interface UnionType {
   /** The tag's enum of a tagged union. */
   tagType: EnumType | undefined;
   fields: UnionField[] | undefined;
+  /** The backing integer that `packed union(u8)` names, filled when its fields are checked. */
+  backingInteger?: IntType;
 }
 
 export interface FnType {
   readonly kind: 'fn';
   readonly params: readonly Type[];
   readonly returnType: Type;
+  /**
+   * For a generic function, each parameter's declared type, or undefined for `anytype` and for a type that depends on an
+   * earlier parameter; a `comptime` parameter, which `params` holds as anytype, keeps the type it declares.
+   */
+  readonly genericParams?: readonly (Type | undefined)[];
 }
 
 /** A container-level declaration, which the compiler analyzes when the program first refers to it. */
@@ -178,9 +203,16 @@ export type Decl =
       value?: Value;
       /** A variable's storage, which lives as long as the program runs. */
       cell?: { slots: Value[] };
+      alignment?: number;
     }
   | { kind: 'fn'; syntax: FunctionDeclaration; namespace: Namespace }
-  | { kind: 'native'; name: string; resolve: () => { type: Type; value: Value; unavailable?: string } };
+  | {
+      kind: 'native';
+      name: string;
+      resolve: () => { type: Type; value: Value; unavailable?: string };
+      /** Resolves a native name for a declaration that the compiler analyzes, such as a type the library declares in Zig. */
+      resolveWith?: (sema: never, span: Span) => unknown;
+    };
 
 // Simple types --------------------------------------------------------------------------------------------------------
 
@@ -364,23 +396,42 @@ export function arrayOf(length: number | bigint, child: Type, sentinel?: Value |
 }
 
 export function pointerTo(child: Type, isConst: boolean): PointerType {
-  return intern(`pointer one ${typeId(child)} ${isConst}`, () => ({
-    kind: 'pointer',
-    size: 'one',
-    child,
-    isConst,
-  }));
+  return pointerOf('one', child, { isConst });
 }
 
 export function sliceOf(child: Type, isConst: boolean, sentinel?: Value | Sentinel): PointerType {
-  const canonical = canonicalSentinel(child, sentinel);
-  return intern(`pointer slice ${typeId(child)} ${isConst}${sentinelKey(canonical)}`, () => ({
+  return pointerOf('slice', child, { isConst, sentinel });
+}
+
+/** A pointer type, which keeps an alignment written as `align(n)`. */
+export function pointerOf(size: PointerType['size'], child: Type, attributes: PointerAttributes): PointerType {
+  const canonical = size === 'one' ? undefined : canonicalSentinel(child, attributes.sentinel);
+  const isVolatile = attributes.isVolatile === true;
+  const allowZero = attributes.allowZero === true && size !== 'c';
+  const { alignment } = attributes;
+  const key = `pointer ${size} ${typeId(child)} ${attributes.isConst}${sentinelKey(canonical)} ${isVolatile} ${allowZero} ${alignment ?? ''}`;
+  return intern(key, () => ({
     kind: 'pointer',
-    size: 'slice',
+    size,
     child,
-    isConst,
-    sentinel: canonical,
+    isConst: attributes.isConst,
+    ...(canonical === undefined ? {} : { sentinel: canonical }),
+    ...(isVolatile ? { isVolatile } : {}),
+    ...(allowZero ? { allowZero } : {}),
+    ...(alignment === undefined ? {} : { alignment }),
   }));
+}
+
+/** The same kind of pointer with other attributes, such as `@constCast`'s result. */
+export function withPointerAttributes(type: PointerType, changes: Partial<PointerAttributes>): PointerType {
+  return pointerOf(type.size, type.child, {
+    isConst: type.isConst,
+    isVolatile: type.isVolatile,
+    allowZero: type.allowZero,
+    alignment: type.alignment,
+    sentinel: type.sentinel,
+    ...changes,
+  });
 }
 
 function canonicalSentinel(type: Type, sentinel: Value | Sentinel): Sentinel | undefined {
@@ -406,11 +457,18 @@ export function errorUnionOf(errorSet: ErrorSetType, payload: Type): ErrorUnionT
   }));
 }
 
-export function fnType(params: readonly Type[], returnType: Type): FnType {
-  return intern(`fn ${params.map((param) => typeId(param)).join(',')} ${typeId(returnType)}`, () => ({
+export function fnType(
+  params: readonly Type[],
+  returnType: Type,
+  genericParams?: readonly (Type | undefined)[]
+): FnType {
+  const generic = genericParams?.map((param) => (param ? typeId(param) : '?')).join(',') ?? '';
+  const key = `fn ${params.map((param) => typeId(param)).join(',')} ${typeId(returnType)} ${generic}`;
+  return intern(key, () => ({
     kind: 'fn',
     params,
     returnType,
+    ...(genericParams ? { genericParams } : {}),
   }));
 }
 
@@ -530,13 +588,23 @@ export function wrapInt(value: bigint, type: IntType): bigint {
 export function indexableChild(type: Type): Type | undefined {
   if (type.kind === 'array') return type.child;
   if (type.kind === 'pointer') {
-    if (type.size === 'slice') return type.child;
+    if (type.size !== 'one') return type.child;
     if (type.child.kind === 'array') return type.child.child;
   }
   return undefined;
 }
 
 // Names ---------------------------------------------------------------------------------------------------------------
+
+/** A pointer type's name, with its qualifiers in the order Zig writes them, as in `*allowzero align(4) const u8`. */
+function pointerTypeName(type: PointerType): string {
+  const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel.value, type.child, typeName)}`;
+  const prefix = { one: '*', many: `[*${sentinel}]`, slice: `[${sentinel}]`, c: '[*c]' }[type.size];
+  const allowZero = type.allowZero ? 'allowzero ' : '';
+  const alignment = type.alignment === undefined ? '' : `align(${type.alignment}) `;
+  const qualifiers = `${type.isConst ? 'const ' : ''}${type.isVolatile ? 'volatile ' : ''}`;
+  return `${prefix}${allowZero}${alignment}${qualifiers}${typeName(type.child)}`;
+}
 
 /** The type's name as Zig's `@typeName` writes it. */
 // code-gauge-allow functionNcss -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
@@ -554,13 +622,7 @@ export function typeName(type: Type): string {
       return `[${type.length}${sentinel}]${typeName(type.child)}`;
     }
     case 'pointer': {
-      const qualifier = type.isConst ? 'const ' : '';
-      if (type.size === 'slice') {
-        const sentinel =
-          type.sentinel === undefined ? '' : `:${constantText(type.sentinel.value, type.child, typeName)}`;
-        return `[${sentinel}]${qualifier}${typeName(type.child)}`;
-      }
-      return `*${qualifier}${typeName(type.child)}`;
+      return pointerTypeName(type);
     }
     case 'optional': {
       return `?${typeName(type.child)}`;
