@@ -70,16 +70,15 @@ function letBindings(tokens: Token[], index: number): Binding[] {
 
 /**
  * Where a condition that goes on after the `=` or `&&` at `start` ends: at a `&&` of the chain (when `atChain`) or
- * the body's `{`. A `{ }` right
- * after `=`, `else` or `&&` is a block of the condition, and one after `if`, `match`, `while`, `for`, `loop` or
- * `unsafe` closes that expression, so neither is the body's.
+ * the body's `{`. A `{ }` after `else` or an operator (`=`, `&&`, `==`, `+`, ...) is an operand of the condition, and
+ * one after `if`, `match`, `while`, `for`, `loop` or `unsafe` closes that expression, so neither is the body's.
  */
 function conditionEnd(tokens: Token[], start: number, atChain: boolean): number | undefined {
   let open = 0;
   for (let at = start + 1; at < tokens.length; at++) {
     const text = leafText(tokens[at]);
     if (isBrace(tokens[at])) {
-      if (['=', 'else', '&&'].includes(leafText(tokens[at - 1]) ?? '')) continue;
+      if (startsOperand(tokens[at - 1])) continue;
       if (open === 0) return at;
       open--;
     } else if (text && SCRUTINEE_BLOCK_WORDS.has(text)) {
@@ -89,6 +88,13 @@ function conditionEnd(tokens: Token[], start: number, atChain: boolean): number 
     }
   }
   return undefined;
+}
+
+/** Whether a `{ }` after this token is an operand: after `else` or an operator, not after an expression's end. */
+function startsOperand(token: Token | undefined): boolean {
+  const text = leafText(token);
+  if (text === undefined) return false;
+  return text === 'else' || (!/^[\w'"]/.test(text) && ![')', ']', '?'].includes(text));
 }
 
 const SCRUTINEE_BLOCK_WORDS = new Set(['if', 'match', 'while', 'for', 'loop', 'unsafe']);
