@@ -1,7 +1,6 @@
 // code-gauge-allow-file fileNcss -- One native per method of the standard library.
 import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, vecCapacity } from '../capacity';
 import type { DebugPart } from '../debugText';
-import { floatNumber } from '../floatBits';
 import { normalize } from '../infer';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
 import { intoIterItem, intoIterShape } from '../iterTypes';
@@ -18,7 +17,6 @@ import {
   valuesEqual,
   valuesUnequal,
   withCloneResults,
-  wrap,
 } from '../ops';
 import { MOVED } from '../runtime';
 import { iteratorCapability } from '../traits';
@@ -51,6 +49,7 @@ import { outcomeIter } from './options';
 import { rangeIterator } from './rangeIterator';
 import { lessByPartialOrd, sortSlice } from './sorting';
 import { collectString } from './stringBuilder';
+import { sumOrProduct } from './sums';
 import {
   call,
   define,
@@ -394,7 +393,7 @@ function forkAdapterState<S extends object>(state: S): S {
 }
 
 /** The iterator as a fold takes it: its pushed-back elements, then its `foldNext`. */
-function foldingView(iter: IterValue): IterValue {
+export function foldingView(iter: IterValue): IterValue {
   return new IterValue(
     () => nextForFold(iter),
     iter.nextBack,
@@ -1472,7 +1471,7 @@ function keepsBest(order: number, sign: 1 | -1): boolean {
  * The sum or product of `Result`s or `Option`s: of the values in `Ok` or `Some`, or the first `Err` or `None`, after
  * which it takes no more elements.
  */
-function sumOfOutcomes(ctx: NativeContext, iter: IterValue, t: Type & { kind: 'adt' }, op: '+' | '*'): Value {
+export function sumOfOutcomes(ctx: NativeContext, iter: IterValue, t: Type & { kind: 'adt' }, op: '+' | '*'): Value {
   return consumeOutcomes(ctx, iter, t, (values) => sumOrProduct(ctx, values, t.args[0], op));
 }
 
@@ -1497,42 +1496,6 @@ function consumeOutcomes(
   values.stateRoots = () => [failure];
   const value = ctx.runtime.withRoots([values], () => consume(values));
   return failure ?? new EnumValue(target.def, success, [value]);
-}
-
-function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' | '*'): Value {
-  const t = normalize(shallow(type));
-  if (t.kind === 'adt' && (t.def.builtin === 'Result' || t.def.builtin === 'Option')) {
-    return sumOfOutcomes(ctx, iter, t, op);
-  }
-  let total: Value = op === '+' ? (t.kind === 'float' ? -0 : 0n) : t.kind === 'float' ? 1 : 1n;
-  const source = foldingView(iter);
-  for (;;) {
-    ctx.runtime.spend();
-    const item = nextOf(source);
-    if (item === DONE) return total;
-    total =
-      t.kind === 'float'
-        ? floatStep(t.name, op, floatNumber(total), floatNumber(item))
-        : intStep(ctx, t, op, total as bigint, deref(item) as bigint);
-  }
-}
-
-function floatStep(name: 'f32' | 'f64', op: '+' | '*', total: number, value: number): number {
-  const result = op === '+' ? total + value : total * value;
-  return name === 'f32' ? Math.fround(result) : result;
-}
-
-/** One step of an integer sum or product, which panics inside the library's `Sum` and `Product` impls on overflow. */
-function intStep(ctx: NativeContext, type: Type, op: '+' | '*', total: bigint, value: bigint): bigint {
-  const result = op === '+' ? total + value : total * value;
-  if (result !== wrap((type as { name: 'i32' }).name, result)) {
-    libraryPanic(
-      ctx,
-      `attempt to ${op === '+' ? 'add' : 'multiply'} with overflow`,
-      'core/src/iter/traits/accum.rs:206:1'
-    );
-  }
-  return result;
 }
 
 /**

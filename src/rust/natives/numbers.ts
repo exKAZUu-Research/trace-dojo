@@ -6,7 +6,16 @@ import { normalize } from '../infer';
 import { bitsOf, copyValue, intArith, needsCopy, overflow, wrap } from '../ops';
 import { arrayTryFrom, intoConversion } from '../traitConversions';
 import { INT_NAMES, intMax, intMin, type IntName, shallow, type Type } from '../types';
-import { EnumValue, sliceItems, sliceLength, StructValue, textOf, type Value } from '../values';
+import {
+  DurationValue,
+  EnumValue,
+  MAX_DURATION,
+  sliceItems,
+  sliceLength,
+  StructValue,
+  textOf,
+  type Value,
+} from '../values';
 import {
   define,
   deref,
@@ -742,6 +751,7 @@ for (const [name, value] of Object.entries(FLOAT_LIMITS)) {
   consts[`const:${name}`] = (_args, ctx) => {
     const type = normalize(shallow(ctx.typeArgs[0]));
     if (type.kind === 'int') return name === 'MAX' ? intMax(type.name) : intMin(type.name);
+    if (type.kind === 'adt' && type.def.builtin === 'Duration') return new DurationValue(MAX_DURATION);
     return isF32Type(type) ? value.f32 : value.f64;
   };
   consts[`const:f64::${name}`] = () => value.f64;

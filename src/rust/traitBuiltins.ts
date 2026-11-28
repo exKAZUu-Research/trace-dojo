@@ -940,7 +940,9 @@ function sum(goal: Goal): Answer {
   const { solver, t, ref } = goal;
   const [item] = ref.args;
   if (t.kind === 'adt' && (t.def.builtin === 'Result' || t.def.builtin === 'Option')) return fallibleSum(goal, t);
-  if (t.kind !== 'int' && t.kind !== 'float') return 'no';
+  // `Duration` sums `Duration`s and `&Duration`s, and has no `Product`.
+  const duration = isBuiltin(t, 'Duration') && ref.trait.builtin === 'Sum';
+  if (t.kind !== 'int' && t.kind !== 'float' && !duration) return 'no';
   const element = shallow(item);
   // std sums `T`s and `&T`s, but not `&mut T`s.
   if (element.kind === 'ref' && element.mutable) return 'no';

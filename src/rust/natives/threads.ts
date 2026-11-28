@@ -9,6 +9,7 @@ import {
   EnumValue,
   FnValue,
   IterValue,
+  MAX_DURATION,
   SharedBox,
   StructValue,
   textOf,
@@ -492,6 +493,19 @@ define({
     duration(a) >= duration(b) ? some(ctx, new DurationValue(duration(a) - duration(b))) : none(ctx),
   'Duration::mul_f64': ([d, factor], ctx) => fromSecsF64(ctx, (Number(duration(d)) / 1e9) * (factor as number)),
   'const:ZERO': () => new DurationValue(0n),
+  'Duration::checked_mul': ([d, factor], ctx) => {
+    const product = duration(d) * (factor as bigint);
+    return product > MAX_DURATION ? none(ctx) : some(ctx, new DurationValue(product));
+  },
+  'Duration::checked_div': ([d, divisor], ctx) =>
+    divisor === 0n ? none(ctx) : some(ctx, new DurationValue(duration(d) / (divisor as bigint))),
+  'Duration::saturating_add': ([a, b]) => new DurationValue(min(duration(a) + duration(b), MAX_DURATION)),
+  'Duration::saturating_sub': ([a, b]) => new DurationValue(duration(a) > duration(b) ? duration(a) - duration(b) : 0n),
+  'Duration::saturating_mul': ([d, factor]) => new DurationValue(min(duration(d) * (factor as bigint), MAX_DURATION)),
+  'Duration::abs_diff': ([a, b]) => {
+    const difference = duration(a) - duration(b);
+    return new DurationValue(difference < 0n ? -difference : difference);
+  },
   'Duration::add': ([a, b], ctx) => bounded(ctx, duration(a) + duration(b), 'overflow when adding durations'),
   'Duration::sub': ([a, b], ctx) => {
     if (duration(a) < duration(b)) libraryPanic(ctx, 'overflow when subtracting durations', 'core/src/time.rs:1277:31');
@@ -513,8 +527,9 @@ define({
   'Duration::div_assign': ([d, divisor], ctx) => assigned(d, divided(ctx, d, divisor)),
 });
 
-/** The longest `Duration`: `u64::MAX` seconds and 999_999_999 nanoseconds. */
-const MAX_DURATION = (2n ** 64n - 1n) * NANOS + (NANOS - 1n);
+function min(a: bigint, b: bigint): bigint {
+  return a < b ? a : b;
+}
 
 const MUL_OVERFLOW = 'overflow when multiplying duration by scalar';
 
