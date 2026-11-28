@@ -142,6 +142,7 @@ export class FunctionChecker {
   private readonly returnFlows = new Map<number, FlowState>();
   private readonly checkedAmbientOverloadSymbols = new Set<number>();
   private committedInferenceDepth = 0;
+  private latentYieldSuppressionDepth = 0;
   private trackingReturnYields = false;
   private readonly selfInferredYieldErrors = new WeakMap<Type, ReadonlySet<number>>();
   private readonly functionReturnYields = new Map<number, ReadonlySet<number>>();
@@ -159,7 +160,17 @@ export class FunctionChecker {
     return this.functionReturnYields.has(nodeId);
   }
 
+  withoutLatentYieldPropagation<T>(run: () => T): T {
+    this.latentYieldSuppressionDepth++;
+    try {
+      return run();
+    } finally {
+      this.latentYieldSuppressionDepth--;
+    }
+  }
+
   propagateLatentYields(nodeId: number): void {
+    if (this.latentYieldSuppressionDepth > 0) return;
     const deps = this.functionReturnYields.get(nodeId);
     if (!deps || deps.size === 0) return;
     const context = this.activeYieldContext();

@@ -777,6 +777,7 @@ export class Checker {
           property.writeType &&
           (() => (writeType ??= this.instantiate(property.writeType?.() ?? property.type(), mapper))),
         type: () => {
+          if (type && this.functions.isTrackingReturnYields()) property.type();
           type ??= this.instantiate(property.type(), mapper);
           return type;
         },
@@ -847,6 +848,7 @@ export class Checker {
       ),
       thisType: signature.thisType && this.instantiate(signature.thisType, mapper),
       returnType: () => {
+        if (returnType && this.functions.isTrackingReturnYields()) signature.returnType();
         returnType ??= this.instantiate(signature.returnType(), mapper);
         return returnType;
       },

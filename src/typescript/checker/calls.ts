@@ -791,8 +791,13 @@ export class Calls {
       if (!this.arity.instanceArityMatches(instantiated, candidate, args) || !attempt.checkThis(instantiated)) {
         return false;
       }
-      attempt.previewCallbacks(instantiated);
-      return this.c.flow.probe(() => this.c.silently(() => this.checkArguments(instantiated, args.nodes, false)));
+      const verifyCandidate = (): boolean => {
+        attempt.previewCallbacks(instantiated);
+        return this.c.flow.probe(() => this.c.silently(() => this.checkArguments(instantiated, args.nodes, false)));
+      };
+      return candidate.typeParameters.length > 0
+        ? this.c.functions.withoutLatentYieldPropagation(verifyCandidate)
+        : verifyCandidate();
     });
   }
 
@@ -810,7 +815,13 @@ export class Calls {
     const final = this.c.flow.probe(() =>
       this.instantiateFor(candidate, args, typeArguments, deferred ?? contextual, receiver)
     );
-    this.checkArguments(final, args.nodes, attempt.checkThis(final, true), node);
+    const runArgumentChecks = (): boolean =>
+      this.checkArguments(final, args.nodes, attempt.checkThis(final, true), node);
+    if (this.c.silent > 0 && candidate.typeParameters.length > 0) {
+      this.c.functions.withoutLatentYieldPropagation(runArgumentChecks);
+    } else {
+      runArgumentChecks();
+    }
     this.checkImmediateBody(node, final);
     return { signature: final, returnType: final.returnType() };
   }
