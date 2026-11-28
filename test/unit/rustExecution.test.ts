@@ -8842,6 +8842,33 @@ fn main() {
 });
 
 // The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test("a rule's format message names the rule's variables past generic and closure commas, and panics at the invocation", () => {
+  const program = `use std::collections::HashMap;
+macro_rules! check {
+    ($s:expr) => {{
+        let n = $s;
+        let add = |a: usize, b: usize| a + b;
+        assert!(add(0, 0) == n || HashMap::<String, i32>::new().len() + 2 == n, "len {n}");
+        println!("{}", HashMap::<String, Vec<i32>>::new().len() + n);
+        assert_eq!(HashMap::<String, i32>::new().len(), n, "len {n}");
+    }};
+}
+fn main() {
+    let n = 7usize;
+    check!(0usize);
+    println!("{n}");
+    check!(2usize);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '0\n7\n2\n',
+    uncaughtException: expect.stringContaining(
+      'panicked at src/main.rs:15:5:\nassertion `left == right` failed: len 2\n  left: 0\n right: 2'
+    ),
+  });
+});
+
 test('Drop impls run when values go out of scope, are replaced, discarded, or dropped', () => {
   const program = `struct D(i32);
 impl Drop for D { fn drop(&mut self) { println!("drop {}", self.0); } }

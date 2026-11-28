@@ -43,8 +43,17 @@ export abstract class MacroConverter extends PatternConverter {
     return name !== undefined && this.userMacros.has(name);
   }
 
-  /** The column of the outermost macro invocation whose expansion is being converted, which `column!` gives. */
-  private expansionColumn: number | undefined;
+  /**
+   * The outermost macro invocation whose expansion is being converted: `column!` gives its column, and a panic in the
+   * expansion reports its place, as rustc reports the place that caused the expansion.
+   */
+  private expansionSite: Span | undefined;
+
+  override span(node: Node): Span {
+    const span = super.span(node);
+    const site = this.expansionSite;
+    return site ? { ...span, displayCol: site.displayCol ?? site.col } : span;
+  }
 
   /**
    * Expands an invocation of a `macro_rules!` macro and converts the code it makes with `convert`, which gets the
@@ -64,13 +73,13 @@ export abstract class MacroConverter extends PatternConverter {
       throw error;
     }
     this.macroDepth++;
-    const enclosing = this.expansionColumn;
-    this.expansionColumn ??= span.col;
+    const enclosing = this.expansionSite;
+    this.expansionSite ??= span;
     try {
       return this.reparse(`${'\n'.repeat(span.row)}${wrap(code)}`, convert as (root: Node) => unknown) as T;
     } finally {
       this.macroDepth--;
-      this.expansionColumn = enclosing;
+      this.expansionSite = enclosing;
     }
   }
 
@@ -192,7 +201,7 @@ export abstract class MacroConverter extends PatternConverter {
       }
       case 'column': {
         // In a macro's expansion, rustc gives the column of the outermost invocation, as `line!` its row.
-        return { kind: 'int', value: BigInt(this.expansionColumn ?? span.col), suffix: 'u32', span };
+        return { kind: 'int', value: BigInt(this.expansionSite?.col ?? span.col), suffix: 'u32', span };
       }
       case 'file': {
         return { kind: 'str', value: 'src/main.rs', span };

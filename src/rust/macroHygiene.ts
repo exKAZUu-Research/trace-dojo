@@ -181,11 +181,11 @@ function renamed(tokens: Token[], outer: Visible, suffix: string, context?: Grou
   const visible = new Map(outer);
   const { bindings, matchBodies } = bindingsIn(tokens);
   if (context === 'match') bindings.push(...armBindings(tokens));
-  const isFormatString = formatStringFinder(typeof context === 'number' ? context : -1);
+  const formatIndex = typeof context === 'number' ? formatStringIndex(tokens, context) : -1;
   const out: Token[] = [];
   for (const [index, token] of tokens.entries()) {
     enterScopes(bindings, index, visible);
-    const formatString = isFormatString(token);
+    const formatString = index === formatIndex;
     if (token.kind === 'group') {
       const inner = matchBodies.has(index) ? 'match' : groupContext(tokens, index);
       out.push({ ...token, tokens: renamed(token.tokens, visible, suffix, inner) });
@@ -206,18 +206,41 @@ function enterScopes(bindings: Binding[], index: number, visible: Visible): void
 }
 
 /**
- * Tells, token by token, the format string of a format macro's arguments: the first string literal of the argument at
- * `position` (after `write!`'s target and `assert!`'s condition), or none for a position of -1.
+ * Where a format macro's format string is: the first string literal of the argument at `position` (after `write!`'s
+ * target and `assert!`'s condition), or -1.
  */
-function formatStringFinder(position: number): (token: Token) => boolean {
+function formatStringIndex(tokens: Token[], position: number): number {
+  const separators = argumentSeparators(tokens);
   let argument = 0;
-  let found = false;
-  return (token) => {
-    if (token.kind === 'leaf' && token.text === ',') argument++;
-    const formatString = !found && argument === position && token.kind === 'leaf' && isStringLiteral(token.type);
-    if (formatString) found = true;
-    return formatString;
-  };
+  for (const [index, token] of tokens.entries()) {
+    if (separators.has(index)) argument++;
+    else if (argument === position && token.kind === 'leaf' && isStringLiteral(token.type)) return index;
+  }
+  return -1;
+}
+
+const ANGLE_CLOSES = new Map([
+  ['>', 1],
+  ['>>', 2],
+]);
+
+/**
+ * The commas that separate a macro's arguments: those outside a turbofish (`f::<A, B>()`) and a closure's parameters
+ * (`|a, b|`), which are not token groups.
+ */
+function argumentSeparators(tokens: Token[]): Set<number> {
+  const separators = new Set<number>();
+  let angles = 0;
+  let inParams = false;
+  for (const [index, token] of tokens.entries()) {
+    const text = leafText(token);
+    if (inParams) inParams = text !== '|';
+    else if (text === '<' && (angles > 0 || leafText(tokens[index - 1]) === '::')) angles++;
+    else if (angles > 0) angles = Math.max(0, angles - (ANGLE_CLOSES.get(text ?? '') ?? 0));
+    else if (text === ',') separators.add(index);
+    else inParams = opensClosure(tokens, 0, index);
+  }
+  return separators;
 }
 
 /** What a group is: a struct's fields, a `match`'s arms, or a format macro's arguments, by its format string's place. */
