@@ -574,13 +574,18 @@ export class ConstLint {
     if (this.diverged) return;
     this.endBlock();
     let allDiverge = true;
+    let afterGuard = false;
     for (const arm of arms) {
       const matches = this.matchesPattern(arm.pattern, scrutinee);
       if (matches === false) continue;
+      // An arm after a guard is reached both from the match and from the failed guard, where rustc forgets what it
+      // knew of the variables.
+      if (afterGuard) this.known.clear();
       this.bind(arm.pattern, matches === true ? scrutinee : undefined);
       for (const cond of arm.guard ?? []) this.condition(cond);
       allDiverge = this.branch(() => this.expr(arm.body)) && allDiverge;
       if (matches === true && !arm.guard) break;
+      afterGuard ||= arm.guard !== undefined;
     }
     this.diverged = allDiverge && arms.length > 0;
   }
