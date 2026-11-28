@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
+import { stringByteLength } from './capacity';
 import { type DebugPart, emit, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
 import { debugEscapesUnicode } from './debugUnicode';
 import { floatNumber } from './floatBits';
@@ -27,6 +28,7 @@ import {
   type SetValue,
   type SharedBox,
   sliceItems,
+  sliceLength,
   StructValue,
   textOf,
   type Value,
@@ -424,7 +426,7 @@ export class Formatter {
       }
       case 'ConstPtr':
       case 'MutPtr': {
-        return padString(`0x${(v as RawPtr).address.toString(16)}`, spec, write);
+        return pointerDebug(v as RawPtr, this.concrete(t.args[0]), spec, indent, write);
       }
       case 'Duration': {
         // The precision is the number of fraction digits, which the text already has.
@@ -684,6 +686,34 @@ function integerText(value: bigint, spec: Spec): string {
 }
 
 /** Pads a number, with `0` padding after its sign and radix prefix. */
+/**
+ * std's `Pointer` formatting: the address in hex with `0x`, which `#` pads with zeros to 16 digits; a pointer to a
+ * slice or `str` is `Pointer { addr, metadata }` with its length.
+ */
+function pointerDebug(
+  pointer: RawPtr,
+  pointee: Type,
+  spec: Spec,
+  indent: number | undefined,
+  write?: WriteChunk
+): string {
+  const addressSpec = spec.alternate ? { ...spec, zero: true, width: spec.width ?? 18 } : spec;
+  const address = (sink?: WriteChunk): string => padNumber(`0x${pointer.address.toString(16)}`, addressSpec, 2, sink);
+  if (pointee.kind !== 'slice' && pointee.kind !== 'str') return address(write);
+  const target = pointer.place?.get();
+  const metadata = target === undefined ? 0 : pointee.kind === 'str' ? stringByteLength(target) : sliceLength(target);
+  return structText(
+    'Pointer',
+    [
+      ['addr', (_inner, sink) => address(sink)],
+      ['metadata', (_inner, sink) => padNumber(String(metadata), spec, 0, sink)],
+    ],
+    indent,
+    false,
+    write
+  );
+}
+
 function padNumber(shown: string, spec: Spec, prefixLength = 0, write?: WriteChunk): string {
   if (spec.zero && spec.width !== undefined) {
     const signLength = shown.startsWith('-') || shown.startsWith('+') ? 1 : 0;
