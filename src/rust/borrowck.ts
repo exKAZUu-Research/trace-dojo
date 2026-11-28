@@ -90,6 +90,7 @@ export class BorrowChecker {
         })),
         bounds: [...(item.generics.lifetimeBounds ?? []), ...implBounds],
         staticReturn: declaredRet !== undefined && isStaticOpaque(declaredRet),
+        declaredRet,
         span: item.span,
       },
     };

@@ -122,12 +122,14 @@ export function dropSlots(type: Type, proj: string[] = []): string[][] {
 }
 
 /**
- * The regions of a layout; with `borrowedOnly`, not a trait object's lifetime that is neither written nor a
- * reference's (`Arc<dyn Job>` inside a closure's `&Arc<dyn Job>`), which may be `'static` itself, so a parameter does
- * not borrow it; a written one (`dyn Fn() + 'a`) is borrowed.
+ * The regions of a layout. `borrowed` leaves out a trait object's lifetime that is neither written nor a reference's
+ * (`Arc<dyn Job>` inside a closure's `&Arc<dyn Job>`), which may be `'static` itself, so a parameter does not borrow
+ * it; a written one (`dyn Fn() + 'a`) is borrowed. `structured` leaves out those of closures, type parameters and
+ * trait objects, each of which stands for every lifetime of what it captures or holds, so that it has no one lifetime
+ * to choose.
  */
-export function regionsOf(layout: Layout, borrowedOnly = false): RVar[] {
-  const inner = (part: Layout): RVar[] => regionsOf(part, borrowedOnly);
+export function regionsOf(layout: Layout, selection: 'all' | 'borrowed' | 'structured' = 'all'): RVar[] {
+  const inner = (part: Layout): RVar[] => regionsOf(part, selection);
   switch (layout.kind) {
     case 'ref': {
       return [layout.region, ...inner(layout.target)];
@@ -142,7 +144,8 @@ export function regionsOf(layout: Layout, borrowedOnly = false): RVar[] {
       return inner(layout.elem);
     }
     case 'opaque': {
-      return borrowedOnly && layout.unwrittenObject ? [] : [layout.region];
+      if (selection === 'structured' || (selection === 'borrowed' && layout.unwrittenObject)) return [];
+      return [layout.region];
     }
     case 'none': {
       return [];

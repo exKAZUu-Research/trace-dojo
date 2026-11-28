@@ -2,8 +2,8 @@ import type { ExecutionBudget } from '../interpreter/limits';
 import type { Expr, Span } from './ast';
 import { normalize } from './infer';
 import type { LoanError } from './loanGraph';
-import type { Layout, RVar } from './regions';
-import { shallow, type Type } from './types';
+import { type Layout, regionsOf, type RVar } from './regions';
+import { shallow, type TraitRef, type Type } from './types';
 
 /** A lifetime a function's signature names, or a place it leaves out (`'_`, `&self`), given a name of its own. */
 interface NamedRegion {
@@ -21,6 +21,8 @@ export interface SignatureNames {
   bounds: { name: string; outlives: string[] }[];
   /** Whether the return type is an `impl Trait + 'static`, whose hidden value must hold no shorter borrow. */
   staticReturn: boolean;
+  /** The return type as written, whose `impl Trait` parts the body's return type has as their hidden types. */
+  declaredRet: Type | undefined;
   span: Span;
 }
 
@@ -43,6 +45,7 @@ export function signatureLifetimeError(
       ...(index < body.receivers ? { name: 'self', span: names.span } : names.params[index - body.receivers]),
     })),
     ret: body.ret,
+    hidden: names.declaredRet ? hiddenParts(names.declaredRet, body.ret.layout) : [],
     refSelf: body.inputTypes.slice(0, body.receivers).some((type) => shallow(type).kind === 'ref'),
     bounds: names.bounds,
     outlives: body.outlives,
@@ -55,6 +58,8 @@ export interface SignatureRegions {
   /** The parameters (`self` first): what each holds, its type, and its name and position. */
   inputs: { layout: Layout; type: Type; name: string; span: Span }[];
   ret: { layout: Layout; type: Type };
+  /** The parts of the return value that are hidden types of `impl Trait`s, with the bounds of each. */
+  hidden: HiddenPart[];
   /** Whether the first input is `&self` or `&mut self`, whose lifetime a left-out return lifetime is. */
   refSelf: boolean;
   /** The bounds the generics declare (`'b: 'a`), of the function and of its impl. */
@@ -62,6 +67,11 @@ export interface SignatureRegions {
   outlives: readonly (readonly [RVar, RVar])[];
   staticRegion: RVar | undefined;
   span: Span;
+}
+
+interface HiddenPart {
+  layout: Layout;
+  bounds: TraitRef[];
 }
 
 /**
@@ -76,7 +86,13 @@ function checkLifetimeRelations(signature: SignatureRegions): LoanError | undefi
     namedRegions(layout, type, anonymous).map((named) => ({ ...named, param: { name, span } }))
   );
   const elided = returnElision(signature, inputs);
-  const ret = namedRegions(signature.ret.layout, signature.ret.type, () => elided ?? anonymous());
+  const elidedName = (): string => elided ?? anonymous();
+  const hidden = new Set(signature.hidden.flatMap(({ layout }) => regionsOf(layout)));
+  const items = signature.hidden.flatMap((part) => hiddenItemRegions(part, elidedName));
+  const ret = [
+    ...namedRegions(signature.ret.layout, signature.ret.type, elidedName).filter(({ region }) => !hidden.has(region)),
+    ...items,
+  ];
   const named = [...inputs, ...ret];
   const byRegion = new Map(named.map((entry) => [entry.region, entry]));
   const relation = declaredRelation(signature, inputs);
@@ -87,7 +103,53 @@ function checkLifetimeRelations(signature: SignatureRegions): LoanError | undefi
       if (!relation(longer.name, shorter.name)) return relationError(longer, shorter, signature.span);
     }
   }
+  // A lifetime of a hidden type that its bounds do not name is one of the lifetimes it captures, which edition 2024
+  // makes every lifetime of the signature: one that each lifetime flowing into it outlives.
+  const candidates = [...inputs.map(({ name }) => name), "'static"];
+  const members = signature.hidden
+    .flatMap(({ layout }) => regionsOf(layout, 'structured'))
+    .filter((region) => !items.some((item) => item.region === region));
+  for (const member of members) {
+    const longer = reachedNamed(member, edges, byRegion, signature.staticRegion).map((region) => byRegion.get(region)!);
+    if (candidates.some((name) => longer.every((each) => relation(each.name, name)))) continue;
+    const [first, ...rest] = longer;
+    return relationError(
+      rest.find((each) => !relation(each.name, first.name))!,
+      first,
+      signature.span
+    );
+  }
   return undefined;
+}
+
+/** The parts of a return value that are the hidden types of the `impl Trait`s its declared type has. */
+function hiddenParts(declared: Type, layout: Layout): HiddenPart[] {
+  const t = shallow(declared);
+  if (t.kind === 'opaque') return [{ layout, bounds: t.opaque.bounds }];
+  return typedParts(t, layout).flatMap(([type, part]) => hiddenParts(type, part));
+}
+
+/** The parts of a layout with the declared types they hold, where the layout has the structure of the type. */
+function typedParts(t: Type, layout: Layout): [Type, Layout][] {
+  if (layout.kind === 'ref' && t.kind === 'ref') return [[t.target, layout.target]];
+  if (layout.kind === 'adt' && t.kind === 'adt') return paired(t.args, layout.args);
+  if (layout.kind === 'tuple' && t.kind === 'tuple') return paired(t.elems, layout.elems);
+  if (layout.kind === 'seq' && (t.kind === 'array' || t.kind === 'slice')) return [[t.elem, layout.elem]];
+  return [];
+}
+
+function paired(types: readonly Type[], parts: Layout[]): [Type, Layout][] {
+  return parts.flatMap((part, index) => (types[index] ? [[types[index], part]] : []));
+}
+
+/**
+ * The regions of the items of a hidden iterator (`IterImpl<T, S>`), named as its `Iterator<Item = ..>` bound names
+ * them.
+ */
+function hiddenItemRegions({ layout, bounds }: HiddenPart, elided: () => string): NamedRegion[] {
+  const item = bounds.find((bound) => bound.trait.builtin === 'Iterator' && bound.item)?.item;
+  if (!item || layout.kind !== 'adt' || layout.def.builtin !== 'Iter' || !layout.args[0]) return [];
+  return namedRegions(layout.args[0], item, elided);
 }
 
 /** The lifetime a return type leaves out: that of `&self`, or else of the only lifetime in the parameters. */
@@ -209,7 +271,9 @@ function relationError(longer: NamedRegion, shorter: NamedRegion, span: Span): L
 
 /**
  * The error when a reference from a parameter must outlive `'static`, as a `T: 'static` bound, an
- * `impl Trait + 'static` return type, or storing it in a trait object without a lifetime (`Box<dyn Trait>`) needs.
+ * `impl Trait + 'static` return type, storing it in a trait object without a lifetime (`Box<dyn Trait>`), or returning
+ * it from a closure for a bound whose result has a lifetime taken for every lifetime (`for<'a> Fn(&'a T) -> &'a U`)
+ * needs.
  */
 export function staticInputError(
   outlives: readonly (readonly [RVar, RVar])[],
@@ -230,7 +294,7 @@ export function staticInputError(
     ? {
         span,
         message:
-          "ライフタイムが足りません。引数から借りた参照を、'static が必要なところ（T: 'static の制約、impl Trait + 'static の戻り値、Box<dyn Trait> のようにライフタイムを書いていないトレイトオブジェクト）で使っています。",
+          "ライフタイムが足りません。引数から借りた参照を、'static が必要なところ（T: 'static の制約、impl Trait + 'static の戻り値、Box<dyn Trait> のようにライフタイムを書いていないトレイトオブジェクト、for<'a> Fn(&'a T) -> &'a U のような境界のクロージャーが返す値）で使っています。",
       }
     : undefined;
 }
