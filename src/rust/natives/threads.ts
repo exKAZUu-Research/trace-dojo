@@ -506,7 +506,10 @@ define({
   'Duration::as_millis': ([d]) => duration(d) / 1_000_000n,
   'Duration::as_micros': ([d]) => duration(d) / 1000n,
   'Duration::as_nanos': ([d]) => duration(d),
-  'Duration::as_secs_f64': ([d]) => Number(duration(d)) / 1e9,
+  'Duration::as_secs_f64': ([d]) => {
+    const nanos = duration(d);
+    return Number(nanos / 1_000_000_000n) + Number(nanos % 1_000_000_000n) / 1e9;
+  },
   'Duration::subsec_millis': ([d]) => (duration(d) % NANOS) / 1_000_000n,
   'Duration::subsec_nanos': ([d]) => duration(d) % NANOS,
   'Duration::mul_f64': ([d, factor], ctx) => fromSecsF64(ctx, (Number(duration(d)) / 1e9) * (factor as number)),
