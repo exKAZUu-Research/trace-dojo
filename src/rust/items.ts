@@ -1282,14 +1282,22 @@ export function resolveTypePath(segments: string[], module: Module, span: Span):
  * unavailable (`Instant` and `UNIX_EPOCH` of `std::time::*`).
  */
 export function reportUnavailableGlobs(module: Module, name: string, span: Span): void {
-  if (!/^\p{Lu}/u.test(name)) return;
-  for (let scope: Module | undefined = module; scope; scope = scope.lexicalParent) {
-    for (const glob of scope.globs) {
-      const target = resolveTypePath(glob.path, scope, glob.span);
-      if (target.kind === 'mod' && target.module.isStd) checkUnavailableStd(['std', ...glob.path.slice(1)], span);
+  // Resolving a glob's own path that is not found comes back here, which would recurse without end.
+  if (!/^\p{Lu}/u.test(name) || reportingGlobs) return;
+  reportingGlobs = true;
+  try {
+    for (let scope: Module | undefined = module; scope; scope = scope.lexicalParent) {
+      for (const glob of scope.globs) {
+        const target = resolveTypePath(glob.path, scope, glob.span);
+        if (target.kind === 'mod' && target.module.isStd) checkUnavailableStd(['std', ...glob.path.slice(1)], span);
+      }
     }
+  } finally {
+    reportingGlobs = false;
   }
 }
+
+let reportingGlobs = false;
 
 export function resolveTraitPath(path: PathAst, scope: TypeScope, self?: Type): TraitRef {
   const binding = resolveTypePath(
