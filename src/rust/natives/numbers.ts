@@ -567,6 +567,16 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     const width = floatWidth(ctx);
     return signedFloat(a, width, signBit(sign, width));
   },
+  midpoint: ([a, b], ctx) => {
+    const [x, y] = [float(a), float(b)];
+    // f32 halves the sum in f64; f64 halves before adding near its limits, as the standard library does.
+    if (isF32(ctx)) return Math.fround((x + y) / 2);
+    const [low, high] = [2 ** -1021, Number.MAX_VALUE / 2];
+    if (Math.abs(x) <= high && Math.abs(y) <= high) return (x + y) / 2;
+    if (Math.abs(x) < low) return x + y / 2;
+    if (Math.abs(y) < low) return x / 2 + y;
+    return x / 2 + y / 2;
+  },
 };
 
 function totalOrderKey(value: Value, width: 32 | 64): bigint {

@@ -768,6 +768,7 @@ pub mod num {
         pub fn rem_euclid(self, rhs: F) -> F;
         pub fn div_euclid(self, rhs: F) -> F;
         pub const fn copysign(self, sign: F) -> F;
+        pub const fn midpoint(self, other: F) -> F;
     }
     impl bool {
         pub fn then<T, F: FnOnce() -> T>(self, f: F) -> Option<T>;
