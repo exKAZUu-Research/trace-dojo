@@ -83,7 +83,7 @@ export abstract class SyntaxConverter {
    * The children of a list whose elements outer attributes may precede (fields, variants, parameters), each with its
    * attributes, leaving out the elements that `#[cfg]` removes.
    */
-  protected withAttributes(children: Node[]): { node: Node; attrs: Attributes }[] {
+  protected withAttributes(children: Node[], on: 'variant' | 'other' = 'other'): { node: Node; attrs: Attributes }[] {
     const result: { node: Node; attrs: Attributes }[] = [];
     let pending: Node[] = [];
     for (const child of children) {
@@ -92,7 +92,7 @@ export abstract class SyntaxConverter {
         pending.push(child);
         continue;
       }
-      const attrs = this.attributes.read(pending);
+      const attrs = this.attributes.read(pending, on);
       pending = [];
       if (attrs) result.push({ node: child, attrs });
     }

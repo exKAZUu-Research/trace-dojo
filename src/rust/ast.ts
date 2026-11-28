@@ -39,8 +39,6 @@ export interface Attributes {
   derives: { name: string; span: Span }[];
   /** `#[default]` on the unit variant that `#[derive(Default)]` gives an enum. */
   isDefault?: boolean;
-  /** `#[track_caller]`, which reports a panic at the caller's location. */
-  trackCaller?: boolean;
   /** The integer type `#[repr(u8)]` and the like give an enum's discriminants. */
   repr?: IntName;
 }
@@ -97,7 +95,6 @@ export interface FnItem {
   endRow: number;
   /** The row of the opening brace, through which a `// atomic` annotation marks the function. */
   headerEndRow: number;
-  trackCaller?: boolean;
   /** An `async fn`, whose `ret` and `body` are already those of the function returning the future. */
   isAsync?: boolean;
 }

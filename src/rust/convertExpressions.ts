@@ -105,7 +105,8 @@ export abstract class ExpressionConverter extends MacroConverter {
     for (const child of node.namedChildren) {
       if (isComment(child)) continue;
       if (child.type === 'inner_attribute_item') {
-        this.attributes.readInner(child);
+        // An inner `#![cfg(..)]` that does not hold removes what the block holds.
+        if (!this.attributes.readInner(child)) return [];
         continue;
       }
       if (child.type === 'attribute_item')
@@ -115,7 +116,7 @@ export abstract class ExpressionConverter extends MacroConverter {
         continue;
       }
       const { attributes, target } = splitAttributes(child);
-      const attrs = target && this.attributes.read(attributes, isItem(target));
+      const attrs = target && this.attributes.read(attributes, isItem(target) ? 'item' : 'other');
       if (!attrs || !target) continue;
       // An item keeps its attributes, which the item's conversion reads.
       children.push(
@@ -984,7 +985,17 @@ function isItem(node: Node): boolean {
 /** A byte string literal, which is a reference to an array of its bytes (`&[u8; N]`), as `&[b'a', ...]` would be. */
 function byteStringExpr(bytes: number[], span: Span): Expr {
   const elems: Expr[] = bytes.map((byte) => ({ kind: 'int', value: BigInt(byte), suffix: 'u8', span }));
-  return { kind: 'ref', mutable: false, operand: { kind: 'array', elems, span }, span };
+  // An empty one (`b""`) has no element to give its type, so it is `[0u8; 0]`.
+  const array: Expr =
+    elems.length > 0
+      ? { kind: 'array', elems, span }
+      : {
+          kind: 'arrayRepeat',
+          value: { kind: 'int', value: 0n, suffix: 'u8', span },
+          count: { kind: 'int', value: 0n, suffix: 'usize', span },
+          span,
+        };
+  return { kind: 'ref', mutable: false, operand: array, span };
 }
 
 /** `c"..."` as the `&CStr` of its bytes. */

@@ -58,7 +58,6 @@ const TARGET_OPTIONS = new Set([
   'panic',
 ]);
 
-/** Reads the attributes on what follows them, as rustc reads them for a program built without `--test`. */
 /** The attributes that need what a single file run cannot give: other crates or files, a linker, or a target. */
 const UNAVAILABLE_ATTRIBUTES: Record<string, string> = {
   proc_macro: '手続きマクロの定義（別のクレートが要ります）',
@@ -75,6 +74,7 @@ const UNAVAILABLE_ATTRIBUTES: Record<string, string> = {
   no_main: '#[no_main]',
   global_allocator: '#[global_allocator]',
   panic_handler: '#[panic_handler]',
+  track_caller: '呼び出し元の位置で panic を報告する属性（#[track_caller]）',
 };
 
 export class AttributeReader {
@@ -85,31 +85,40 @@ export class AttributeReader {
   ) {}
 
   /**
-   * The effects of outer attributes, or undefined when `#[cfg]` removes what they are on. Only an item (`onItem`) may
-   * carry `#[derive]`, which the item then checks is a struct or an enum.
+   * The effects of outer attributes, or undefined when `#[cfg]` removes what they are on. Only an item (`on: 'item'`)
+   * may carry `#[derive]` and `#[repr(u8)]`, which the item then checks it is a struct or an enum, and only an enum's
+   * variant `#[default]`.
    */
-  read(nodes: Node[], onItem = false): Attributes | undefined {
+  read(nodes: Node[], on: 'item' | 'variant' | 'other' = 'other'): Attributes | undefined {
     const attrs: Attributes = { derives: [] };
     for (const node of nodes) {
       if (isComment(node)) continue;
-      if (!this.apply(node, attrs, false)) return undefined;
-      if (!onItem && attrs.derives.length > 0) {
+      if (!this.apply(node, attrs)) return undefined;
+      if (on !== 'item' && attrs.derives.length > 0) {
         syntaxError(this.span(node), '#[derive] は、構造体と列挙型にだけ付けられます。');
+      }
+      if (on !== 'item' && attrs.repr)
+        syntaxError(this.span(node), `#[repr(${attrs.repr})] は、列挙型にだけ付けられます。`);
+      if (on !== 'variant' && attrs.isDefault) {
+        syntaxError(this.span(node), '#[default] は、列挙型の選択肢にだけ付けられます。');
       }
     }
     return attrs;
   }
 
-  /** Checks an inner attribute (`#![...]`), which applies to the module or block it is in. */
-  readInner(node: Node): void {
-    if (isComment(node)) return;
-    this.apply(node, { derives: [] }, true);
+  /**
+   * Checks an inner attribute (`#![...]`), which applies to the module or block it is in, telling whether that stays
+   * (`#![cfg(test)]` removes it).
+   */
+  readInner(node: Node): boolean {
+    if (isComment(node)) return true;
+    return this.apply(node, { derives: [] });
   }
 
   /** Applies one attribute, telling whether what it is on stays. */
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of attribute.
   // code-gauge-allow functionNcss -- One case per kind of attribute.
-  private apply(node: Node, attrs: Attributes, inner: boolean): boolean {
+  private apply(node: Node, attrs: Attributes): boolean {
     const attribute = node.namedChildren.find((child) => child.type === 'attribute');
     if (!attribute) return true;
     const span = this.span(node);
@@ -132,7 +141,7 @@ export class AttributeReader {
         return this.condition(cfgTokens(args), span);
       }
       case 'cfg_attr': {
-        return this.cfgAttr(args, attrs, inner, span);
+        return this.cfgAttr(args, attrs, span);
       }
       case 'test':
       case 'bench': {
@@ -141,10 +150,6 @@ export class AttributeReader {
       }
       case 'default': {
         attrs.isDefault = true;
-        return true;
-      }
-      case 'track_caller': {
-        attrs.trackCaller = true;
         return true;
       }
       case 'repr': {
@@ -182,7 +187,7 @@ export class AttributeReader {
     }
   }
 
-  private cfgAttr(args: Node | null, attrs: Attributes, inner: boolean, span: Span): boolean {
+  private cfgAttr(args: Node | null, attrs: Attributes, span: Span): boolean {
     const tokens = args ? cfgTokens(args) : [];
     const comma = topLevelComma(tokens);
     if (comma === -1) syntaxError(span, '#[cfg_attr] には、条件と属性を書いてください。');
@@ -194,7 +199,7 @@ export class AttributeReader {
         (part.at(-1) as Node).endIndex - args!.startIndex
       );
       for (const attribute of this.reparseAttributes(`#[${text}]`)) {
-        if (!this.apply(attribute, attrs, inner)) return false;
+        if (!this.apply(attribute, attrs)) return false;
       }
     }
     return true;

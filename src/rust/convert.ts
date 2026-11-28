@@ -61,7 +61,7 @@ export class Converter extends ExpressionConverter {
     const span = this.span(node);
     switch (node.type) {
       case 'function_item': {
-        return this.fnItem(node, false, attrs);
+        return this.fnItem(node, false);
       }
       case 'struct_item': {
         return this.structItem(node, attrs ?? { derives: [] });
@@ -108,9 +108,12 @@ export class Converter extends ExpressionConverter {
         if (!body) unavailable(span, '別のファイルのモジュール（mod 名前;）');
         const items: Item[] = [];
         const name = this.identifier(this.field(node, 'name'));
+        // An inner `#![cfg(..)]` that does not hold removes the whole module.
+        const inner = body.namedChildren.filter((child) => child.type === 'inner_attribute_item');
+        if (!inner.every((child) => this.attributes.readInner(child))) return undefined;
         this.modulePath.push(name);
         for (const child of body.namedChildren) {
-          if (isComment(child)) continue;
+          if (isComment(child) || child.type === 'inner_attribute_item') continue;
           items.push(...this.itemsOf(child));
         }
         this.modulePath.pop();
@@ -185,14 +188,16 @@ export class Converter extends ExpressionConverter {
 
   private attributed(node: Node): Item | undefined {
     const { attributes, target } = splitAttributes(node);
-    const attrs = this.attributes.read(attributes, true);
+    const attrs = this.attributes.read(attributes, 'item');
     if (!attrs || !target) return undefined;
     const declaration = target;
     const derivable = ['struct_item', 'enum_item', 'union_item'];
     if (attrs.derives.length > 0 && !derivable.includes(declaration.type)) {
       syntaxError(this.span(node), '#[derive] は、構造体と列挙型にだけ付けられます。');
     }
-    if (attrs.isDefault) syntaxError(this.span(node), '#[default] は、列挙型の選択肢にだけ付けられます。');
+    if (attrs.repr && declaration.type !== 'enum_item') {
+      syntaxError(this.span(node), `#[repr(${attrs.repr})] は、列挙型にだけ付けられます。`);
+    }
     return this.item(declaration, attrs);
   }
 
@@ -217,7 +222,7 @@ export class Converter extends ExpressionConverter {
 
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
-  private fnItem(node: Node, allowMissingBody = false, attrs?: Attributes): FnItem {
+  private fnItem(node: Node, allowMissingBody = false): FnItem {
     const span = this.span(node);
     const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
     const words = modifiers?.text.split(/\s+/) ?? [];
@@ -268,7 +273,6 @@ export class Converter extends ExpressionConverter {
       params,
       endRow: node.endPosition.row,
       headerEndRow: bodyNode ? bodyNode.startPosition.row : node.endPosition.row,
-      trackCaller: attrs?.trackCaller,
     };
   }
 
@@ -507,7 +511,10 @@ export class Converter extends ExpressionConverter {
   private enumItem(node: Node, attrs: Attributes): EnumItem {
     const span = this.span(node);
     const variants: VariantAst[] = [];
-    for (const { node: child, attrs: variantAttrs } of this.withAttributes(this.field(node, 'body').namedChildren)) {
+    for (const { node: child, attrs: variantAttrs } of this.withAttributes(
+      this.field(node, 'body').namedChildren,
+      'variant'
+    )) {
       if (child.type !== 'enum_variant') continue;
       const body = child.childForFieldName('body');
       const value = child.childForFieldName('value');
@@ -546,7 +553,7 @@ export class Converter extends ExpressionConverter {
         const attrs = this.attributes.read(attributes);
         if (!attrs || !child) continue;
         if (child.type === 'function_item' || child.type === 'function_signature_item') {
-          const method = this.fnItem(child, child.type === 'function_signature_item', attrs);
+          const method = this.fnItem(child, child.type === 'function_signature_item');
           if (method.isConst) syntaxError(method.span, 'トレイトの関数は const にできません（E0379）。');
           methods.push(method);
         } else if (child.type === 'associated_type') {
@@ -604,8 +611,8 @@ export class Converter extends ExpressionConverter {
         const { attributes, target: child } = splitAttributes(syntax);
         const attrs = this.attributes.read(attributes);
         if (!attrs || !child) continue;
-        if (child.type === 'function_item') methods.push(this.fnItem(child, false, attrs));
-        else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true, attrs));
+        if (child.type === 'function_item') methods.push(this.fnItem(child, false));
+        else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true));
         else if (child.type === 'const_item') consts.push(this.item(child) as ImplItem['consts'][number]);
         else if (child.type === 'type_item') {
           assocTypes.push({
