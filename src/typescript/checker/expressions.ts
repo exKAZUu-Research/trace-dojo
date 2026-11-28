@@ -636,7 +636,7 @@ export class ExpressionChecker {
     } else if (typeSymbol && typeSymbol.typeKind !== 'class') {
       this.c.error(node, `${name} は型であり、値としては使えません。`);
     } else {
-      const hint = nodeGlobalHint(name) || nameSuggestionHint(scope, name, 'value', this.c.budget);
+      const hint = nameSuggestionHint(scope, name, 'value', this.c.budget);
       this.c.error(node, `名前 ${name} が見つかりません。${hint}`);
     }
     return errorType;
@@ -1261,13 +1261,6 @@ function isIndirectCall(sequence: TreeNode, left: TreeNode, right: TreeNode): bo
       right.type === 'subscript_expression' ||
       (right.type === 'identifier' && right.text === 'eval'))
   );
-}
-
-/** Node.js names that need its type definitions, which the reference `tsc` does not have. */
-function nodeGlobalHint(name: string): string {
-  return ['module', 'exports', '__dirname', '__filename'].includes(name)
-    ? 'Node.js の機能は、この採点環境では使えません。'
-    : '';
 }
 
 /** The members of a target that an object literal's excess properties are checked against. */

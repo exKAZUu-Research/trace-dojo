@@ -11,6 +11,20 @@ import {
 
 const AVAILABLE_PROCESS_MEMBERS = new Set(['stdout', 'stderr', 'exit', 'exitCode']);
 
+/** Bare globals declared by `@types/node` that this interpreter does not run. */
+export const UNAVAILABLE_NODE_GLOBALS = [
+  'Buffer',
+  'QuotaExceededError',
+  '__dirname',
+  '__filename',
+  'clearImmediate',
+  'exports',
+  'gc',
+  'global',
+  'module',
+  'setImmediate',
+] as const;
+
 /**
  * The feature a member of a Node.js object names when this interpreter does not run it, by the name of the interface or
  * module declaring it: of `process`, it provides `stdout`, `stderr`, `exit`, and `exitCode`.
@@ -63,7 +77,17 @@ type BufferEncoding = "ascii" | "utf8" | "utf-8" | "utf16le" | "utf-16le" | "ucs
 interface Buffer extends Uint8Array {
     toString(encoding?: BufferEncoding, start?: number, end?: number): string;
 }
+type QuotaExceededError = DOMException;
 declare var Buffer: any;
+declare var QuotaExceededError: any;
+declare var __dirname: string;
+declare var __filename: string;
+declare var exports: any;
+declare var gc: any;
+declare var global: any;
+declare var module: any;
+declare function setImmediate(...args: any[]): any;
+declare function clearImmediate(...args: any[]): void;
 declare namespace NodeJS {
     interface ErrnoException extends Error {
         errno?: number;

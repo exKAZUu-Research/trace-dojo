@@ -4,7 +4,7 @@ import { BROWSER_ONLY_GLOBALS, DOM_TYPE_ALIASES, SHARED_HOST_GLOBALS } from './d
 import { DOM_INTERFACES } from './domMembers';
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
 import { LOCALE_OPTIONS_LIBRARY } from './localeOptionsLibrary';
-import { NODE_LIBRARY } from './nodeLibrary';
+import { NODE_LIBRARY, UNAVAILABLE_NODE_GLOBALS } from './nodeLibrary';
 import { Scope, Sym } from './scopes';
 import { undefinedType } from './types';
 
@@ -137,12 +137,12 @@ const unsupportedValues: Record<string, string> = {
   fetch: 'fetch などのネットワーク',
   alert: 'alert',
   prompt: 'prompt などの標準入力',
-  Buffer: 'Buffer',
 };
 
 export function markUnsupported(scope: Scope): void {
   for (const [name, feature] of [
     ...Object.entries(unsupportedValues),
+    ...UNAVAILABLE_NODE_GLOBALS.map((name) => [name, name]),
     ...omittedLibraryGlobals.map((name) => [name, name]),
     ...Object.keys(SHARED_HOST_GLOBALS).map((name) => [name, name]),
   ]) {
