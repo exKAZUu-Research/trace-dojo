@@ -467,12 +467,16 @@ define({
   },
   'Receiver<_>::iter': ([receiver], ctx) => receiverIter(ctx, receiver, true),
   'Receiver<_>::try_iter': ([receiver], ctx) => receiverIter(ctx, receiver, false),
-  'Duration::new': ([secs, nanos]) => new DurationValue((secs as bigint) * NANOS + (nanos as bigint)),
+  'Duration::new': ([secs, nanos], ctx) => {
+    const total = (secs as bigint) * NANOS + (nanos as bigint);
+    if (total > MAX_DURATION) libraryPanic(ctx, 'overflow in Duration::new', 'core/src/time.rs:201:18');
+    return new DurationValue(total);
+  },
   'Duration::from_secs': ([secs]) => new DurationValue((secs as bigint) * NANOS),
   'Duration::from_millis': ([millis]) => new DurationValue((millis as bigint) * 1_000_000n),
   'Duration::from_micros': ([micros]) => new DurationValue((micros as bigint) * 1000n),
   'Duration::from_nanos': ([nanos]) => new DurationValue(nanos as bigint),
-  'Duration::from_secs_f64': ([secs]) => new DurationValue(BigInt(Math.round((secs as number) * 1e9))),
+  'Duration::from_secs_f64': ([secs], ctx) => fromSecsF64(ctx, secs as number),
   'Duration::as_secs': ([d]) => duration(d) / NANOS,
   'Duration::as_millis': ([d]) => duration(d) / 1_000_000n,
   'Duration::as_micros': ([d]) => duration(d) / 1000n,
@@ -486,7 +490,7 @@ define({
   },
   'Duration::checked_sub': ([a, b], ctx) =>
     duration(a) >= duration(b) ? some(ctx, new DurationValue(duration(a) - duration(b))) : none(ctx),
-  'Duration::mul_f64': ([d, factor]) => new DurationValue(BigInt(Math.round(Number(duration(d)) * (factor as number)))),
+  'Duration::mul_f64': ([d, factor], ctx) => fromSecsF64(ctx, (Number(duration(d)) / 1e9) * (factor as number)),
   'const:ZERO': () => new DurationValue(0n),
   'Duration::add': ([a, b], ctx) => bounded(ctx, duration(a) + duration(b), 'overflow when adding durations'),
   'Duration::sub': ([a, b], ctx) => {
@@ -513,6 +517,15 @@ define({
 const MAX_DURATION = (2n ** 64n - 1n) * NANOS + (NANOS - 1n);
 
 const MUL_OVERFLOW = 'overflow when multiplying duration by scalar';
+
+/** `Duration::from_secs_f64`, which panics where std does for a negative, a too large, or a NaN number of seconds. */
+function fromSecsF64(ctx: NativeContext, secs: number): DurationValue {
+  const location = 'core/src/time.rs:962:23';
+  if (secs < 0) libraryPanic(ctx, 'cannot convert float seconds to Duration: value is negative', location);
+  if (!(secs < 2 ** 64))
+    libraryPanic(ctx, 'cannot convert float seconds to Duration: value is either too big or NaN', location);
+  return new DurationValue(BigInt(Math.round(secs * 1e9)));
+}
 
 /** A `Duration` of `nanos`, panicking as std does when it is longer than the longest one. */
 function bounded(ctx: NativeContext, nanos: bigint, message: string): DurationValue {
