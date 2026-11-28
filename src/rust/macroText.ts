@@ -2,12 +2,11 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { isComment } from './convertSyntax';
 import { writtenName } from './macroHygiene';
-import { isStringLiteral } from './macroRules';
+import { isStringLiteral, spacedBeforeParen } from './macroRules';
 
 /**
- * The text `stringify!` gives tokens: with one space where spaces or newlines separate them, but none around the
- * insides of brackets, before `,` and `;`, or before a call's `(`; `spacedOperators` puts a binary operator between
- * single spaces, as `assert!`'s message does.
+ * The text `stringify!` gives tokens: with one space where spaces or newlines separate them and `joinsAfter` keeps
+ * it; `spacedOperators` prints an expression as `assert!`'s message does, a binary operator between single spaces.
  */
 // code-gauge-allow functionCognitiveComplexity -- One walk over the tokens skips comments and expr variables' marks.
 export function tokenText(tokens: Node[], spacedOperators = false): string {
@@ -29,7 +28,7 @@ export function tokenText(tokens: Node[], spacedOperators = false): string {
       token.parent?.type === 'binary_expression' &&
       token.parent.childForFieldName('operator')?.id === token.id;
     const spaced = (end !== undefined && token.startIndex > end) || (operator && end !== undefined);
-    if (spaced && joinsAfter(previous, token.text)) text += ' ';
+    if (spaced && joinsAfter(previous, token.text, spacedOperators)) text += ' ';
     text += token.type === 'identifier' ? writtenName(token.text) : token.text;
     if (operator) text += ' ';
     end = operator ? Number.POSITIVE_INFINITY : token.endIndex;
@@ -39,10 +38,15 @@ export function tokenText(tokens: Node[], spacedOperators = false): string {
   return text;
 }
 
-/** Whether rustc's token printing keeps a space between two tokens: not around brackets' insides, `,`, `;`, or a call's `(`. */
-function joinsAfter(previous: string, next: string): boolean {
-  if (previous === ' ' || previous === '(' || previous === '[') return false;
-  if ([',', ';', ')', ']'].includes(next)) return false;
+/**
+ * Whether rustc keeps a space between two tokens: never inside brackets, around `.`, or before `,` and `;`. Its token
+ * printing (`stringify!`) keeps the source's space before `[` and before the `(` of a keyword; its expression printing
+ * (`assert!`'s message) drops it before a call's `(` and an index's `[`.
+ */
+function joinsAfter(previous: string, next: string, expression: boolean): boolean {
+  if ([' ', '(', '[', '.'].includes(previous)) return false;
+  if ([',', ';', ')', ']', '.'].includes(next)) return false;
+  if (!expression) return next !== '(' || spacedBeforeParen(previous);
   if (next === '(' || next === '[') return !/^[\p{L}\p{N}_)\]]/u.test(previous.at(-1) ?? '');
   return true;
 }

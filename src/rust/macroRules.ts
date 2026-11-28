@@ -505,8 +505,8 @@ function stringified(tokens: Token[]): Token[] {
 }
 
 /**
- * The text of tokens as `stringify!` gives it: with the spaces the source has between them, but none before `,`,
- * `;`, or a call's or an index's brackets, and none inside `( )` and `[ ]`, as rustc prints tokens.
+ * The text of tokens as `stringify!` gives it: with the spaces the source has between them where `spacedAfter` keeps
+ * them, and none inside `( )` and `[ ]`, as rustc prints tokens.
  */
 function writtenText(tokens: Token[], top = true, tight = false): string {
   return tokens
@@ -526,13 +526,28 @@ function groupText(group: Token & { kind: 'group' }, first: boolean, tight: bool
   return `${group.open}${inner}${group.closeSpaced && inner && !bracket ? ' ' : ''}${group.close}`;
 }
 
-/** Whether rustc's token printing keeps a space between two tokens: not before `,` and `;`, nor before a call's `(`. */
+/**
+ * Whether rustc's token printing keeps a space that the source has between two tokens: not before `,` and `;`, not
+ * around `.`, and not before the `(` of a name other than a keyword.
+ */
 export function spacedAfter(previous: Token | undefined, token: Token): boolean {
-  if (token.kind === 'leaf') return token.text !== ',' && token.text !== ';';
-  if (token.open !== '(' && token.open !== '[') return true;
-  if (previous === undefined) return true;
-  return previous.kind === 'leaf' ? !/^[\p{L}\p{N}_]/u.test(previous.text) : previous.open === '{';
+  if (leafText(previous) === '.') return false;
+  if (token.kind === 'leaf') return token.text !== ',' && token.text !== ';' && token.text !== '.';
+  if (token.open !== '(' || previous?.kind !== 'leaf') return true;
+  return spacedBeforeParen(previous.text);
 }
+
+/** Whether rustc's token printing keeps a source space between a token and a `(` after it. */
+export function spacedBeforeParen(previous: string): boolean {
+  return !/^[\p{L}_]/u.test(previous) || SPACED_BEFORE_PARENS.has(previous);
+}
+
+/** The keywords after which rustc keeps a space before `(`: all of edition 2024's but `fn`, `pub` and `Self`. */
+const SPACED_BEFORE_PARENS = new Set(
+  '_ abstract as async await become box break const continue crate do dyn else enum extern false final for gen if impl in let loop macro match mod move mut override priv ref return self static struct super trait true try type typeof unsafe unsized use virtual where while yield'.split(
+    ' '
+  )
+);
 
 function transcribeVar(name: string, bindings: Map<string, Binding>): Token[] {
   if (name === 'crate') return [{ kind: 'leaf', text: 'crate', type: 'crate' }];

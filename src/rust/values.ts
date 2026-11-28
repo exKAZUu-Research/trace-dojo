@@ -485,10 +485,10 @@ export class FutureValue {
   ) {}
 }
 
-/** A `Duration`, in nanoseconds. */
 /** The longest `Duration`, in nanoseconds: `u64::MAX` seconds and 999_999_999 nanoseconds. */
 export const MAX_DURATION = (2n ** 64n - 1n) * 1_000_000_000n + 999_999_999n;
 
+/** A `Duration`, in nanoseconds. */
 export class DurationValue {
   constructor(readonly nanos: bigint) {}
 }
