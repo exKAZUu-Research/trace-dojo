@@ -1,7 +1,6 @@
 import { compileError, type Module } from './items';
 import { type AdtDef, childTypes, shallow, type Type } from './types';
 
-/** Which of a struct's or enum's type and lifetime parameters its fields use. */
 interface Usage {
   params: boolean[];
   lifetimes: boolean[];
@@ -15,7 +14,8 @@ interface Usage {
 export function checkParamsUsed(def: AdtDef): void {
   const usage = usageOf(def);
   for (const [index, param] of def.params.entries()) {
-    if (usage.params[index]) continue;
+    // A const parameter needs no field: its value is part of the type.
+    if (usage.params[index] || param.constType) continue;
     const mentioned = fieldTypes(def).some((field) => someType(field, (t) => t.kind === 'param' && t.param === param));
     compileError(
       def.span,
@@ -56,7 +56,6 @@ function usageOf(root: AdtDef): Usage {
   return usages.get(root) as Usage;
 }
 
-/** Marks the parameters of `def` that a field's type uses. */
 class UsageMarker {
   changed = false;
 
@@ -74,8 +73,8 @@ class UsageMarker {
       for (const part of partsOf(t)) this.mark(part);
       return;
     }
-    // A declared type's argument is used only where that type uses its parameter.
-    const passed = this.usages.get(t.def);
+    // A declared type's argument is used only where that type uses its parameter; a projection (`C::Out`) uses all.
+    const passed = t.def.projection ? undefined : this.usages.get(t.def);
     for (const [index, lifetime] of (t.lifetimes ?? []).entries()) {
       if (!passed || passed.lifetimes[index]) this.markLifetime(lifetime);
     }

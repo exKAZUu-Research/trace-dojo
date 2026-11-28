@@ -3,6 +3,7 @@ import type { Expr, PathAst, Span, TypeAst } from './ast';
 import type { Checker } from './checker';
 import { selfParamType } from './checkerCalls';
 import { checkFieldVisible } from './checkerPlaces';
+import { argumentFor } from './genericArgs';
 import { normalize } from './infer';
 import {
   compileError,
@@ -13,24 +14,29 @@ import {
   lookupType,
   lookupValue,
   type Module,
+  reportUnavailableGlobs,
+  resolveTraitPath,
   resolveTypePath,
   type TypeBinding,
-  unavailableStdItem,
   type ValueBinding,
   visibilityScope,
   visibleFrom,
 } from './items';
 import { boundsOf, lookupAssociated } from './methods';
+import { INTERNAL_STD_HELPERS, isInternalStdHelper, unavailableStdItem } from './stdNames';
 import {
   adt,
   type AdtDef,
+  allSupertraits,
   CHAR,
   type FnDef,
   freshVar,
   intType,
   shallow,
   substitute,
+  substituteTraitRef,
   type TraitDef,
+  type TraitRef,
   type Type,
   type TypeParam,
   typeToString,
@@ -39,7 +45,19 @@ import {
 export function pathExpr(c: Checker, expr: Extract<Expr, { kind: 'path' }>, expected: Type | undefined): Type {
   const res = resolveValuePath(c, expr.path, expr.span);
   c.annotations.paths.set(expr, res);
+  // A destructor is not a value either (`let f = D::drop;`).
+  if (res.kind === 'fn') rejectDropCall(res.fn, expr.span);
+  if (res.kind === 'const' && res.def.ast.isMutable && !c.body.rawBorrowing) {
+    c.requireUnsafe(expr.span, 'static mut を使うこと');
+  }
   return typeOfRes(c, res, expr.span, expected);
+}
+
+/** Rejects naming a `Drop` impl's `drop`, which rustc calls only itself (E0040). */
+export function rejectDropCall(fn: FnDef, span: Span): void {
+  if (fn.trait?.builtin === 'Drop' || fn.impl?.trait?.trait.builtin === 'Drop') {
+    compileError(span, 'drop メソッドは直接呼べません（std::mem::drop(x) を使ってください。E0040）。');
+  }
 }
 
 export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type | undefined): Type {
@@ -78,7 +96,8 @@ export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type |
     case 'const': {
       return res.type;
     }
-    case 'builtinConst': {
+    case 'builtinConst':
+    case 'constParam': {
       return res.type;
     }
     case 'discard': {
@@ -87,7 +106,6 @@ export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type |
   }
 }
 
-/** The type arguments for a generic item: those written in the path, or fresh variables. */
 export function typeArgsFor(
   c: Checker,
   params: TypeParam[],
@@ -96,10 +114,19 @@ export function typeArgsFor(
   what: string
 ): Type[] {
   if (!written) return params.map(() => freshVar());
-  if (written.length !== params.length) {
+  // Parameters left out at the end take their defaults (`M::<3>` of `struct M<const N: usize, const B: bool = true>`).
+  const defaulted = written.length < params.length && params.slice(written.length).every((param) => param.defaultType);
+  if (written.length !== params.length && !defaulted) {
     compileError(span, `${what} の型引数の数が合いません（${params.length} 個です）。`);
   }
-  return written.map((arg) => c.lowerType(arg));
+  const args = written.map((arg, index) => c.lowerType(argumentFor(arg, params[index])));
+  const subst = new Map(params.slice(0, args.length).map((param, index) => [param, args[index]]));
+  for (const param of params.slice(args.length)) {
+    const type = substitute(param.defaultType as Type, subst);
+    subst.set(param, type);
+    args.push(type);
+  }
+  return args;
 }
 
 export function applyWrittenFnArgs(
@@ -122,6 +149,8 @@ export function resolveValuePath(c: Checker, path: PathAst, span: Span): PathRes
   // A path whose last segment names a value in a module, a variant of an enum, or an associated item of a type.
   const names = segments.map((segment) => segment.name);
   const last = segments.at(-1)!;
+  const qualified = segments[0].qualified;
+  if (qualified && segments.length === 2) return qualifiedValueRes(c, qualified, last, span);
   const owner = resolvePrefix(c, segments.slice(0, -1), span);
   if (owner.kind === 'mod') return moduleValueRes(c, owner.module, names, last, span);
   if (owner.kind === 'trait') {
@@ -134,18 +163,49 @@ export function resolveValuePath(c: Checker, path: PathAst, span: Span): PathRes
   return associatedValueRes(c, normalize(shallow(owner.type)), last, span);
 }
 
+/** `<T as Trait>::name` or `<T>::name`: an associated function or constant of `T`, of the trait if one is named. */
+function qualifiedValueRes(
+  c: Checker,
+  qualified: NonNullable<PathAst['segments'][number]['qualified']>,
+  last: PathAst['segments'][number],
+  span: Span
+): PathRes {
+  const self = c.lowerType(qualified.self);
+  if (!qualified.trait) return associatedValueRes(c, normalize(shallow(self)), last, span);
+  const ref = resolveTraitPath(qualified.trait, c.typeScope(), self);
+  c.require(self, ref, span);
+  const constant = ref.trait.consts.get(last.name);
+  if (constant) {
+    const subst = new Map([
+      [ref.trait.self, self],
+      ...ref.trait.params.map((param, index): [TypeParam, Type] => [param, ref.args[index]]),
+    ]);
+    return { kind: 'const', def: constant, type: substitute(constant.type, subst), typeArgs: [self, ...ref.args] };
+  }
+  const fn = ref.trait.methods.get(last.name);
+  if (!fn) compileError(span, `トレイト ${ref.trait.name} に ${last.name} がありません。`);
+  const typeArgs = [self, ...ref.args, ...fn.params.slice(fn.parentParamCount).map(() => freshVar())];
+  applyWrittenFnArgs(c, fn, typeArgs, last.args, span);
+  return { kind: 'fn', fn, typeArgs };
+}
+
 function singleNameRes(c: Checker, segment: PathAst['segments'][number], span: Span): PathRes {
   const name = segment.name;
   if (name === '_') return { kind: 'discard' };
   const local = c.findLocal(name);
   if (local) return c.localRes(local);
+  const constParam = c.body.typeParams.get(name);
+  if (constParam?.constType) return { kind: 'constParam', param: constParam, type: c.lowerType(constParam.constType) };
   if (name === 'self') compileError(span, 'self は、self を引数に取るメソッドの中にだけ書けます。');
   if (name === 'Self') return selfCtor(c, span);
-  const binding = lookupValue(c.body.module, name, span);
+  const found = lookupValue(c.body.module, name, span);
+  // A glob of `std::pin` brings no helper that only macro expansions call.
+  const binding = found && isInternalStdHelper(found) ? undefined : found;
   if (!binding) {
     if (lookupType(c.body.module, name, span)) {
       compileError(span, `${name} は型の名前で、値ではありません。`);
     }
+    reportUnavailableGlobs(c.body.module, name, span);
     compileError(span, `${name} が見つかりません。`);
   }
   return valueBindingRes(c, binding, segment.args, span, name);
@@ -158,7 +218,9 @@ function moduleValueRes(
   last: PathAst['segments'][number],
   span: Span
 ): PathRes {
-  const binding = lookupQualifiedValue(module, c.body.module, last.name, span);
+  // The helpers that macro expansions call (`pin!`, C string literals) are not part of std for programs.
+  const hidden = module.isStd && INTERNAL_STD_HELPERS.has(last.name) && !last.internal;
+  const binding = hidden ? undefined : lookupQualifiedValue(module, c.body.module, last.name, span);
   if (!binding) {
     if (module.isStd) unavailableStdItem([...module.path.split('::'), last.name], span);
     compileError(span, `${names.join('::')} が見つかりません。`);
@@ -234,7 +296,6 @@ export function checkMethodVisible(c: Checker, fn: FnDef, span: Span): void {
   }
 }
 
-/** A method of the program's own trait impl is callable only where the trait is in scope, as rustc requires. */
 /**
  * Rejects a function of a trait that is not in scope: the program's traits by their impls, and the standard library's
  * outside the prelude. A bound of a type parameter, a trait object, or an opaque type brings its traits into scope.
@@ -263,7 +324,7 @@ function associatedConst(c: Checker, t: Type, name: string, span: Span): PathRes
   }
   if (t.kind === 'char' && name === 'MAX') return { kind: 'builtinConst', type: CHAR, name: 'char::MAX' };
   const found = lookupAssociatedConst(c.solver, c.body.module, t, name, span);
-  if (!found) return undefined;
+  if (!found) return traitConst(c, t, name);
   const { def, subst } = found;
   return {
     kind: 'const',
@@ -271,6 +332,26 @@ function associatedConst(c: Checker, t: Type, name: string, span: Span): PathRes
     type: substitute(def.type, subst),
     typeArgs: def.impl!.params.map((param) => subst.get(param) ?? { kind: 'param', param }),
   };
+}
+
+/** A constant a trait declares, on a type bounded by the trait or with an impl of it that leaves the default. */
+function traitConst(c: Checker, t: Type, name: string): PathRes | undefined {
+  const bounds = boundsOf(t);
+  const refs: TraitRef[] = bounds
+    ? allSupertraits(bounds, t)
+    : c.program.impls.flatMap((impl) => {
+        if (!impl.trait?.trait.consts.has(name)) return [];
+        const subst = c.solver.matchImpl(impl, t);
+        return subst ? [substituteTraitRef(impl.trait, subst)] : [];
+      });
+  const ref = refs.find((candidate) => candidate.trait.consts.has(name));
+  if (!ref) return undefined;
+  const def = ref.trait.consts.get(name)!;
+  const subst = new Map([
+    [ref.trait.self, t],
+    ...ref.trait.params.map((param, index): [TypeParam, Type] => [param, ref.args[index]]),
+  ]);
+  return { kind: 'const', def, type: substitute(def.type, subst), typeArgs: [t, ...ref.args] };
 }
 
 function selfCtor(c: Checker, span: Span): PathRes {
@@ -298,6 +379,12 @@ function resolvePrefix(
   if (names.length === 1 && names[0] === 'Self') {
     if (!c.body.selfType) compileError(span, 'Self は、impl やトレイトの中にだけ書けます。');
     return { kind: 'type', type: c.body.selfType };
+  }
+  // An associated type of `Self`, a type parameter, or a qualified type (`Self::Out::default()`,
+  // `<S as Tr>::Out::default()`), as it is in a type's place.
+  const projected = names[0] === 'Self' || c.body.typeParams.has(names[0]) || prefix[0].qualified !== undefined;
+  if (names.length === 2 && projected) {
+    return { kind: 'type', type: c.lowerType({ kind: 'path', path: { segments: prefix, span }, span }) };
   }
   const binding = resolveTypePath(names, c.body.module, span);
   switch (binding.kind) {
@@ -381,8 +468,14 @@ export function structExpr(c: Checker, expr: Extract<Expr, { kind: 'struct' }>, 
   c.annotations.paths.set(expr, { kind: 'ctor', def, variant, typeArgs });
   if (expr.base) {
     if (def.kind === 'enum') compileError(expr.base.span, '列挙子には .. を書けません。');
+    if (def.isUnion) compileError(expr.base.span, '共用体の式には .. を書けません（E0436）。');
     for (const field of variantDef.fields) if (!seen.has(field.name)) checkFieldVisible(c, def, field, expr.base.span);
     c.coerceExpr(expr.base, self);
+    return self;
+  }
+  if (def.isUnion) {
+    if (expr.fields.length !== 1)
+      compileError(expr.span, '共用体は、フィールドを1つだけ書いて作ってください（E0784）。');
     return self;
   }
   const missing = variantDef.fields.filter((field) => !seen.has(field.name)).map((field) => field.name);

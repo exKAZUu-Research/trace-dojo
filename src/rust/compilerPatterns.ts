@@ -1,23 +1,49 @@
 import type { LocalVar, PathRes } from './annotations';
 import type { Expr, Pattern } from './ast';
+import { patternBindingParts } from './astWalk';
 import type { Compiler } from './compiler';
-import { derefAll, isPlaceExpr, isRefType } from './compilerCommon';
+import { derefAll, isPlaceExpr, isRefType, stripRefs } from './compilerCommon';
+import { holdTemporary } from './compilerTemporaries';
 import { normalize } from './infer';
 import { projectedBindings } from './loanCaptures';
-import { copyValue, needsCopy, valuesEqual } from './ops';
+import { derefOnce } from './methods';
+import { compareValues, copyValue, needsCopy, valuesEqual } from './ops';
 import { type Frame, MOVED } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { resolve, shallow, type Type } from './types';
-import { CellPlace, ElementPlace, type EnumValue, isPlace, type Place, type StructValue, type Value } from './values';
+import {
+  CellPlace,
+  ElementPlace,
+  type EnumValue,
+  isPlace,
+  type Place,
+  sliceBase,
+  sliceLength,
+  SliceView,
+  type StructValue,
+  type Value,
+} from './values';
 
 export type Matcher = (frame: Frame, value: Value, place: (() => Place) | undefined) => boolean;
 
-type PatternProbe = (frame: Frame, value: Value, place: (() => Place) | undefined, bindings: (() => void)[]) => boolean;
+/** A step of binding a pattern's variables; `movesOut` marks one that leaves a moved part in the matched value. */
+type Binding = (() => void) & { movesOut?: boolean };
+
+type PatternProbe = (frame: Frame, value: Value, place: (() => Place) | undefined, bindings: Binding[]) => boolean;
 
 type PatternOf<K extends Pattern['kind']> = Extract<Pattern, { kind: K }>;
 
-export function compilePatternInput(c: Compiler, expr: Expr): (frame: Frame) => { value: Value; place: Place } {
-  if (expr.kind === 'index' && c.annotations.indexes.get(expr)?.container === 'map') {
+/**
+ * The value a pattern matches and the place it lives in. A `*` or an index through the program's `Deref` or `Index`
+ * reaches it through `deref` or `index`, as rustc does, unless a pattern binds part of it by `ref mut`.
+ */
+export function compilePatternInput(
+  c: Compiler,
+  expr: Expr,
+  patterns: Pattern[]
+): (frame: Frame) => { value: Value; place: Place } {
+  const overloaded = readsThroughUserImpl(c, expr) && !patterns.some((pattern) => bindsByRefMut(c, pattern));
+  if (overloaded || (expr.kind === 'index' && c.annotations.indexes.get(expr)?.container === 'map')) {
     const read = c.read(expr);
     return (frame) => {
       const value = read(frame);
@@ -29,10 +55,38 @@ export function compilePatternInput(c: Compiler, expr: Expr): (frame: Frame) => 
     const read = c.read(expr);
     return (frame) => ({ value: read(frame), place: place(frame) });
   }
+  // A value that no variable holds is a temporary, which goes with what the patterns leave of it.
+  const dropped = isPlaceExpr(expr, c.annotations) ? undefined : c.droppedType(expr.ty);
   return (frame) => {
     const evaluated = place(frame);
+    if (dropped) holdTemporary(frame, evaluated, dropped(frame));
     return { value: evaluated.get(), place: evaluated };
   };
+}
+
+/**
+ * Whether a place is reached through the program's `Deref` or `Index`, where reading it calls `deref` or `index` and
+ * only writing it calls `deref_mut` or `index_mut`.
+ */
+export function readsThroughUserImpl(c: Compiler, expr: Expr): boolean {
+  for (let part = expr; part.kind === 'index' || part.kind === 'field' || part.kind === 'unary'; part = part.operand) {
+    if (part.kind === 'unary' && part.op !== '*') return false;
+    if (stepsThroughUserImpl(c, part)) return true;
+  }
+  return false;
+}
+
+function stepsThroughUserImpl(c: Compiler, part: Extract<Expr, { kind: 'index' | 'field' | 'unary' }>): boolean {
+  if (part.kind === 'index') {
+    const index = c.annotations.indexes.get(part);
+    return index?.container === 'user' || index?.derefs.includes('user') === true;
+  }
+  if (part.kind === 'field') return c.annotations.fields.get(part)?.derefs.includes('user') === true;
+  return derefOnce(c.program, normalize(shallow(part.operand.ty!)))?.kind === 'user';
+}
+
+function bindsByRefMut(c: Compiler, pattern: Pattern): boolean {
+  return patternBindingParts(pattern, c.annotations).some(({ local, refMut }) => refMut || local.mode === 'refMut');
 }
 
 /**
@@ -40,12 +94,30 @@ export function compilePatternInput(c: Compiler, expr: Expr): (frame: Frame) => 
  * bindings that bind by mutable reference.
  */
 export function compileMatcher(c: Compiler, pattern: Pattern): Matcher {
+  const matcher = compileGuardedMatcher(c, pattern);
+  return (frame, value, place) => {
+    const moveOut = matcher(frame, value, place);
+    moveOut?.();
+    return moveOut !== undefined;
+  };
+}
+
+/**
+ * Matches a value against a pattern as {@link compileMatcher} does, but leaves the parts that bindings move out of the
+ * value in place until the returned function runs, as a match arm's guard sees them before the arm takes them.
+ */
+export function compileGuardedMatcher(
+  c: Compiler,
+  pattern: Pattern
+): (frame: Frame, value: Value, place: (() => Place) | undefined) => (() => void) | undefined {
   const probe = compileProbe(c, pattern);
   return (frame, value, place) => {
-    const bindings: (() => void)[] = [];
-    if (!probe(frame, value, place, bindings)) return false;
-    for (const bind of bindings) bind();
-    return true;
+    const bindings: Binding[] = [];
+    if (!probe(frame, value, place, bindings)) return;
+    for (const bind of bindings) if (!bind.movesOut) bind();
+    return () => {
+      for (const bind of bindings) if (bind.movesOut) bind();
+    };
   };
 }
 
@@ -80,7 +152,107 @@ function compileProbe(c: Compiler, pattern: Pattern): PatternProbe {
     case 'or': {
       return orMatcher(c, pattern);
     }
+    case 'range': {
+      return rangeMatcher(c, pattern, type);
+    }
+    case 'slice': {
+      return sliceMatcher(c, pattern);
+    }
+    case 'rest': {
+      return () => true;
+    }
   }
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Compares both ends of a range pattern.
+function rangeMatcher(c: Compiler, pattern: PatternOf<'range'>, type: Type): PatternProbe {
+  const endValue = (end: Pattern | undefined): ((frame: Frame) => Value) | undefined => {
+    if (!end) return undefined;
+    if (end.kind === 'lit') return c.value(end.expr);
+    const res = c.annotations.paths.get(end);
+    if (res?.kind === 'builtinConst') {
+      const value = c.support.builtinConst(res.name);
+      return () => value;
+    }
+    return res?.kind === 'const' ? compileConstant(c, res) : undefined;
+  };
+  const start = endValue(pattern.start);
+  const end = endValue(pattern.end);
+  const valueType = stripRefs(type);
+  const inclusive = pattern.inclusive;
+  return (frame, value) => {
+    const target = derefAll(value);
+    if (start && !((compareValues(valueType, start(frame), target, true) ?? 1) <= 0)) return false;
+    if (!end) return true;
+    const order = compareValues(valueType, target, end(frame), true);
+    return order !== undefined && (inclusive ? order <= 0 : order < 0);
+  };
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Matches elements before and after the rest element.
+function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
+  const rest = pattern.restIndex;
+  const elems = pattern.elems.map((elem, index) => (index === rest ? undefined : compileProbe(c, elem)));
+  const fixed = pattern.elems.length - (rest === undefined ? 0 : 1);
+  const restBinder = rest === undefined ? undefined : compileRestBinder(c, pattern.elems[rest]);
+  // An element after the `..` counts from the end.
+  const offsetOf = (index: number, after: number): number =>
+    rest !== undefined && index > rest ? index - 1 + after : index;
+  return (frame, value, place, bindings) => {
+    const target = derefAll(value);
+    const { base, start } = sliceBase(target);
+    const length = sliceLength(target);
+    if (rest === undefined ? length !== fixed : length < fixed) return false;
+    const after = length - fixed;
+    for (const [index, elem] of elems.entries()) {
+      const position = start + offsetOf(index, after);
+      const elemPlace = place || isPlace(value) ? () => new ElementPlace(base, position) : undefined;
+      if (elem && !elem(frame, base[position], elemPlace, bindings)) return false;
+    }
+    const from = start + (rest ?? 0);
+    restBinder?.(frame, target, from, from + after, place !== undefined || isPlace(value), bindings);
+    return true;
+  };
+}
+
+type RestBinder = (
+  frame: Frame,
+  target: Value,
+  from: number,
+  to: number,
+  hasPlace: boolean,
+  bindings: Binding[]
+) => void;
+
+/** Binds `rest @ ..` to the elements from `from` to `to`, moving them out of an array it takes by value. */
+function compileRestBinder(c: Compiler, restBinding: Pattern): RestBinder | undefined {
+  const restLocal = c.annotations.bindings.get(restBinding);
+  if (!restLocal) return undefined;
+  const restType = normalize(shallow(restLocal.type));
+  const restMode = restType.kind !== 'ref' ? 'value' : restType.mutable ? 'mut' : 'ref';
+  const movesOut = restMode === 'value' && !c.isCopy(restLocal.type);
+  return (frame, target, from, to, hasPlace, bindings) => {
+    const { base } = sliceBase(target);
+    bindings.push(() => (frame.locals[restLocal.slot] = sliceRest(target, base, from, to, restMode)));
+    if (movesOut && hasPlace) bindings.push(movingOut(base, from, to));
+  };
+}
+
+function movingOut(base: Value[], from: number, to: number): (() => void) & { movesOut: true } {
+  const moveOut = (): void => {
+    base.fill(MOVED, from, to);
+  };
+  return Object.assign(moveOut, { movesOut: true as const });
+}
+
+/**
+ * What `rest @ ..` binds: a view of the elements, the place of that view for a `&mut [T]` (as `&mut v[a..b]` makes),
+ * or for a pattern on an array by value, an array of them.
+ */
+function sliceRest(target: Value, base: Value[], from: number, to: number, mode: 'value' | 'ref' | 'mut'): Value {
+  if (mode === 'value') return base.slice(from, to);
+  const view = new SliceView(base, from, to, target instanceof SliceView ? target.owner : undefined);
+  return mode === 'mut' ? new CellPlace(view) : view;
 }
 
 function orMatcher(c: Compiler, pattern: PatternOf<'or'>): PatternProbe {
@@ -103,17 +275,18 @@ function bindingMatcher(c: Compiler, pattern: PatternOf<'binding'>, type: Type):
   const sub = pattern.sub ? compileProbe(c, pattern.sub) : undefined;
   const copies = local.mode === 'move' && needsCopy(resolve(local.type, true)) && c.isCopy(local.type);
   const localType = normalize(shallow(local.type));
+  // An explicit `ref mut`, or a default binding mode, borrows what it matches, even a value that is itself a reference.
+  const mode = pattern.byRef === 'refMut' || pattern.inheritedRef === 'refMut' ? 'refMut' : local.mode;
   // Match ergonomics on a `&mut` value gives the parts of the value with `&mut` types, which are their places.
-  const bindsPlace = local.mode === 'refMut' || (localType.kind === 'ref' && localType.mutable);
+  const bindsPlace = mode === 'refMut' || (localType.kind === 'ref' && localType.mutable);
   // Binding a part of a variable by value moves it out, leaving the variable without it, as Rust does.
   const movesOut = local.mode === 'move' && localType.kind !== 'ref' && !c.isCopy(local.type);
   return (frame, value, place, bindings) => {
     if (sub && !sub(frame, value, place, bindings)) return false;
     bindings.push(() => {
-      frame.locals[local.slot] = boundValue(value, place, local.mode, bindsPlace, copies);
-      if (!movesOut || !place) return;
-      place().set(MOVED);
+      frame.locals[local.slot] = boundValue(value, place, mode, bindsPlace, copies);
     });
+    if (movesOut && place) bindings.push(Object.assign(() => place().set(MOVED), { movesOut: true }));
     return true;
   };
 }
@@ -159,7 +332,6 @@ function ctorMatcher(c: Compiler, pattern: PatternOf<'tupleStruct' | 'struct' | 
   };
 }
 
-/** The matchers of a constructor pattern's fields, with the indexes of the fields they match. */
 function fieldMatchers(
   c: Compiler,
   pattern: PatternOf<'tupleStruct' | 'struct' | 'path'>,
@@ -186,6 +358,10 @@ function constMatcher(c: Compiler, res: PathRes, type: Type): (frame: Frame, val
   if (res.kind === 'const') {
     const read = compileConstant(c, res);
     return (frame, value) => valuesEqual(type, derefAll(value), read(frame));
+  }
+  if (res.kind === 'builtinConst') {
+    const constant = c.support.builtinConst(res.name);
+    return (_frame, value) => valuesEqual(type, derefAll(value), constant);
   }
   return () => true;
 }

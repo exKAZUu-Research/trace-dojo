@@ -2,7 +2,7 @@
 import { collectionKeyAnswer } from './collectionBounds';
 import { isPseudo, normalize } from './infer';
 import { debugOperands, supportsDebug } from './iterDebug';
-import { dynIteratorTarget, intoIterItem } from './iterTypes';
+import { dynIteratorTarget, intoIterItem, isUserIterator } from './iterTypes';
 import { arrayTryFrom, conversionExists, inferNumericSource, intoConversion } from './traitConversions';
 import { doubleEndedSearcher, iteratorCapability } from './traitIterators';
 import type { Answer, TraitSolver } from './traits';
@@ -11,6 +11,9 @@ import {
   isBuiltin,
   isIteratorShape,
   isSigned,
+  ref,
+  resolve,
+  sameType,
   shallow,
   substitute,
   type TraitRef,
@@ -18,7 +21,6 @@ import {
   USIZE,
 } from './types';
 
-/** A question of whether a type implements one of the standard library's traits. */
 interface Goal {
   solver: TraitSolver;
   t: Type;
@@ -51,6 +53,39 @@ const CLONE_CONTAINERS = new Set([
 ]);
 
 const DEBUG_TYPES = new Set([
+  'Stdin',
+  'StdinLock',
+  'Stdout',
+  'StdoutLock',
+  'Stderr',
+  'StderrLock',
+  'BufReader',
+  'BufWriter',
+  'OpenOptions',
+  'CStr',
+  'Pin',
+  'Arc',
+  'Mutex',
+  'RwLock',
+  'MutexGuard',
+  'RwLockReadGuard',
+  'RwLockWriteGuard',
+  'Duration',
+  'Thread',
+  'Sender',
+  'Receiver',
+  'JoinHandle',
+  'Path',
+  'PathBuf',
+  'PathDisplay',
+  'File',
+  'IoErrorKind',
+  'Cell',
+  'Rc',
+  'Weak',
+  'RefCell',
+  'Ref',
+  'RefMut',
   'String',
   'Vec',
   'HashMap',
@@ -84,7 +119,24 @@ const DEBUG_TYPES = new Set([
   'OccupiedEntry',
 ]);
 
+/**
+ * Types whose `Debug` hides what they hold (`(Weak)`, `Sender { .. }`, `Poisoned(..)`, a pointer's address), so it
+ * needs nothing of it.
+ */
+const OPAQUE_DEBUG_TYPES = new Set([
+  'SendError',
+  'PoisonError',
+  'TryLockError',
+  'Weak',
+  'Sender',
+  'Receiver',
+  'JoinHandle',
+  'ConstPtr',
+  'MutPtr',
+]);
+
 const DEFAULT_TYPES = new Set([
+  'Weak',
   'String',
   'Vec',
   'HashMap',
@@ -122,11 +174,26 @@ export const RANGE_TYPES = new Set([
   'RangeFull',
 ]);
 
+const DEREF_TYPES = new Set([
+  'Rc',
+  'Ref',
+  'RefMut',
+  'Box',
+  'String',
+  'Vec',
+  'Arc',
+  'MutexGuard',
+  'RwLockReadGuard',
+  'RwLockWriteGuard',
+]);
+const DEREF_MUT_TYPES = new Set(['RefMut', 'Box', 'String', 'Vec', 'MutexGuard', 'RwLockWriteGuard']);
+
 const RULES: Record<string, Rule> = {
   Sized: sized,
   Static: () => 'yes',
   Send: autoTrait,
   Sync: autoTrait,
+  Unpin: unpin,
   Copy: copy,
   Clone: clone,
   Debug: debug,
@@ -180,7 +247,149 @@ const RULES: Record<string, Rule> = {
   Into: fromInto,
   TryFrom: tryFrom,
   TryInto: tryFrom,
+  ...Object.fromEntries(
+    ['Add', 'Sub', 'Mul', 'Div', 'Rem', 'BitAnd', 'BitOr', 'BitXor', 'Shl', 'Shr'].flatMap((name): [string, Rule][] => [
+      [name, (goal) => numericOperator(goal, name, false)],
+      [`${name}Assign`, (goal) => numericOperator(goal, name, true)],
+    ])
+  ),
+  Deref: ({ t }) =>
+    t.kind === 'adt' && DEREF_TYPES.has(t.def.builtin ?? '') ? 'yes' : t.kind === 'ref' ? 'yes' : 'no',
+  DerefMut: ({ t }) =>
+    t.kind === 'adt' && DEREF_MUT_TYPES.has(t.def.builtin ?? '') ? 'yes' : t.kind === 'ref' && t.mutable ? 'yes' : 'no',
+  AsPath: ({ t }) => (isPathLike(t) ? 'yes' : 'no'),
+  AsBytes: ({ t }) => (isBytesLike(t) ? 'yes' : 'no'),
+  Index: (goal) => indexes(goal, false),
+  IndexMut: (goal) => indexes(goal, true),
+  Neg: ({ t }) => {
+    const n = operatorNumber(t);
+    return n && (n.kind === 'float' || (n.kind === 'int' && n.name.startsWith('i'))) ? 'yes' : 'no';
+  },
+  Not: ({ t }) => {
+    const n = operatorNumber(t);
+    return n && (n.kind === 'int' || n.kind === 'bool') ? 'yes' : 'no';
+  },
 };
+
+/**
+ * std's `Index<usize>` (and `IndexMut<usize>`) of arrays, slices, `Vec` and `VecDeque`, and `Index<&K>` of maps,
+ * whose `Output` the projection gives.
+ */
+function indexes({ solver, t, ref }: Goal, mutable: boolean): Answer {
+  const index = ref.args[0] && normalize(shallow(ref.args[0]));
+  // A range of `usize` indexes a slice of what a slice-like type holds, and of a string's text.
+  const sliceLike = t.kind === 'array' || t.kind === 'slice' || isBuiltin(t, 'Vec');
+  if (index && isUsizeRange(solver, index) && (sliceLike || t.kind === 'str' || isBuiltin(t, 'String'))) return 'yes';
+  if (sliceLike || isBuiltin(t, 'VecDeque')) return indexesByUsize(solver, index);
+  const map = isBuiltin(t, 'HashMap') || isBuiltin(t, 'BTreeMap');
+  return map && !mutable && (!index || index.kind === 'ref' || index.kind === 'var') ? 'yes' : 'no';
+}
+
+function isUsizeRange(solver: TraitSolver, index: Type): boolean {
+  if (index.kind !== 'adt' || !(RANGE_TYPES.has(index.def.builtin ?? '') || index.def.builtin === 'RangeFull'))
+    return false;
+  return index.args.every((arg) => solver.unifier.tryUnify(arg, USIZE));
+}
+
+function indexesByUsize(solver: TraitSolver, index: Type | undefined): Answer {
+  if (!index) return 'yes';
+  if (index.kind === 'var') return solver.unifier.tryUnify(index, USIZE) ? 'yes' : 'no';
+  return index.kind === 'int' && index.name === 'usize' ? 'yes' : 'no';
+}
+
+function isPathLike(type: Type): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return isPathLike(t.target);
+  if (t.kind === 'str') return true;
+  return t.kind === 'adt' && ['String', 'Path', 'PathBuf'].includes(t.def.builtin ?? '');
+}
+
+/** What `fs::write` writes: text, or bytes in a slice, an array, or a `Vec`, or a reference to one. */
+function isBytesLike(type: Type): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return isBytesLike(t.target);
+  if (t.kind === 'str' || (t.kind === 'adt' && t.def.builtin === 'String')) return true;
+  const elem =
+    t.kind === 'slice' || t.kind === 'array'
+      ? t.elem
+      : t.kind === 'adt' && t.def.builtin === 'Vec'
+        ? t.args[0]
+        : undefined;
+  const e = elem && normalize(shallow(elem));
+  return e?.kind === 'int' && e.name === 'u8';
+}
+
+/** A number or `bool`, or a shared reference to one, which std's operator impls take. */
+function operatorNumber(type: Type | undefined): (Type & { kind: 'int' | 'float' | 'bool' }) | undefined {
+  const t = type && normalize(shallow(type));
+  if (t?.kind === 'ref' && !t.mutable) {
+    const target = normalize(shallow(t.target));
+    return target.kind === 'int' || target.kind === 'float' || target.kind === 'bool' ? target : undefined;
+  }
+  return t?.kind === 'int' || t?.kind === 'float' || t?.kind === 'bool' ? t : undefined;
+}
+
+/**
+ * std's impls of the arithmetic, bitwise, and shift operators (and their assignments) for numbers: both sides of one
+ * type (through `&` too), except shifts, which take any integer on the right; `String + &str` and `String += &str`.
+ */
+// code-gauge-allow functionCognitiveComplexity -- Follows std's operator impls for numbers and String case by case.
+function numericOperator({ solver, t, ref }: Goal, name: string, assign: boolean): Answer {
+  if (assign && t.kind === 'ref') return 'no';
+  const rhs = ref.args[0] && normalize(shallow(ref.args[0]));
+  if (t.kind === 'adt' && t.def.builtin === 'String' && name === 'Add') return stringAdd(solver, rhs);
+  const literal = untypedLeft(solver, t, rhs, name);
+  if (literal) return literal;
+  const left = operatorNumber(t);
+  if (!left || !numberTakes(left, name)) return 'no';
+  const untyped = untypedRight(solver, left, rhs, name);
+  if (untyped) return untyped;
+  const right = operatorNumber(rhs);
+  if (!right) return 'no';
+  if (name === 'Shl' || name === 'Shr') return left.kind === 'int' && right.kind === 'int' ? 'yes' : 'no';
+  return solver.unifier.tryUnify(left, right) ? 'yes' : 'no';
+}
+
+/**
+ * The answer for a right side not known yet: a number literal, or `&` of one (`1i32.add(&2)`), takes the left side's
+ * type; anything else (the argument of `a.add(&b)`) may still be a reference. Undefined for a right side known.
+ */
+function untypedRight(solver: TraitSolver, left: Type, rhs: Type | undefined, name: string): Answer | undefined {
+  const shift = name === 'Shl' || name === 'Shr';
+  if (!rhs) return 'yes';
+  const target = rhs.kind === 'ref' && !rhs.mutable ? normalize(shallow(rhs.target)) : rhs;
+  if (target.kind !== 'var') return undefined;
+  // A shift takes any integer on the right, so its untyped right side (`a.shl(&3)`) waits for its own type.
+  if (shift || !target.v.literal) return 'unknown';
+  return solver.unifier.tryUnify(target, left) ? 'yes' : 'no';
+}
+
+/**
+ * The answer for an untyped number on the left, or `&` of one (`Add::add(&2, x)`): it takes the type of a number of
+ * its kind on the right, as std's impls take one type on both sides; a shift's right side tells nothing. Undefined
+ * for a left side known.
+ */
+function untypedLeft(solver: TraitSolver, t: Type, rhs: Type | undefined, name: string): Answer | undefined {
+  const target = t.kind === 'ref' && !t.mutable ? normalize(shallow(t.target)) : t;
+  if (target.kind !== 'var' || !target.v.literal) return undefined;
+  const right = operatorNumber(rhs);
+  if (!right || right.kind !== target.v.literal || name === 'Shl' || name === 'Shr') return 'unknown';
+  return solver.unifier.tryUnify(target, right) ? 'yes' : 'no';
+}
+
+/** `String + &str`, which settles a right side not known yet as `&str`. */
+function stringAdd(solver: TraitSolver, rhs: Type | undefined): Answer {
+  if (rhs?.kind === 'var') {
+    return solver.unifier.tryUnify(rhs, { kind: 'ref', mutable: false, target: { kind: 'str' } }) ? 'yes' : 'no';
+  }
+  return rhs?.kind === 'ref' && normalize(shallow(rhs.target)).kind === 'str' ? 'yes' : 'no';
+}
+
+/** Whether std implements the operator for numbers of this kind: floats have no bit operations, and `bool` only them. */
+function numberTakes(left: Type, name: string): boolean {
+  if (left.kind === 'float') return !['BitAnd', 'BitOr', 'BitXor', 'Shl', 'Shr'].includes(name);
+  return left.kind !== 'bool' || ['BitAnd', 'BitOr', 'BitXor'].includes(name);
+}
 
 /** Whether a type of the standard library (or a derive) implements one of its traits, as std's impls decide. */
 export function builtinImplements(solver: TraitSolver, t: Type, ref: TraitRef): Answer {
@@ -221,9 +430,63 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
   }
   if (t.kind === 'tuple') return all(t.elems);
   if (t.kind === 'array' || t.kind === 'slice') return all([t.elem]);
-  if (t.kind === 'closure') return all(t.closure.captures?.map(({ type }) => type) ?? []);
-  if (t.kind === 'adt') return all(t.args);
+  // A closure holds what it captures by reference as `&T` or `&mut T`, which need `T: Sync` and `T: Send` to send.
+  if (t.kind === 'closure') return all(capturedTypes(t));
+  if (t.kind === 'adt')
+    return t.def.builtin ? builtinAutoTrait(solver, t, name, all) : programAdtAutoTrait(t, name, all);
   return 'yes';
+}
+
+function builtinAutoTrait(solver: TraitSolver, t: AdtType, name: string, all: Goal['all']): Answer {
+  const builtin = t.def.builtin ?? '';
+  // `Rc` shares its count between threads unsynchronized, and `Cell`, `RefCell`, and their guards may not be shared.
+  if (['Rc', 'Weak', 'ConstPtr', 'MutPtr'].includes(builtin)) return 'no';
+  // `Arc<T>` shares `T` between threads, which needs it both `Send` and `Sync`.
+  if (builtin === 'Arc') return implementsAll(solver, t.args[0], ['Send', 'Sync']);
+  if (builtin === 'Mutex' || builtin === 'RwLock') {
+    // `RwLock<T>` lends `&T` to several threads at once, so sharing it also needs `T: Sync`.
+    const bounds = name === 'Sync' && builtin === 'RwLock' ? ['Send', 'Sync'] : ['Send'];
+    return implementsAll(solver, t.args[0], bounds);
+  }
+  if (name === 'Send' && ['MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard', 'Ref', 'RefMut'].includes(builtin)) {
+    return 'no';
+  }
+  // `Sender<T>` may be shared between threads whenever `T` may be sent (since Rust 1.72).
+  if (name === 'Sync' && builtin === 'Sender') return implementsAll(solver, t.args[0], ['Send']);
+  if (name === 'Sync' && ['Receiver', 'Cell', 'RefCell', 'Ref', 'RefMut'].includes(builtin)) return 'no';
+  return all(t.args);
+}
+
+/**
+ * The goals of the program's types whose auto traits are being decided, which a recursive type assumes of itself, as
+ * rustc does; a goal of another trait, definition or arguments (`W<Rc<i32>>` inside `W<i32>`) is decided on its own.
+ */
+const autoTraitGoals: { trait: string; t: AdtType }[] = [];
+
+/** How deep one definition may nest in its own fields with ever new arguments (`W<T>` holding a `W<Vec<T>>`). */
+const MAX_AUTO_TRAIT_NESTING = 8;
+
+/** A program's struct or enum is `Send` or `Sync` when every field of every variant is. */
+function programAdtAutoTrait(t: AdtType, trait: string, all: (types: Type[]) => Answer): Answer {
+  const same = autoTraitGoals.filter((goal) => goal.trait === trait && goal.t.def === t.def);
+  if (same.length >= MAX_AUTO_TRAIT_NESTING || same.some((goal) => sameType(resolve(goal.t), resolve(t)))) return 'yes';
+  autoTraitGoals.push({ trait, t });
+  try {
+    const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+    return all(t.def.variants.flatMap((variant) => variant.fields.map((field) => substitute(field.type, subst))));
+  } finally {
+    autoTraitGoals.pop();
+  }
+}
+
+/** Every type may move after it is pinned, except the futures of `async` blocks and what holds one. */
+function unpin({ t, all }: Goal): Answer {
+  if (t.kind === 'dyn') return 'no';
+  if (t.kind === 'tuple') return all(t.elems);
+  if (t.kind === 'array' || t.kind === 'slice') return all([t.elem]);
+  if (t.kind === 'closure') return all(capturedTypes(t));
+  if (t.kind !== 'adt' || ['Box', 'Pin', 'Rc', 'Arc', 'ConstPtr', 'MutPtr'].includes(t.def.builtin ?? '')) return 'yes';
+  return t.def.builtin === 'AsyncFuture' ? 'no' : all(t.args);
 }
 
 function copy(goal: Goal): Answer {
@@ -239,6 +502,8 @@ function copy(goal: Goal): Answer {
 /** What `Copy` and `Clone` share: primitives, shared references, and what is made of copies. */
 function plainCopy({ t, all }: Goal): Answer | undefined {
   if (isPrimitive(t) || t.kind === 'fn' || t.kind === 'never') return 'yes';
+  if (t.kind === 'adt' && t.def.builtin === 'Duration') return 'yes';
+  if (t.kind === 'adt' && (t.def.builtin === 'ConstPtr' || t.def.builtin === 'MutPtr')) return 'yes';
   if (t.kind === 'ref') return t.mutable ? 'no' : 'yes';
   if (t.kind === 'tuple') return all(t.elems);
   if (t.kind === 'array') return all([t.elem]);
@@ -280,11 +545,17 @@ const NON_CLONE_ITERATORS = new Set([
   'BTreeSetIntoIterShape',
 ]);
 
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of owning type.
 function cloneAdt(goal: Goal, t: AdtType): Answer {
   const { all } = goal;
   const d = derived(goal);
   if (d) return d;
   if (t.def.builtin === 'Iter') return all([t.args[1]]);
+  if (['Rc', 'Weak', 'PathBuf', 'Arc', 'Sender', 'Duration', 'Thread'].includes(t.def.builtin ?? '')) return 'yes';
+  if (t.def.builtin === 'RefCell') return all(t.args);
+  if (t.def.builtin === 'Cell') {
+    return goal.solver.implements(t.args[0], { trait: goal.solver.program.traitDef('Copy'), args: [] });
+  }
   if (isIteratorShape(t.def)) return NON_CLONE_ITERATORS.has(t.def.name) ? 'no' : all(t.args);
   if (CLONE_CONTAINERS.has(t.def.builtin as string)) return all(t.args);
   if (
@@ -313,11 +584,24 @@ function debug(goal: Goal): Answer {
   if (t.kind !== 'adt') return 'no';
   const d = derived(goal);
   if (d) return d;
+  if (OPAQUE_DEBUG_TYPES.has(t.def.builtin as string)) return 'yes';
   if (t.def.builtin === 'Iter') {
     return supportsDebug(t.args[1]) ? all(debugOperands(t.args[0], t.args[1], t.def)) : 'no';
   }
+  // `Cell`'s `Debug` copies its value out to show it.
+  if (t.def.builtin === 'Cell')
+    return bothAnswers(all(t.args), goal.solver.implements(t.args[0], copyRef(goal.solver)));
   if (DEBUG_TYPES.has(t.def.builtin as string)) return all(t.args);
   return 'no';
+}
+
+function copyRef(solver: TraitSolver): TraitRef {
+  return { trait: solver.program.traitDef('Copy'), args: [] };
+}
+
+function bothAnswers(a: Answer, b: Answer): Answer {
+  if (a === 'no' || b === 'no') return 'no';
+  return a === 'yes' && b === 'yes' ? 'yes' : 'unknown';
 }
 
 function display({ solver, t, all }: Goal): Answer {
@@ -326,11 +610,30 @@ function display({ solver, t, all }: Goal): Answer {
   if (t.kind === 'dyn') return dynImplies(solver, t, 'Display');
   if (t.kind !== 'adt') return 'no';
   if (
-    ['String', 'CaseIter', 'EscapeDefault', 'EscapeUnicode', 'IoError'].includes(t.def.builtin as string) ||
+    [
+      'String',
+      'CaseIter',
+      'EscapeDefault',
+      'EscapeUnicode',
+      'PathDisplay',
+      'IoError',
+      'IoErrorKind',
+      'SendError',
+      'RecvError',
+      'PoisonError',
+      'TryLockError',
+      'TryRecvError',
+    ].includes(t.def.builtin as string) ||
     ERROR_TYPES.has(t.def.builtin as string)
   )
     return 'yes';
-  if (t.def.builtin === 'Box') return all(t.args);
+  if (
+    ['Box', 'Pin', 'Rc', 'Ref', 'RefMut', 'Arc', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard'].includes(
+      t.def.builtin ?? ''
+    )
+  ) {
+    return all(t.args);
+  }
   return 'no';
 }
 
@@ -397,7 +700,6 @@ const SEQUENCE_EQ = new Set([
   'VecDeque=&array',
 ]);
 
-/** A side of a sequence comparison: its kind as `SEQUENCE_EQ` names it, its element type, and an array's length. */
 function sequenceSide(type: Type): { kind: string; elem: Type; len?: number } | undefined {
   const isRef = type.kind === 'ref';
   const t = isRef ? normalize(shallow(type.target)) : type;
@@ -429,7 +731,7 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
   if (d) return d;
   const builtin = t.def.builtin as string;
   const equality = name === 'PartialEq' || name === 'Eq';
-  if (builtin === 'String' || builtin === 'Ordering') return 'yes';
+  if (['String', 'Ordering', 'ConstPtr', 'MutPtr', 'Path', 'PathBuf'].includes(builtin)) return 'yes';
   if (ERROR_TYPES.has(builtin)) return equality ? 'yes' : 'no';
   if (builtin === 'HashMap' || builtin === 'HashSet') {
     if (!equality) return 'no';
@@ -439,9 +741,20 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
     return values === 'no' ? 'no' : keys;
   }
   if (builtin === 'BTreeMap' || builtin === 'BTreeSet') return all(t.args);
-  if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse'].includes(builtin)) return all(t.args);
+  if (builtin === 'Duration' || builtin === 'CStr') return 'yes';
+  if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse', 'Rc', 'RefCell', 'Arc'].includes(builtin)) {
+    return name === 'Hash' && builtin === 'RefCell' ? 'no' : all(t.args);
+  }
+  if (builtin === 'Cell') return cellComparison(goal, t);
   if (RANGE_TYPES.has(builtin)) return equality || name === 'Hash' ? all(t.args) : 'no';
   return 'no';
+}
+
+/** `Cell<T>` compares the values it holds, which it copies out, so `T` must be `Copy`. */
+function cellComparison({ solver, name, all }: Goal, t: AdtType): Answer {
+  if (name !== 'PartialEq' && name !== 'Eq' && name !== 'PartialOrd' && name !== 'Ord') return 'no';
+  const copy = implementsAll(solver, t.args[0], ['Copy']);
+  return copy === 'yes' ? all(t.args) : copy;
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Arrays and boxed values have distinct Default bounds.
@@ -460,16 +773,24 @@ function defaultValue(goal: Goal): Answer {
   if (d) return d;
   const builtin = t.def.builtin as string;
   if (DEFAULT_TYPES.has(builtin)) return 'yes';
-  if (builtin === 'Box') {
+  if (builtin === 'Box' || builtin === 'Rc' || builtin === 'Arc') {
+    // std gives `Box<str>`, `Rc<[T]>` and the like an empty default.
     const content = normalize(shallow(t.args[0]));
     return content.kind === 'str' || content.kind === 'slice' ? 'yes' : all([content]);
   }
+  if (['RefCell', 'Cell', 'Mutex', 'RwLock'].includes(builtin)) return all(t.args);
+  if (builtin === 'Duration') return 'yes';
   return 'no';
 }
 
 function stdError({ t, all }: Goal): Answer {
   // `io::Error` is an error, though unlike the others it is neither `Clone` nor `PartialEq`.
-  if (t.kind === 'adt') return ERROR_TYPES.has(t.def.builtin as string) || t.def.builtin === 'IoError' ? 'yes' : 'no';
+  if (t.kind === 'adt') {
+    return ERROR_TYPES.has(t.def.builtin as string) ||
+      ['IoError', 'SendError', 'RecvError', 'PoisonError', 'TryLockError', 'TryRecvError'].includes(t.def.builtin ?? '')
+      ? 'yes'
+      : 'no';
+  }
   if (t.kind === 'ref') return all([t.target]);
   return 'no';
 }
@@ -494,7 +815,6 @@ function asRef({ solver, t, ref }: Goal): Answer {
   return solver.unifier.tryUnify(target, { kind: 'slice', elem }) ? 'yes' : 'no';
 }
 
-/** A `usize`, or a range of them. */
 function sliceIndex({ solver, t }: Goal): Answer {
   if (t.kind === 'int') return t.name === 'usize' ? 'yes' : 'no';
   if (t.kind !== 'adt' || !RANGE_TYPES.has(t.def.builtin as string)) return t.kind === 'var' ? 'unknown' : 'no';
@@ -556,7 +876,6 @@ function sliceOf({ solver, t, ref }: Goal): Answer {
   return elem && solver.unifier.tryUnify(elem, ref.args[0]) ? 'yes' : 'no';
 }
 
-/** `Join` separates by an element or by a slice of elements. */
 function joinSeparator({ solver, t, ref }: Goal): Answer {
   if (t.kind !== 'ref') return t.kind === 'var' ? 'unknown' : 'no';
   const target = normalize(shallow(t.target));
@@ -639,7 +958,9 @@ function sum(goal: Goal): Answer {
   const { solver, t, ref } = goal;
   const [item] = ref.args;
   if (t.kind === 'adt' && (t.def.builtin === 'Result' || t.def.builtin === 'Option')) return fallibleSum(goal, t);
-  if (t.kind !== 'int' && t.kind !== 'float') return 'no';
+  // `Duration` sums `Duration`s and `&Duration`s, and has no `Product`.
+  const duration = isBuiltin(t, 'Duration') && ref.trait.builtin === 'Sum';
+  if (t.kind !== 'int' && t.kind !== 'float' && !duration) return 'no';
   const element = shallow(item);
   // std sums `T`s and `&T`s, but not `&mut T`s.
   if (element.kind === 'ref' && element.mutable) return 'no';
@@ -748,11 +1069,19 @@ function boxFromIterator(solver: TraitSolver, inner: Type, item: Type, element: 
 /** A derive bounds every type parameter by the trait, as `#[derive]` does. */
 function derived({ t, name, all }: Goal): Answer | undefined {
   if (t.kind !== 'adt') return undefined;
-  return t.def.derives.has(name) ? all(t.args) : undefined;
+  // A derived `Default` of an enum gives a variant without fields, which needs nothing of the type's parameters.
+  if (name === 'Default' && t.def.kind === 'enum' && t.def.derives.has(name)) return 'yes';
+  // A const parameter (`const N: usize`) is a value, which the derive bounds by nothing.
+  const types = t.args.filter((_, index) => !t.def.params[index]?.constType);
+  return t.def.derives.has(name) ? all(types) : undefined;
 }
 
 function isPrimitive(t: Type): boolean {
   return t.kind === 'int' || t.kind === 'float' || t.kind === 'bool' || t.kind === 'char';
+}
+
+function capturedTypes(t: Type & { kind: 'closure' }): Type[] {
+  return (t.closure.captures ?? []).map(({ type, mode }) => (mode === 'value' ? type : ref(type, mode === 'mut')));
 }
 
 /**
@@ -795,7 +1124,6 @@ function borrowedSliceElem(type: Type): Type | 'unknown' | undefined {
   return target.kind === 'slice' ? target.elem : undefined;
 }
 
-/** The builtin types that are iterators themselves, not only collections that make one. */
 export const ITERATOR_BUILTINS: ReadonlySet<string> = new Set([
   'Iter',
   'Range',
@@ -811,5 +1139,11 @@ function isIterator(type: Type): boolean {
   if (dynIteratorTarget(type)) return true;
   const t = type.kind === 'ref' && type.mutable ? normalize(shallow(type.target)) : type;
   if (t.kind === 'param' || t.kind === 'opaque') return true;
+  if (isUserIterator(t)) return true;
   return t.kind === 'adt' && ITERATOR_BUILTINS.has(t.def.builtin as string);
+}
+
+function implementsAll(solver: TraitSolver, type: Type, traits: string[]): Answer {
+  const answers = traits.map((trait) => solver.implements(type, { trait: solver.program.traitDef(trait), args: [] }));
+  return answers.includes('no') ? 'no' : answers.every((answer) => answer === 'yes') ? 'yes' : 'unknown';
 }

@@ -122,7 +122,6 @@ const VEC_SHRINKING = new Set([
   'resize_with',
 ]);
 
-/** The natives of a `Vec`, a `VecDeque`, or a `BinaryHeap` that read and change its capacity. */
 const vecCapacityNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   with_capacity: ([capacity], ctx) => {
     checkVecCapacity(ctx, 0, capacity, sizeOf(elemType(ctx)));
@@ -214,7 +213,6 @@ const STRING_RESIZING = new Set([
   'split_off',
 ]);
 
-/** The natives that read and change a `String`'s capacity. */
 const stringCapacityNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   capacity: ([self]) => BigInt(stringCapacity(self)),
   reserve: ([self, additional], ctx) => {

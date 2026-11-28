@@ -2,6 +2,7 @@ import { isPseudo, normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import { builtinImplements } from './traitBuiltins';
 import {
+  adt,
   allSupertraits,
   type ClosureType,
   F32,
@@ -19,6 +20,7 @@ import {
   type TraitDef,
   type TraitRef,
   type Type,
+  type TypeParam,
   USIZE,
 } from './types';
 
@@ -27,10 +29,31 @@ export { iteratorCapability } from './traitIterators';
 
 export type Answer = 'yes' | 'no' | 'unknown';
 
-/** Decides which types implement which traits: from impls, derives, bounds, and the standard library's rules. */
+/** The operator traits std implements for numbers only with the same type on both sides (not shifts). */
+const SAME_TYPE_OPERATORS = new Set([
+  'Add',
+  'Sub',
+  'Mul',
+  'Div',
+  'Rem',
+  'BitAnd',
+  'BitOr',
+  'BitXor',
+  'AddAssign',
+  'SubAssign',
+  'MulAssign',
+  'DivAssign',
+  'RemAssign',
+  'BitAndAssign',
+  'BitOrAssign',
+  'BitXorAssign',
+]);
+
 export class TraitSolver {
   private readonly implGoals: { trait: TraitDef; type: Type; args: Type[] }[] = [];
   private readonly sizedGoals: Type[] = [];
+  /** The `where` bounds on types other than parameters that the body being checked may assume. */
+  assumptions: readonly { type: Type; bound: TraitRef }[] = [];
 
   constructor(
     readonly program: Program,
@@ -42,8 +65,11 @@ export class TraitSolver {
   // code-gauge-allow functionNcss -- Routes Rust trait obligations by receiver type.
   implements(type: Type, ref: TraitRef): Answer {
     const t = normalize(shallow(type));
+    if (ref.assoc && t.kind !== 'param' && t.kind !== 'opaque' && t.kind !== 'dyn')
+      return this.implementsWithAssoc(t, ref);
     const { trait } = ref;
     if (t.kind === 'never') return 'yes';
+    if (this.assumptions.some(({ type: assumed, bound }) => assumes(bound, ref) && sameType(assumed, t))) return 'yes';
     if (t.kind === 'var') return this.varImplements(t, ref);
     // Type parameters are `Sized` unless they opt out with `?Sized`.
     if (t.kind === 'param') {
@@ -64,10 +90,31 @@ export class TraitSolver {
       return answer === 'no' ? this.builtinOnly(t, ref) : answer;
     }
     if (ref.fnSig) return this.closureImplements(t, ref);
-    const implementation = this.implAnswer(trait, t, ref.args);
+    const implementation = this.implAnswer(trait, t, ref.args, ref.item);
     if (implementation !== 'no') return implementation;
     if (trait.builtin) return builtinImplements(this, t, ref);
     return 'no';
+  }
+
+  /** Whether a type implements a trait whose associated types the bound sets, which must then be those types. */
+  private implementsWithAssoc(t: Type, ref: TraitRef): Answer {
+    const { assoc, ...rest } = ref;
+    const answer = this.implements(t, rest);
+    if (answer === 'no' || !assoc) return answer;
+    let result: Answer = answer;
+    for (const [name, expected] of assoc) {
+      // The associated type may be a supertrait's (`Sub<Out = u8>` where `trait Sub: Super` and `Super` has `Out`).
+      const owner = allSupertraits([rest], t).find((candidate) => candidate.trait.assocTypes.has(name));
+      const declared = owner?.trait.assocTypes.get(name)?.projection;
+      if (!owner || !declared) continue;
+      const actual = normalize(adt(declared, [t, ...owner.args]));
+      if (actual.kind === 'adt' && actual.def === declared) {
+        result = 'unknown';
+        continue;
+      }
+      if (!this.unifier.unify(actual, expected)) return 'no';
+    }
+    return result;
   }
 
   private builtinOnly(t: Type, ref: TraitRef): Answer {
@@ -85,6 +132,7 @@ export class TraitSolver {
   }
 
   private pseudoImplements(type: Type & { kind: 'adt' }, ref: TraitRef): Answer {
+    if (type.def.projection) return this.projectionImplements(type, ref);
     if (type.def.builtin === 'TryFromError') {
       if (ref.trait.builtin === 'Sized') return 'yes';
       return hasVars(type) ? 'unknown' : 'no';
@@ -96,6 +144,24 @@ export class TraitSolver {
     return this.implements(iterator, ref);
   }
 
+  /**
+   * An associated type of a type parameter that no bound sets has the bounds its trait declares for it (and is
+   * `Sized`); of a type not known yet, nothing is known.
+   */
+  private projectionImplements(type: Type & { kind: 'adt' }, ref: TraitRef): Answer {
+    const { trait, name } = type.def.projection!;
+    const self = normalize(shallow(type.args[0]));
+    if (self.kind === 'var' || hasVars(self)) return 'unknown';
+    if (ref.trait.builtin === 'Sized') return 'yes';
+    const subst: Subst = new Map([
+      [trait.self, self],
+      ...trait.params.map((param, index): [TypeParam, Type] => [param, type.args[index + 1]]),
+    ]);
+    const bounds = (trait.assocTypes.get(name)?.bounds ?? []).map((bound) => substituteTraitRef(bound, subst));
+    const answer = this.boundAnswer(bounds, ref, type);
+    return answer === 'no' ? this.builtinOnly(type, ref) : answer;
+  }
+
   private varImplements(t: Type & { kind: 'var' }, ref: TraitRef): Answer {
     // An untyped number indexing a slice is a `usize`, the only integer type slices take.
     if (t.v.literal === 'int' && ref.trait.builtin === 'SliceIndex')
@@ -103,15 +169,27 @@ export class TraitSolver {
     if (!t.v.literal) return 'unknown';
     if (ref.trait.builtin === 'ExtendInto' || ref.trait.builtin === 'MapExtendInto')
       return builtinImplements(this, t, ref);
-    const rhs = ref.args[0];
-    if (rhs && (ref.trait.builtin === 'PartialEq' || ref.trait.builtin === 'PartialOrd')) {
-      return this.literalCompares(t, t.v.literal, ref, normalize(shallow(rhs)));
-    }
+    const byRhs = this.literalWithRhs(t, t.v.literal, ref);
+    if (byRhs) return byRhs;
     // rustc takes a number's type from the one impl that fits it, among the impls for numbers of its kind.
     const only = this.onlyNumericImpl(t.v.literal, ref);
     if (only) return this.unifier.tryUnify(t, only) ? 'yes' : 'no';
     if (ref.trait.builtin) return this.literalImplements(t.v.literal, ref);
     return 'unknown';
+  }
+
+  /** What the type on the right of a comparison or an arithmetic trait settles of an untyped number on the left. */
+  private literalWithRhs(t: Type & { kind: 'var' }, literal: 'int' | 'float', ref: TraitRef): Answer | undefined {
+    const rhs = ref.args[0] && normalize(shallow(ref.args[0]));
+    if (!rhs) return undefined;
+    if (ref.trait.builtin === 'PartialEq' || ref.trait.builtin === 'PartialOrd') {
+      return this.literalCompares(t, literal, ref, rhs);
+    }
+    // With a number of its kind on the right of an arithmetic trait (`Add::add(2, x)`, `Add::add(2, &x)`), it is of
+    // that number's type, as std implements these traits only for two numbers of one type.
+    const number = rhs.kind === 'ref' && !rhs.mutable ? normalize(shallow(rhs.target)) : rhs;
+    if (number.kind !== literal || !SAME_TYPE_OPERATORS.has(ref.trait.builtin ?? '')) return undefined;
+    return this.unifier.tryUnify(t, number) ? 'yes' : 'no';
   }
 
   /** Whether an untyped number compares with a value of another type, which settles the number's type. */
@@ -170,6 +248,7 @@ export class TraitSolver {
         'Send',
         'Sync',
         'Sized',
+        'Unpin',
       ].includes(name)
     ) {
       return 'yes';
@@ -215,7 +294,11 @@ export class TraitSolver {
     return (
       bound.trait === ref.trait &&
       bound.args.every((arg, i) => ref.args[i] === undefined || this.unifier.unify(arg, ref.args[i])) &&
-      this.itemsMatch(bound, ref)
+      this.itemsMatch(bound, ref) &&
+      [...(ref.assoc ?? [])].every(([name, type]) => {
+        const set = bound.assoc?.get(name);
+        return set !== undefined && this.unifier.unify(set, type);
+      })
     );
   }
 
@@ -254,24 +337,30 @@ export class TraitSolver {
     return 'no';
   }
 
-  private implAnswer(trait: TraitDef, type: Type, args: Type[]): Answer {
+  private implAnswer(trait: TraitDef, type: Type, args: Type[], item?: Type): Answer {
     if (this.implGoals.length >= 64 || this.implGoals.some((goal) => matchesImplGoal(goal, trait, type, args))) {
       return 'no';
     }
     this.implGoals.push({ trait, type, args });
     try {
-      return this.findImplAnswer(trait, type, args);
+      return this.findImplAnswer(trait, type, args, item);
     } finally {
       this.implGoals.pop();
     }
   }
 
-  private findImplAnswer(trait: TraitDef, type: Type, args: Type[]): Answer {
+  private findImplAnswer(trait: TraitDef, type: Type, args: Type[], item?: Type): Answer {
     let answer: Answer = 'no';
     for (const impl of this.program.impls) {
       if (impl.trait?.trait !== trait) continue;
       const snapshot = this.unifier.snapshot();
       const matched = this.matchImplAnswer(impl, type, args);
+      // The `Item` a bound names is the impl's.
+      const implItem = matched && item && impl.assocTypes.get('Item');
+      if (implItem && !this.unifier.unify(substitute(implItem, matched.subst), item)) {
+        this.unifier.rollback(snapshot);
+        continue;
+      }
       if (matched?.answer === 'yes') return 'yes';
       if (matched?.answer === 'unknown') answer = 'unknown';
       this.unifier.rollback(snapshot);
@@ -319,7 +408,7 @@ export class TraitSolver {
     for (const param of impl.params) {
       const type = subst.get(param) as Type;
       const bounds = param.bounds.map((ref) => substituteTraitRef(ref, subst));
-      if (!(impl.module as Module).isStd) bounds.push(sized);
+      if (!(impl.module as Module).isStd && !param.maybeUnsized) bounds.push(sized);
       for (const bound of bounds) {
         const result = this.implements(type, bound);
         if (result === 'no') return 'no';
@@ -369,4 +458,12 @@ function closureKindAnswer(closure: ClosureType, need: string): Answer {
 export function closureKindAtLeast(have: string, need: string): boolean {
   const order = ['Fn', 'FnMut', 'FnOnce'];
   return order.includes(have) && order.indexOf(have) <= order.indexOf(need);
+}
+
+function assumes(bound: TraitRef, ref: TraitRef): boolean {
+  return (
+    bound.trait === ref.trait &&
+    bound.args.length === ref.args.length &&
+    bound.args.every((arg, i) => sameType(arg, ref.args[i]))
+  );
 }

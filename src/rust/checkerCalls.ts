@@ -2,25 +2,29 @@ import type { PathRes, ReceiverAdjust } from './annotations';
 import type { Expr } from './ast';
 import type { Checker } from './checker';
 import { closureSignature } from './checkerClosures';
+import { rejectStaticMutBorrow } from './checkerOperators';
 import {
   applyWrittenFnArgs,
   checkMethodVisible,
   checkTraitInScope,
   isStandardType,
+  rejectDropCall,
   resolveValuePath,
   traitInScope,
   typeOfRes,
 } from './checkerPaths';
 import { requireMutablePlace } from './checkerPlaces';
 import { normalize } from './infer';
-import type { Module } from './items';
+import type { Module, Program } from './items';
 import { compileError } from './items';
-import { autoderefSteps, boundsOf, failedInherentBound, lookupMethod } from './methods';
+import { failedInherentBound } from './methodBounds';
+import { autoderefSteps, boundsOf, derefOnce, lookupMethod } from './methods';
 import { reborrowsIterator } from './receiverReborrow';
 import { typeAfter } from './regions';
 import {
   adt,
   type ClosureType,
+  type DerefKind,
   type FnDef,
   hasVars,
   intType,
@@ -28,6 +32,7 @@ import {
   ref,
   REF_STR,
   resolve,
+  type SelfWrapper,
   shallow,
   type Subst,
   substitute,
@@ -42,7 +47,11 @@ export function checkCall(c: Checker, expr: Extract<Expr, { kind: 'call' }>, exp
   if (callee.kind === 'path') {
     const res = resolveValuePath(c, callee.path, callee.span);
     c.annotations.paths.set(callee, res);
-    if (res.kind === 'fn') return callFn(c, expr, res.fn, res.typeArgs, expected);
+    if (res.kind === 'fn' && res.fn.ast?.isUnsafe) c.requireUnsafe(callee.span, 'unsafe fn を呼ぶこと');
+    if (res.kind === 'fn') {
+      rejectDropCall(res.fn, callee.span);
+      return callFn(c, expr, res.fn, res.typeArgs, expected);
+    }
     if (res.kind === 'ctor') return callCtor(c, expr, res, expected);
     const type = typeOfRes(c, res, callee.span, undefined);
     callee.ty = type;
@@ -70,7 +79,7 @@ function callFn(
   }
   const iterable = fn.selfMode ? [false, ...iterableParams(fn)] : iterableParams(fn);
   checkArgs(c, expr.args, params, expectations(c, sig.ret, params, expected), iterable);
-  if (fn.selfMode === 'value') c.requireTrait(params[0], 'Sized', expr.args[0].span);
+  if (fn.selfMode === 'value' && !fn.selfWrapper) c.requireTrait(params[0], 'Sized', expr.args[0].span);
   expr.callee.ty = { kind: 'fn', params, ret: sig.ret };
   return sig.ret;
 }
@@ -78,8 +87,15 @@ function callFn(
 export function selfParamType(fn: FnDef, subst: Subst): Type {
   const self = fn.trait ? ({ kind: 'param', param: fn.trait.self } as Type) : (fn.impl?.selfType ?? UNIT);
   const selfType = substitute(self, subst);
-  if (fn.selfMode === 'value') return selfType;
+  if (fn.selfMode === 'value') {
+    return wrapSelf((fn.module as Module).program, fn.selfWrapper, selfType);
+  }
   return ref(selfType, fn.selfMode === 'mutRef');
+}
+
+export function wrapSelf(program: Program, wrapper: SelfWrapper | undefined, selfType: Type): Type {
+  if (!wrapper) return selfType;
+  return program.builtinType(wrapper, [wrapper === 'Pin' ? ref(selfType, true) : selfType]);
 }
 
 function turtleNew(c: Checker, expr: Extract<Expr, { kind: 'call' }>): Type {
@@ -169,6 +185,9 @@ function checkArgs(
   const enclosing = c.iterableArgument;
   for (const index of order) {
     c.iterableArgument = iterable[index] ? args[index] : undefined;
+    // A parameter whose type is an associated type (`o: T::O`) learns it from the bounds that the arguments before
+    // it settled, so the argument coerces to it (`&String` to `&str`) as rustc normalizes it first.
+    if (inputTypes[index].kind === 'var') inputTypes[index] = shallow(c.settledAssoc(params[index]));
     checkArgument(c, args[index], params[index], inputTypes[index], expectations[index]);
   }
   c.iterableArgument = enclosing;
@@ -214,7 +233,6 @@ function coerceClosure(c: Checker, arg: Expr, type: Type, param: Type): void {
   c.coerce(arg, type, param);
 }
 
-/** Calls a value: a closure, a function, or a value whose type is bounded by a closure trait. */
 // code-gauge-allow functionNcss -- Call rules differ for concrete functions, closures and callable bounds.
 // code-gauge-allow functionCognitiveComplexity -- Call rules differ for concrete functions, closures and callable bounds.
 function callValue(
@@ -224,7 +242,8 @@ function callValue(
   expected: Type | undefined
 ): Type {
   let t = normalize(shallow(calleeType));
-  while (t.kind === 'ref' || (t.kind === 'adt' && t.def.builtin === 'Box')) {
+  // A closure behind a reference or a pointer that owns or shares it (`Box`, `Rc`, `Arc`) is called through it.
+  while (t.kind === 'ref' || (t.kind === 'adt' && ['Box', 'Rc', 'Arc'].includes(t.def.builtin ?? ''))) {
     t = normalize(shallow(t.kind === 'ref' ? t.target : t.args[0]));
   }
   let params: Type[];
@@ -235,6 +254,9 @@ function callValue(
     ret = t.closure.ret;
     kind = t.closure.kind;
   } else if (t.kind === 'fn') {
+    if (t.isUnsafe || (t.item && 'ast' in t.item && t.item.ast?.isUnsafe)) {
+      c.requireUnsafe(expr.span, 'unsafe fn を呼ぶこと');
+    }
     params = t.params;
     ret = t.ret;
     kind = 'Fn';
@@ -336,6 +358,8 @@ export function checkMethodCall(
   const { fn } = found;
   applyWrittenFnArgs(c, fn, found.typeArgs, expr.turbofish, expr.methodSpan);
   checkReceiverAdjust(c, expr, found.adjust, fn.selfMode);
+  const throughReference = found.adjust.derefs.some((step) => step === 'ref' || step === 'mutRef');
+  if (found.adjust.autoref !== 'none' && !throughReference) rejectStaticMutBorrow(c, expr.receiver, expr.receiver.span);
   const sig = c.instantiate(fn, found.typeArgs, expr.methodSpan);
   if (expr.args.length !== sig.params.length) {
     compileError(
@@ -344,9 +368,11 @@ export function checkMethodCall(
     );
   }
   checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected), iterableParams(fn));
+  if (fn.ast?.isUnsafe) c.requireUnsafe(expr.span, 'unsafe fn を呼ぶこと');
+  rejectDropCall(fn, expr.methodSpan);
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
   const adjusted = typeAfter(receiverType, found.adjust.derefs) ?? found.selfType;
-  if (fn.selfMode === 'value') checkMoveOutOfRef(c, expr, found.adjust, adjusted);
+  if (fn.selfMode === 'value') checkSelfMove(c, expr, fn, found, receiverType);
   if (expr.method === 'map') return arrayMapResult(adjusted, found.selfType, sig.ret);
   return sig.ret;
 }
@@ -380,8 +406,9 @@ function noMethod(c: Checker, expr: Extract<Expr, { kind: 'methodCall' }>, recei
     );
   }
   const missing = failedInherentBound(c.program, c.solver, receiverType, expr.method);
-  if (missing) c.require(missing.type, missing.ref, expr.methodSpan);
   const t = typeToString(resolve(receiverType));
+  if (missing === 'otherNumber') compileError(expr.methodSpan, `${t} にメソッド ${expr.method} がありません。`);
+  if (missing) c.require(missing.type, missing.ref, expr.methodSpan);
   const fieldType = fieldTypeOf(c, receiverType, expr.method);
   if (fieldType) {
     compileError(
@@ -417,6 +444,29 @@ function fieldTypeOf(c: Checker, type: Type, name: string): Type | undefined {
   return undefined;
 }
 
+/**
+ * A method taking `self` by value moves the receiver; `self: Box<Self>` takes the `Box`, which method lookup derefs
+ * through to `Self`, while lookup stops at an `Rc`, `Arc` or `Pin` itself.
+ */
+function checkSelfMove(
+  c: Checker,
+  expr: Extract<Expr, { kind: 'methodCall' }>,
+  fn: FnDef,
+  found: { adjust: ReceiverAdjust; selfType: Type },
+  receiverType: Type
+): void {
+  const derefs = fn.selfWrapper === 'Box' ? found.adjust.derefs.slice(0, -1) : found.adjust.derefs;
+  const adjust = { ...found.adjust, derefs };
+  checkMoveOutOfRef(c, expr, adjust, typeThrough(c, receiverType, derefs) ?? found.selfType);
+}
+
+function typeThrough(c: Checker, receiverType: Type, derefs: DerefKind[]): Type | undefined {
+  if (!derefs.includes('user')) return typeAfter(receiverType, derefs);
+  let type = receiverType;
+  for (let index = 0; index < derefs.length; index++) type = derefOnce(c.program, type)?.type ?? type;
+  return type;
+}
+
 /** Taking `self` by value through a reference moves out of it, which only `Copy` types allow. */
 function checkMoveOutOfRef(
   c: Checker,
@@ -428,7 +478,8 @@ function checkMoveOutOfRef(
   if (adjust.asIter && !isBuiltin(shallow(selfType), 'Box')) return;
   if (reborrowsIterator(adjust.derefs, selfType)) return;
   c.requireTrait(selfType, 'Sized', expr.receiver.span);
-  const throughRef = adjust.derefs.some((step) => step === 'ref' || step === 'mutRef');
+  // A `Deref` impl (`Rc`, a guard, the program's) lends its target as a reference does; a `Box` owns it.
+  const throughRef = adjust.derefs.some((step) => step === 'ref' || step === 'mutRef' || step === 'user');
   if (!throughRef) return;
   c.deferredChecks.push(() => {
     if (!c.solver.isCopy(resolve(selfType, true))) {
@@ -448,7 +499,10 @@ function checkReceiverAdjust(
   mode: FnDef['selfMode']
 ): void {
   if (mode !== 'mutRef') return;
-  const derefs = adjust.autoref === 'none' ? [...adjust.derefs, 'mutRef' as const] : adjust.derefs;
+  // An iterator a `&mut` holds (`r.nth(2)` of `r: &mut C`) is reborrowed through it, which needs no `mut` binding.
+  const receiver = normalize(shallow(expr.receiver.ty ?? UNIT));
+  const throughMut = adjust.asIter && adjust.derefs.length === 0 && receiver.kind === 'ref' && receiver.mutable;
+  const derefs = adjust.autoref === 'none' || throughMut ? [...adjust.derefs, 'mutRef' as const] : adjust.derefs;
   if (derefs.includes('ref')) {
     compileError(
       expr.receiver.span,

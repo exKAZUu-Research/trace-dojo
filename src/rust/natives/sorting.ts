@@ -8,7 +8,6 @@ import { stableSort } from './sort/stable';
 import { unstableSort } from './sort/unstable';
 import { call, callForEach, libraryPanic, type NativeContext } from './support';
 
-/** Sorts a slice in place as std's stable sort (`sort`) or unstable sort (`sort_unstable`) does. */
 export function sortSlice(
   ctx: NativeContext,
   slice: Value,
@@ -46,7 +45,6 @@ function ordViolation(ctx: NativeContext): never {
   );
 }
 
-/** `a < b` by `PartialOrd`, as `sort` compares its elements. */
 export function lessByPartialOrd(type: Type): (a: Value, b: Value) => boolean {
   return (a, b) => testPartialOrder('lt', type, a, b);
 }
@@ -72,14 +70,20 @@ export function compareByKey(
  * Keeps an element unless `sameBucket(it, the last element kept)` says it repeats that one, as `Vec::dedup_by` does;
  * both reach the elements by `&mut`.
  */
-export function dedupBy(items: Value[], sameBucket: (current: ElementPlace, kept: ElementPlace) => boolean): Value {
+export function dedupBy(
+  items: Value[],
+  sameBucket: (current: ElementPlace, kept: ElementPlace) => boolean,
+  drop: (item: Value) => void
+): Value {
   if (items.length < 2) return UNIT_VALUE;
   let read = 1;
   let write = 1;
   try {
     for (; read < items.length; read++) {
       if (sameBucket(new ElementPlace(items, read), new ElementPlace(items, write - 1))) {
+        const removed = items[read];
         items[read] = MOVED;
+        drop(removed);
       } else {
         if (write < read) {
           items[write] = items[read];

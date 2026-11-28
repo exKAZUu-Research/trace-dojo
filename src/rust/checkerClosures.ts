@@ -3,6 +3,7 @@ import type { Expr, MacroCall, Pattern, Span } from './ast';
 import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
 import { checkParamPatterns } from './checkerPatterns';
+import { neverCompletes } from './divergence';
 import { compileError } from './items';
 import { type CaptureMode, captureProjections, projectedBindings } from './loanCaptures';
 import { receiverReborrow } from './receiverReborrow';
@@ -12,6 +13,7 @@ import {
   callableSignature,
   type ClosureType,
   freshVar,
+  NEVER,
   newClosureType,
   resolve,
   settleClosure,
@@ -20,8 +22,9 @@ import {
   UNIT,
 } from './types';
 
+// code-gauge-allow functionCognitiveComplexity -- Closures and async blocks share the capture and signature checks.
 export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }>, expected: Type | undefined): Type {
-  const expectedSig = expected && closureSignature(c, expected);
+  const expectedSig = expected && !expr.isAsync ? closureSignature(c, expected) : undefined;
   const parentBody = c.body;
   const fn: FnContext = {
     name: '{closure}',
@@ -34,7 +37,9 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
     isMove: expr.isMove,
     closureKind: 'Fn',
   };
-  const retType = expr.ret ? c.lowerType(expr.ret) : (expectedSig?.ret ?? freshVar());
+  const retType = expr.ret
+    ? c.lowerType(expr.ret)
+    : (expectedSig?.ret ?? (expr.isAsync && expected ? futureOutput(expected) : undefined) ?? freshVar());
   if (expectedSig && expectedSig.params.length !== expr.params.length) {
     compileError(expr.span, `クロージャの引数の数が合いません（${expectedSig.params.length} 個が必要です）。`);
   }
@@ -61,6 +66,9 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
       paramTypes
     );
     c.coerceExpr(expr.body, retType);
+    // A body that never finishes leaves its return type open; edition 2024 falls back to `!`, as for a `let`.
+    const ret = shallow(retType);
+    if (ret.kind === 'var' && !ret.v.literal && neverCompletes(expr.body)) ret.v.fallback ??= NEVER;
   } finally {
     c.body = parentBody;
   }
@@ -71,10 +79,15 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
       c.annotations.bindings.get(param.pattern) ? [c.annotations.bindings.get(param.pattern)!] : []
     ),
   });
-  return closureType;
+  return expr.isAsync ? c.program.builtinType('AsyncFuture', [retType]) : closureType;
 }
 
-/** Decides how a closure captures and which closure trait it implements, again later while a type it needs is unknown. */
+function futureOutput(expected: Type): Type | undefined {
+  const t = shallow(expected);
+  return t.kind === 'adt' && t.def.builtin === 'AsyncFuture' ? t.args[0] : undefined;
+}
+
+/** How a closure captures and which closure trait it implements, decided again while a type it needs is unknown. */
 function analyzeCaptures(
   c: Checker,
   fn: FnContext,
@@ -136,13 +149,12 @@ function closureKindOf(
   return { kind, movedAt: uses.firstMove, captures, isSettled: !uses.dependsOnInference };
 }
 
-/** How a closure's body uses the variables it captures: those it moves out and those it modifies. */
 class CaptureUses {
   readonly moved = new Set<LocalVar>();
   readonly mutated = new Set<LocalVar>();
   readonly modes = new Map<Expr, CaptureMode>();
   firstMove: { name: string; span: Span } | undefined;
-  /** Whether a type not inferred yet, or a closure whose own analysis waits for one, can still turn a use into a move. */
+  /** Whether a type not inferred yet, or a closure whose analysis waits for one, can still turn a use into a move. */
   dependsOnInference = false;
 
   constructor(

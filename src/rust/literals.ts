@@ -56,12 +56,12 @@ export function parseFloatLiteral(
   return { value: suffix === 'f32' ? f32 : Number(digits), f32, suffix };
 }
 
-type LiteralKind = 'byte' | 'char' | 'string';
+type LiteralKind = 'byte' | 'char' | 'string' | 'byteString' | 'cString';
 
 export function parseCharLiteral(text: string): string | undefined {
   const body = text.slice(1, -1);
   const chars = unescape(body, 'char');
-  if (chars === undefined || [...chars].length !== 1) return undefined;
+  if (chars === undefined || !/^.$/su.test(chars)) return undefined;
   return chars;
 }
 
@@ -74,6 +74,48 @@ export function parseStringLiteral(text: string): string | undefined {
   return unescape(text.slice(1, -1), 'string');
 }
 
+/** The bytes of a byte string literal (`b"..."`), which may hold only ASCII characters and byte escapes. */
+export function parseByteStringLiteral(text: string): number[] | undefined {
+  const chars = unescape(text.slice(2, -1), 'byteString');
+  return chars === undefined ? undefined : Array.from(chars, (char) => char.codePointAt(0) ?? 0);
+}
+
+/** The bytes of a C string literal (`c"..."`) without its terminating NUL, which no character inside may be. */
+export function parseCStringLiteral(text: string): number[] | undefined {
+  const chars = unescape(text.slice(2, -1), 'cString');
+  return chars === undefined ? undefined : cStringBytes(chars);
+}
+
+/**
+ * A raw string literal (`r#"..."#`, `br"..."`, `cr"..."`): its prefix and its text as written, with `\r\n` read as
+ * `\n`.
+ */
+export function parseRawStringLiteral(text: string): { prefix: '' | 'b' | 'c'; body: string } | undefined {
+  const match = /^([bc]?)r(#*)"([\s\S]*)"\2$/.exec(text);
+  if (!match) return undefined;
+  const body = match[3].replaceAll('\r\n', '\n');
+  if (body.includes('\r')) return undefined;
+  const prefix = match[1] as '' | 'b' | 'c';
+  if (prefix === 'b' && /[^\0-\u007F]/.test(body)) return undefined;
+  return { prefix, body };
+}
+
+/** A lone surrogate that stands for a raw byte of a C string, which no Rust character can be. */
+const RAW_BYTE = 0xdc_00;
+
+/** The UTF-8 bytes of a C string's text (with its raw bytes as they are), or undefined when it holds a NUL. */
+export function cStringBytes(text: string): number[] | undefined {
+  if (text.includes('\0')) return undefined;
+  const encoder = new TextEncoder();
+  const bytes: number[] = [];
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (char.length === 1 && code >= RAW_BYTE + 0x80 && code <= RAW_BYTE + 0xff) bytes.push(code - RAW_BYTE);
+    else bytes.push(...encoder.encode(char));
+  }
+  return bytes;
+}
+
 // code-gauge-allow functionCognitiveComplexity -- Rust escape forms have different widths and allowed values.
 function unescape(body: string, kind: LiteralKind): string | undefined {
   if (body.includes('\r')) {
@@ -84,8 +126,8 @@ function unescape(body: string, kind: LiteralKind): string | undefined {
   for (let index = 0; index < body.length; index++) {
     const char = body[index];
     if (char !== '\\') {
-      if (kind !== 'string' && "\n\t'".includes(char)) return undefined;
-      if (kind === 'byte' && char.codePointAt(0)! > 0x7f) return undefined;
+      if ((kind === 'byte' || kind === 'char') && "\n\t'".includes(char)) return undefined;
+      if ((kind === 'byte' || kind === 'byteString') && char.codePointAt(0)! > 0x7f) return undefined;
       result += char;
       continue;
     }
@@ -100,6 +142,7 @@ function unescape(body: string, kind: LiteralKind): string | undefined {
 const SIMPLE_ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t', '\\': '\\', "'": "'", '"': '"', '0': '\0' };
 
 /** The text of the escape whose letter is at `index`, and the index of its last character. */
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of escape sequence.
 function readEscape(body: string, index: number, kind: LiteralKind): { text: string; last: number } | undefined {
   const next = body[index];
   if (Object.hasOwn(SIMPLE_ESCAPES, next)) return { text: SIMPLE_ESCAPES[next], last: index };
@@ -108,14 +151,16 @@ function readEscape(body: string, index: number, kind: LiteralKind): { text: str
       const hex = body.slice(index + 1, index + 3);
       if (!/^[\da-f]{2}$/i.test(hex)) return undefined;
       const code = Number.parseInt(hex, 16);
-      if (kind !== 'byte' && code > 0x7f) return undefined;
+      if (kind !== 'byte' && kind !== 'byteString' && kind !== 'cString' && code > 0x7f) return undefined;
+      // In a C string, `\x80`–`\xff` is one byte, not a character, so it is kept apart as a lone surrogate.
+      if (kind === 'cString' && code > 0x7f) return { text: String.fromCodePoint(RAW_BYTE + code), last: index + 2 };
       return { text: String.fromCodePoint(code), last: index + 2 };
     }
     case 'u': {
-      return kind === 'byte' ? undefined : readUnicodeEscape(body, index);
+      return kind === 'byte' || kind === 'byteString' ? undefined : readUnicodeEscape(body, index);
     }
     case '\n': {
-      if (kind !== 'string') return undefined;
+      if (kind === 'byte' || kind === 'char') return undefined;
       let last = index;
       while (last + 1 < body.length && /[ \t\n]/.test(body[last + 1])) last++;
       return { text: '', last };

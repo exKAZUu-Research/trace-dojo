@@ -1,6 +1,12 @@
 // code-gauge-allow-file fileNcss -- Defines Rust types, their substitutions and their shared structural operations.
-import type { ConstItem, FieldAst, FnItem, Span } from './ast';
+import type { ConstItem, FieldAst, FnItem, Span, TypeAst } from './ast';
 import type { Module } from './items';
+
+/**
+ * A step of a deref: through a shared or `&mut` reference, from an owner to what it owns (`Box<T>` → `T`), or through
+ * the program's own `Deref` impl, whose method the step calls.
+ */
+export type DerefKind = 'ref' | 'mutRef' | 'own' | 'user';
 
 export type IntName = 'i8' | 'i16' | 'i32' | 'i64' | 'i128' | 'isize' | 'u8' | 'u16' | 'u32' | 'u64' | 'u128' | 'usize';
 export type FloatName = 'f32' | 'f64';
@@ -13,15 +19,24 @@ export type Type =
   | { kind: 'str' }
   | { kind: 'never' }
   | { kind: 'tuple'; elems: Type[] }
-  | { kind: 'array'; elem: Type; len: number }
+  /**
+   * `lenType`: for an array whose length is a const parameter (`[T; N]`) or not inferred yet, that parameter or
+   * variable, while `len` is -1; once it is a `ConstValue`, the length is `len`.
+   */
+  | { kind: 'array'; elem: Type; len: number; lenType?: Type }
   | { kind: 'slice'; elem: Type }
-  /** `lifetime`: the name a declared signature gives the reference's lifetime (`'a`), which only the borrow checker reads. */
   | { kind: 'ref'; mutable: boolean; target: Type; lifetime?: string }
-  /** `lifetimes`: the lifetime arguments a declared signature writes (`Parser<'a>`), which only the borrow checker reads. */
   | { kind: 'adt'; def: AdtDef; args: Type[]; lifetimes?: string[] }
   | { kind: 'param'; param: TypeParam }
   | { kind: 'var'; v: TypeVar }
-  | { kind: 'fn'; params: Type[]; ret: Type; item?: FnDef | VariantDef }
+  | {
+      kind: 'fn';
+      params: Type[];
+      ret: Type;
+      item?: FnDef | VariantDef;
+      isUnsafe?: boolean;
+      boundLifetimes?: string[];
+    }
   | { kind: 'closure'; closure: ClosureType }
   | {
       kind: 'dyn';
@@ -45,8 +60,10 @@ export interface TypeParam {
   id: number;
   bounds: TraitRef[];
   defaultType?: Type;
-  /** Whether this is the `Self` of a trait, which stands for the implementing type. */
   isSelf?: boolean;
+  /** For a const parameter (`const N: usize`), its type as written, which makes it a value in expressions. */
+  constType?: TypeAst;
+  maybeUnsized?: boolean;
 }
 
 export interface ClosureType {
@@ -57,7 +74,6 @@ export interface ClosureType {
   kind: 'Fn' | 'FnMut' | 'FnOnce';
   /** Where an `FnOnce` closure first moves a capture out, which rustc reports when it needs `Fn` or `FnMut`. */
   movedAt?: { name: string; span: Span };
-  /** Where the closure is written, which rustc reports when it implements too weak a closure trait. */
   span?: Span;
   /** How the closure captures each variable, which decides whether it is `Copy` and `Clone`. */
   captures?: { type: Type; mode: 'ref' | 'mut' | 'value' }[];
@@ -68,14 +84,12 @@ export interface ClosureType {
   unsettled?: (() => void)[];
 }
 
-/** Marks the capture analysis of a closure final and updates what depends on it. */
 export function settleClosure(closure: ClosureType): void {
   const dependents = closure.unsettled ?? [];
   closure.unsettled = undefined;
   for (const update of dependents) update();
 }
 
-/** A return type `impl Trait`, which callers see only through its bounds. */
 export interface OpaqueType {
   id: number;
   args: Type[];
@@ -126,6 +140,7 @@ export type BuiltinAdt =
   | 'ControlFlow'
   | 'EscapeDefault'
   | 'EscapeUnicode'
+  | 'PathDisplay'
   | 'ParseError'
   | 'Unsigned'
   | 'Signed'
@@ -156,7 +171,54 @@ export type BuiltinAdt =
   | 'FromUtf8Error'
   | 'Entry'
   | 'OccupiedEntry'
-  | 'Infallible';
+  | 'Infallible'
+  /** `<Self as Trait>::Name`, an associated type, whose arguments are `Self` and then the trait's arguments. */
+  | 'Projection'
+  | 'Rc'
+  | 'Weak'
+  | 'RefCell'
+  | 'Ref'
+  | 'RefMut'
+  | 'Cell'
+  | 'ConstPtr'
+  | 'MutPtr'
+  | 'ConstValue'
+  | 'Stdin'
+  | 'StdinLock'
+  | 'BufReader'
+  | 'BufWriter'
+  | 'File'
+  | 'OpenOptions'
+  | 'Path'
+  | 'PathBuf'
+  | 'IoErrorKind'
+  | 'Arc'
+  | 'Mutex'
+  | 'MutexGuard'
+  | 'RwLock'
+  | 'RwLockReadGuard'
+  | 'RwLockWriteGuard'
+  | 'Sender'
+  | 'SendError'
+  | 'RecvError'
+  | 'PoisonError'
+  | 'TryLockError'
+  | 'TryRecvError'
+  | 'Receiver'
+  | 'JoinHandle'
+  | 'ScopedJoinHandle'
+  | 'Thread'
+  | 'Duration'
+  | 'ThreadScope'
+  | 'Pin'
+  | 'AsyncFuture'
+  | 'Context'
+  | 'Waker'
+  | 'Poll'
+  | 'Condvar'
+  | 'CStr';
+
+export type SelfWrapper = 'Box' | 'Rc' | 'Arc' | 'Pin';
 
 export interface AdtDef {
   name: string;
@@ -168,36 +230,47 @@ export interface AdtDef {
   variants: VariantDef[];
   writtenFields?: readonly FieldAst[];
   derives: Set<string>;
-  /** Where the type is declared, whose name rustc reports for errors about its derives. */
   span: Span;
   builtin?: BuiltinAdt;
-  /** The lifetime parameters the type declares (`'a`), through which its values may hold borrows. */
   lifetimeParams?: string[];
-  /** The module the type is declared in, whose items may read its private fields. */
   module?: unknown;
+  defaultVariant?: number;
+  isUnion?: boolean;
+  /** For a `Projection`, the trait and the name of the associated type. */
+  projection?: { trait: TraitDef; name: string };
+}
+
+export interface AssocTypeDef {
+  name: string;
+  /** The bounds every impl's type for it must meet, with `Self` the implementing type. */
+  bounds: TraitRef[];
+  projection: AdtDef;
+  /** The type parameters of a generic associated type, whose arguments follow the trait's in a projection. */
+  params: TypeParam[];
 }
 
 export interface TraitDef {
+  isUnsafe?: boolean;
   name: string;
   path: string;
   span?: Span;
   params: TypeParam[];
-  /** The trait's `Self`, which its methods' signatures refer to. */
   self: TypeParam;
   methods: Map<string, FnDef>;
   supertraits: TraitRef[];
-  /** A trait of the standard library whose implementations the interpreter knows. */
   builtin?: string;
   module?: unknown;
+  assocTypes: Map<string, AssocTypeDef>;
+  consts: Map<string, ConstDef>;
 }
 
 export interface TraitRef {
   trait: TraitDef;
   args: Type[];
-  /** The parameters and result of a closure trait (`Fn(i32) -> i32`). */
   fnSig?: { params: Type[]; ret: Type };
-  /** The `Item` an `Iterator` or `IntoIterator` bound sets (`Iterator<Item = i32>`). */
   item?: Type;
+  /** The other associated types a bound sets (`Add<Output = T>`). */
+  assoc?: ReadonlyMap<string, Type>;
 }
 
 export interface ImplDef {
@@ -206,6 +279,10 @@ export interface ImplDef {
   selfType: Type;
   methods: Map<string, FnDef>;
   consts: Map<string, ConstDef>;
+  /** The associated types of a trait impl (`type Item = u32;`), lowered once the impl's types are. */
+  assocTypes: Map<string, Type>;
+  assocTypeParams?: Map<string, TypeParam[]>;
+  lifetimeBounds?: { name: string; outlives: string[] }[];
   module: unknown;
   span: { row: number; col: number };
 }
@@ -216,13 +293,14 @@ export interface ConstDef {
   ast: ConstItem;
   module: Module;
   impl: ImplDef | undefined;
+  /** For a constant a trait declares, the trait, whose `Self` the constant's uses give as their first type argument. */
+  trait?: TraitDef;
 }
 
 export interface FnDef {
   name: string;
   /** The type parameters of the function, after those of its impl or trait, which calls bind in this order. */
   params: TypeParam[];
-  /** How many of `params` belong to the impl or trait. */
   parentParamCount: number;
   selfMode: 'value' | 'ref' | 'mutRef' | undefined;
   paramTypes: Type[];
@@ -230,20 +308,18 @@ export interface FnDef {
   ast: FnItem | undefined;
   impl: ImplDef | undefined;
   trait: TraitDef | undefined;
-  /** The module the function is declared in. */
   module: unknown;
   /** Filled by the compiler. */
   compiled?: unknown;
   /** Whether the function's self type is the `Self` of the declaring trait (a default method). */
   isDefault?: boolean;
-  /** For a function of the standard library without a body, the key of its native implementation. */
   nativeKey?: string;
+  selfWrapper?: SelfWrapper;
   /** Bounds that a method's `where` clause puts on its impl's or trait's type parameters. */
   extraBounds?: { param: TypeParam; bound: TraitRef }[];
+  /** The bounds a `where` clause puts on a type that is not a parameter (`Vec<T>: Debug`). */
+  wherePredicates?: { type: Type; bound: TraitRef }[];
 }
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Constructors
 
 const intTypes = new Map<string, Type>();
 export function intType(name: IntName): Type {
@@ -342,10 +418,6 @@ export function newOpaque(args: Type[]): OpaqueType {
   return { id: nextOpaqueId++, args, bounds: [], hidden: undefined };
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Inference
-
-/** Follows the bindings of type variables at the top of a type. */
 export function shallow(type: Type): Type {
   let current = type;
   while (current.kind === 'var' && current.v.binding) current = current.v.binding;
@@ -359,7 +431,8 @@ export function mapChildren(t: Type, f: (child: Type) => Type): Type {
       return { kind: 'tuple', elems: t.elems.map(f) };
     }
     case 'array': {
-      return { kind: 'array', elem: f(t.elem), len: t.len };
+      if (!t.lenType) return { kind: 'array', elem: f(t.elem), len: t.len };
+      return arrayOfLength(f(t.elem), f(t.lenType));
     }
     case 'slice': {
       return { kind: 'slice', elem: f(t.elem) };
@@ -388,6 +461,7 @@ function mapTraitRef(ref: TraitRef, f: (type: Type) => Type): TraitRef {
     args: ref.args.map(f),
     fnSig: ref.fnSig && { params: ref.fnSig.params.map(f), ret: f(ref.fnSig.ret) },
     item: ref.item && f(ref.item),
+    ...(ref.assoc && { assoc: new Map([...ref.assoc].map(([name, type]) => [name, f(type)])) }),
   };
 }
 
@@ -397,7 +471,9 @@ export function childTypes(t: Type): Type[] {
     case 'tuple': {
       return t.elems;
     }
-    case 'array':
+    case 'array': {
+      return t.lenType ? [t.elem, t.lenType] : [t.elem];
+    }
     case 'slice': {
       return [t.elem];
     }
@@ -425,7 +501,6 @@ export function childTypes(t: Type): Type[] {
   }
 }
 
-/** Replaces bound variables in a type and applies fallback types when requested. */
 export function resolve(type: Type, defaults = false): Type {
   const t = shallow(type);
   if (t.kind === 'var') {
@@ -454,7 +529,6 @@ export function resolveTraitRef(ref: TraitRef, defaults = false): TraitRef {
   return mapTraitRef(ref, (type) => resolve(type, defaults));
 }
 
-/** Whether a type still has an unbound variable after resolving. */
 export function hasVars(type: Type): boolean {
   const t = shallow(type);
   if (t.kind === 'var') return true;
@@ -463,7 +537,6 @@ export function hasVars(type: Type): boolean {
 
 export type Subst = Map<TypeParam, Type>;
 
-/** Replaces type parameters with the types `subst` binds them to. */
 export function substitute(type: Type, subst: Subst): Type {
   if (subst.size === 0) return type;
   const t = shallow(type);
@@ -550,11 +623,17 @@ export function allSupertraits(bounds: TraitRef[], self?: Type): TraitRef[] {
   return result;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Compares each part of a trait reference.
 function sameTraitRef(a: TraitRef, b: TraitRef): boolean {
   if (a.trait !== b.trait || !sameTypeList(a.args, b.args)) return false;
   if (a.fnSig && b.fnSig) {
     if (!sameTypeList(a.fnSig.params, b.fnSig.params) || !sameType(a.fnSig.ret, b.fnSig.ret)) return false;
   } else if (a.fnSig || b.fnSig) return false;
+  if ((a.assoc?.size ?? 0) !== (b.assoc?.size ?? 0)) return false;
+  for (const [name, type] of a.assoc ?? []) {
+    const other = b.assoc?.get(name);
+    if (!other || !sameType(type, other)) return false;
+  }
   return a.item && b.item ? sameType(a.item, b.item) : a.item === b.item;
 }
 
@@ -586,6 +665,12 @@ export function sameType(a: Type, b: Type): boolean {
     }
     case 'array': {
       const other = y as typeof x;
+      if (x.lenType || other.lenType) {
+        return (
+          sameType(x.lenType ?? constValueType(x.len), other.lenType ?? constValueType(other.len)) &&
+          sameType(x.elem, other.elem)
+        );
+      }
       return x.len === other.len && sameType(x.elem, other.elem);
     }
     case 'slice': {
@@ -608,6 +693,7 @@ export function sameType(a: Type, b: Type): boolean {
     case 'fn': {
       const other = y as typeof x;
       return (
+        (x.isUnsafe ?? false) === (other.isUnsafe ?? false) &&
         x.params.length === other.params.length &&
         x.params.every((p, i) => sameType(p, other.params[i])) &&
         sameType(x.ret, other.ret)
@@ -636,11 +722,7 @@ export function sameAutoTraits(a: Extract<Type, { kind: 'dyn' }>, b: Extract<Typ
   return left.length === right.length && left.every((trait) => right.includes(trait));
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Printing
-
 /** A type as rustc writes it in messages, with `{integer}` and `_` for variables. */
-// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
 // code-gauge-allow functionNcss -- One case per kind of type.
 export function typeToString(type: Type): string {
   const t = shallow(type);
@@ -662,7 +744,7 @@ export function typeToString(type: Type): string {
       return `(${t.elems.map(typeToString).join(', ')})`;
     }
     case 'array': {
-      return `[${typeToString(t.elem)}; ${t.len}]`;
+      return `[${typeToString(t.elem)}; ${t.lenType ? typeToString(t.lenType) : t.len}]`;
     }
     case 'slice': {
       return `[${typeToString(t.elem)}]`;
@@ -671,14 +753,7 @@ export function typeToString(type: Type): string {
       return `&${t.mutable ? 'mut ' : ''}${typeToString(t.target)}`;
     }
     case 'adt': {
-      if (t.def.builtin === 'Iter') {
-        // An iterator is the std type its shape stands for.
-        const shape = shallow(t.args[1]);
-        return shape.kind === 'adt' ? typeToString(shape) : `impl Iterator<Item = ${typeToString(t.args[0])}>`;
-      }
-      const name = isIteratorShape(t.def) ? shapeName(t.def.name) : t.def.name;
-      if (t.args.length === 0) return name;
-      return `${name}<${t.args.map(typeToString).join(', ')}>`;
+      return adtToString(t);
     }
     case 'param': {
       return t.param.name;
@@ -687,7 +762,7 @@ export function typeToString(type: Type): string {
       return t.v.literal === 'int' ? '{integer}' : t.v.literal === 'float' ? '{float}' : '_';
     }
     case 'fn': {
-      return `fn(${t.params.map(typeToString).join(', ')})${isUnit(t.ret) ? '' : ` -> ${typeToString(t.ret)}`}`;
+      return fnToString(t);
     }
     case 'closure': {
       return 'クロージャ';
@@ -701,13 +776,46 @@ export function typeToString(type: Type): string {
   }
 }
 
+function adtToString(t: Type & { kind: 'adt' }): string {
+  if (t.def.projection) {
+    const { trait, name } = t.def.projection;
+    const [self, ...rest] = t.args;
+    const args = rest.slice(0, trait.params.length);
+    const own = rest.slice(trait.params.length);
+    const traitText = args.length === 0 ? trait.name : traitRefToString({ trait, args });
+    const ownText = own.length === 0 ? '' : `<${own.map(typeToString).join(', ')}>`;
+    return `<${typeToString(self)} as ${traitText}>::${name}${ownText}`;
+  }
+  if (t.def.builtin === 'ConstPtr' || t.def.builtin === 'MutPtr') {
+    return `*${t.def.builtin === 'MutPtr' ? 'mut' : 'const'} ${typeToString(t.args[0])}`;
+  }
+  if (t.def.builtin === 'Iter') {
+    // An iterator is the std type its shape stands for.
+    const shape = shallow(t.args[1]);
+    return shape.kind === 'adt' ? typeToString(shape) : `impl Iterator<Item = ${typeToString(t.args[0])}>`;
+  }
+  const name = isIteratorShape(t.def) ? shapeName(t.def.name) : t.def.name;
+  if (t.args.length === 0) return name;
+  return `${name}<${t.args.map(typeToString).join(', ')}>`;
+}
+
+function fnToString(t: Type & { kind: 'fn' }): string {
+  const unsafe = t.isUnsafe || (t.item && 'ast' in t.item && t.item.ast?.isUnsafe) ? 'unsafe ' : '';
+  return `${unsafe}fn(${t.params.map(typeToString).join(', ')})${isUnit(t.ret) ? '' : ` -> ${typeToString(t.ret)}`}`;
+}
+
 export function traitRefToString(ref: TraitRef): string {
   if (ref.fnSig) {
     const ret = isUnit(ref.fnSig.ret) ? '' : ` -> ${typeToString(ref.fnSig.ret)}`;
     return `${ref.trait.name}(${ref.fnSig.params.map(typeToString).join(', ')})${ret}`;
   }
-  if (ref.args.length === 0) return ref.trait.name;
-  return `${ref.trait.name}<${ref.args.map(typeToString).join(', ')}>`;
+  const args = [
+    ...ref.args.map(typeToString),
+    ...(ref.item ? [`Item = ${typeToString(ref.item)}`] : []),
+    ...[...(ref.assoc ?? [])].map(([name, type]) => `${name} = ${typeToString(type)}`),
+  ];
+  if (args.length === 0) return ref.trait.name;
+  return `${ref.trait.name}<${args.join(', ')}>`;
 }
 
 export function isUnit(type: Type): boolean {
@@ -777,7 +885,6 @@ export function isIteratorShape(def: AdtDef): boolean {
   return def.name.endsWith('Shape') && (def.module as { name?: string } | undefined)?.name === 'shape';
 }
 
-/** The name of the iterator type of std that a shape stands for. */
 function shapeName(name: string): string {
   const renamed: Record<string, string> = {
     SliceIterShape: 'Iter',
@@ -791,4 +898,44 @@ function shapeName(name: string): string {
   if (renamed[name]) return renamed[name];
   const collection = /^(?:HashMap|BTreeMap|HashSet|BTreeSet|VecDeque|BinaryHeap)(\w+)Shape$/.exec(name);
   return collection ? collection[1] : name.replace(/Shape$/, '');
+}
+
+const constValues = new Map<string, AdtDef>();
+
+/** The value given to a const parameter, as a type argument: an integer, a `bool`, or a `char` (`'z'`). */
+export function constValueType(value: bigint | number | boolean | string): Type {
+  const name = typeof value === 'string' ? `'${value}'` : String(value);
+  let def = constValues.get(name);
+  if (!def) {
+    def = {
+      name,
+      path: name,
+      kind: 'struct',
+      params: [],
+      variants: [],
+      derives: new Set(),
+      span: { row: 0, col: 1 },
+      builtin: 'ConstValue',
+    };
+    constValues.set(name, def);
+  }
+  return { kind: 'adt', def, args: [] };
+}
+
+export function constValueOf(type: Type): bigint | undefined {
+  const value = constArgValue(type);
+  return typeof value === 'bigint' ? value : undefined;
+}
+
+export function constArgValue(type: Type): bigint | boolean | string | undefined {
+  const t = shallow(type);
+  if (t.kind !== 'adt' || t.def.builtin !== 'ConstValue') return undefined;
+  const { name } = t.def;
+  if (name === 'true' || name === 'false') return name === 'true';
+  return name.startsWith("'") ? name.slice(1, -1) : BigInt(name);
+}
+
+export function arrayOfLength(elem: Type, lenType: Type): Type {
+  const known = constValueOf(lenType);
+  return known === undefined ? { kind: 'array', elem, len: -1, lenType } : { kind: 'array', elem, len: Number(known) };
 }

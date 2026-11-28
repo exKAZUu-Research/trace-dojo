@@ -1,3 +1,5 @@
+import type { PathRes } from './annotations';
+import { projectionOf } from './assocTypes';
 import type { Expr, Span } from './ast';
 import type { Checker } from './checker';
 import { isPlaceExpr, requireMutablePlace } from './checkerPlaces';
@@ -5,7 +7,21 @@ import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
 import { compileError } from './items';
 import { derefOnce } from './methods';
-import { BOOL, freshVar, intType, ref, REF_STR, resolve, shallow, type Type, typeToString, UNIT } from './types';
+import {
+  BOOL,
+  F32,
+  F64,
+  freshVar,
+  INT_NAMES,
+  intType,
+  ref,
+  REF_STR,
+  resolve,
+  shallow,
+  type Type,
+  typeToString,
+  UNIT,
+} from './types';
 
 /**
  * Gives each pending operator its result type once its operands' types are known: rustc waits while the left one is
@@ -43,7 +59,8 @@ function settleBinary(
     c.requireKnownTypes();
     compileError(expr.opSpan, `型が決まりません（${typeToString(resolve(leftType))} の型を書いてください）。`);
   }
-  const output = setOperation(c, expr, left, right) ?? settledOutput(c, expr, l, r);
+  const output =
+    setOperation(c, expr, left, right) ?? overloadedOutput(c, expr, left, right) ?? settledOutput(c, expr, l, r);
   if (!output) badOperands(expr, leftType, rightType);
   if (!c.unifier.tryUnify(result, output)) {
     compileError(
@@ -51,6 +68,18 @@ function settleBinary(
       `${typeToString(resolve(left))} ${expr.op} ${typeToString(resolve(right))} の結果は ${typeToString(resolve(output))} ですが、${typeToString(resolve(result))} が必要です。`
     );
   }
+}
+
+/** The result of an operator whose left side turned out to be a type an operator trait's impl takes (a struct). */
+function overloadedOutput(
+  c: Checker,
+  expr: Extract<Expr, { kind: 'binary' }>,
+  left: Type,
+  right: Type
+): Type | undefined {
+  const traits = BINARY_TRAITS[expr.op];
+  if (!traits || !isOverloadable(numericOperand(left)) || isSetOperand(left, expr.op)) return undefined;
+  return overloadedOperator(c, expr, traits[0], traits[1], left, [right], expr.opSpan, expr.op);
 }
 
 /** The result type of an operator on numbers, booleans, or strings whose types are known, if std implements it. */
@@ -62,18 +91,65 @@ function settledOutput(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, l: T
   return isArithmeticOperand(l) && !(bitwise && l.kind === 'float') && c.unifier.tryUnify(l, r) ? l : undefined;
 }
 
+export const BINARY_TRAITS: Record<string, [string, string]> = {
+  '+': ['Add', 'add'],
+  '-': ['Sub', 'sub'],
+  '*': ['Mul', 'mul'],
+  '/': ['Div', 'div'],
+  '%': ['Rem', 'rem'],
+  '&': ['BitAnd', 'bitand'],
+  '|': ['BitOr', 'bitor'],
+  '^': ['BitXor', 'bitxor'],
+  '<<': ['Shl', 'shl'],
+  '>>': ['Shr', 'shr'],
+};
+
+/** Whether an operand's type is one whose operators an impl of an operator trait gives, not the language. */
+export function isOverloadable(type: Type): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return isOverloadable(t.target);
+  if (t.kind === 'adt') return t.def.builtin !== 'String';
+  return t.kind === 'param' || t.kind === 'opaque' || t.kind === 'tuple' || t.kind === 'array' || t.kind === 'dyn';
+}
+
+/**
+ * An operator that an impl of its trait gives (`impl Add for Point`): it calls the trait's method, and its result is
+ * the impl's `Output`.
+ */
+// code-gauge-allow functionParameterCount -- Takes both operands, their types and spans, which every operator check needs.
+export function overloadedOperator(
+  c: Checker,
+  expr: Expr,
+  traitName: string,
+  method: string,
+  self: Type,
+  args: Type[],
+  span: Span,
+  describe: string
+): Type {
+  const trait = c.program.traitDef(traitName);
+  const ref = { trait, args };
+  if (c.solver.implements(self, ref) === 'no') {
+    compileError(
+      span,
+      `${typeToString(resolve(self))} に演算子 ${describe} は使えません（${traitName} が実装されていません）。`
+    );
+  }
+  c.require(self, ref, span);
+  c.annotations.operators.set(expr, { fn: trait.methods.get(method)!, typeArgs: [self, ...args] });
+  return trait.assocTypes.has('Output') ? projectionOf(trait, 'Output', self, args) : UNIT;
+}
+
 // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, expected: Type | undefined): Type {
-  if (expr.op === '*') {
-    const type = normalize(shallow(c.settled(c.expr(expr.operand, undefined))));
-    const deref = derefOnce(c.program, type);
-    if (deref) return deref.type;
-    if (type.kind === 'var') compileError(expr.span, '型が決まらないので、* で参照をたどれません。');
-    compileError(expr.span, `${typeToString(resolve(type))} は参照ではないので、* でたどれません。`);
-  }
+  if (expr.op === '*') return checkDeref(c, expr);
   if (expr.op === '-' && expr.operand.kind === 'int') c.negatedLiterals.add(expr.operand);
   const operandType = c.expr(expr.operand, expected);
   const t = numericOperand(operandType);
+  if (isOverloadable(t)) {
+    const [trait, method] = expr.op === '!' ? ['Not', 'not'] : ['Neg', 'neg'];
+    return overloadedOperator(c, expr, trait, method, operandType, [], expr.span, expr.op);
+  }
   if (expr.op === '!') {
     if (t.kind === 'bool' || t.kind === 'int' || (t.kind === 'var' && t.v.literal === 'int')) return t;
     compileError(expr.span, `${typeToString(resolve(operandType))} に ! は使えません。`);
@@ -86,11 +162,23 @@ export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, e
   return compileError(expr.span, `${typeToString(resolve(operandType))} に - は使えません。`);
 }
 
+/** `*x`: through a reference, a raw pointer, an owner, a `Deref` impl, or a type parameter's `Deref` bound. */
+function checkDeref(c: Checker, expr: Extract<Expr, { kind: 'unary' }>): Type {
+  const type = normalize(shallow(c.settled(c.expr(expr.operand, undefined))));
+  if (type.kind === 'adt' && (type.def.builtin === 'ConstPtr' || type.def.builtin === 'MutPtr')) {
+    return rawPointee(c, expr, type);
+  }
+  const deref = derefOnce(c.program, type);
+  if (deref) return deref.type;
+  if (type.kind === 'var') compileError(expr.span, '型が決まらないので、* で参照をたどれません。');
+  return compileError(expr.span, `${typeToString(resolve(type))} は参照ではないので、* でたどれません。`);
+}
+
 /**
  * The number an operand of an operator stands for: std implements the operators for numbers and for shared
  * references to them, one level deep (`&i32 + i32`), but not for `&&i32` or `&mut i32`, which stay as they are.
  */
-function numericOperand(type: Type): Type {
+export function numericOperand(type: Type): Type {
   const t = normalize(shallow(type));
   if (t.kind === 'ref' && !t.mutable) {
     const target = normalize(shallow(t.target));
@@ -100,6 +188,7 @@ function numericOperand(type: Type): Type {
   return t;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of binary operator.
 export function checkBinary(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, expected: Type | undefined): Type {
   const { op } = expr;
   if (op === '&&' || op === '||') {
@@ -128,8 +217,20 @@ export function checkBinary(c: Checker, expr: Extract<Expr, { kind: 'binary' }>,
       '&str どうしは + でつなげません（String::from("...") + "..." や format! を使ってください）。'
     );
   }
+  if (isOverloadable(left) && !isSetOperand(leftType, op)) {
+    const rightType = c.expr(expr.right, undefined);
+    const [trait, method] = BINARY_TRAITS[op];
+    return overloadedOperator(c, expr, trait, method, leftType, [rightType], expr.opSpan, op);
+  }
   if (op === '<<' || op === '>>') return checkShift(c, expr, leftType, left);
   return arithmeticOrBitwise(c, expr, leftType, left);
+}
+
+function isSetOperand(left: Type, op: string): boolean {
+  const l = normalize(shallow(left));
+  if (!['|', '&', '-', '^'].includes(op) || l.kind !== 'ref') return false;
+  const set = normalize(shallow(l.target));
+  return set.kind === 'adt' && (set.def.builtin === 'HashSet' || set.def.builtin === 'BTreeSet');
 }
 
 /** The two sides of a shift have types of their own, so a right one not known yet is checked once it is. */
@@ -152,6 +253,12 @@ function arithmeticOrBitwise(c: Checker, expr: Extract<Expr, { kind: 'binary' }>
     c.unifyOrError(expr.right.span, BOOL, right);
     return BOOL;
   }
+  // A number with a type on the right whose impl takes it (`impl Mul<Point> for i32`).
+  if (isOverloadable(right)) {
+    const [trait, method] = BINARY_TRAITS[op];
+    const self = left.kind === 'var' ? (literalSelf(c, left, trait, rightType) ?? resolve(left, true)) : leftType;
+    return overloadedOperator(c, expr, trait, method, self, [rightType], expr.opSpan, op);
+  }
   if (!isArithmeticOperand(left) || !isArithmeticOperand(right)) badOperands(expr, leftType, rightType);
   if (!c.unifier.tryUnify(left, right)) {
     compileError(
@@ -168,6 +275,20 @@ function arithmeticOrBitwise(c: Checker, expr: Extract<Expr, { kind: 'binary' }>
     });
   }
   return result;
+}
+
+/**
+ * The one integer type whose impl of an operator trait takes the right operand, for an integer literal on the left
+ * (`3 * Duration::from_millis(7)` is a `u32`), as rustc picks it before falling back to `i32`.
+ */
+function literalSelf(c: Checker, left: Type & { kind: 'var' }, traitName: string, right: Type): Type | undefined {
+  if (left.v.literal !== 'int' && left.v.literal !== 'float') return undefined;
+  const ref = { trait: c.program.traitDef(traitName), args: [right] };
+  const candidates = left.v.literal === 'int' ? INT_NAMES.map(intType) : [F32, F64];
+  const [only, ...others] = candidates.filter((type) => c.solver.implements(type, ref) === 'yes');
+  if (!only || others.length > 0) return undefined;
+  c.unifier.tryUnify(left, only);
+  return only;
 }
 
 /** `&a | &b`, `&`, `-`, and `^` of two sets by reference: their union, intersection, and differences. */
@@ -240,55 +361,26 @@ export function checkAssign(c: Checker, expr: Extract<Expr, { kind: 'assign' }>)
     c.expr(expr.value, undefined);
     return UNIT;
   }
-  const targetType = c.expr(target, undefined);
+  c.body.writingUnionField = target.kind === 'field';
+  let targetType: Type;
+  try {
+    targetType = c.expr(target, undefined);
+  } finally {
+    c.body.writingUnionField = false;
+  }
   if (!isPlaceExpr(c, target)) compileError(target.span, '代入の左辺には、変数やフィールドなどを書いてください。');
   c.coerceAtReferenceSite(expr.value, targetType);
   requireMutablePlace(c, target, '代入する');
   return UNIT;
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
-export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'compoundAssign' }>): Type {
-  const targetType = c.expr(expr.target, undefined);
-  if (!isPlaceExpr(c, expr.target))
-    compileError(expr.target.span, '代入の左辺には、変数やフィールドなどを書いてください。');
-  const t = normalize(shallow(targetType));
-  if (expr.op === '+' && t.kind === 'adt' && t.def.builtin === 'String') {
-    c.coerceExpr(expr.value, REF_STR);
-  } else if (expr.op === '<<' || expr.op === '>>') {
-    const r = numericOperand(c.expr(expr.value, undefined));
-    if (!isIntegral(t) || !isIntegral(r))
-      compileError(expr.span, `${typeToString(resolve(targetType))} に ${expr.op}= は使えません。`);
-  } else {
-    const valueType = c.expr(expr.value, t.kind === 'var' && !t.v.literal ? undefined : t);
-    const v = numericOperand(valueType);
-    const numeric = t.kind === 'int' || t.kind === 'float' || t.kind === 'var';
-    const bitwise = ['&', '|', '^'].includes(expr.op);
-    const boolOp = t.kind === 'bool' && bitwise;
-    if ((!numeric && !boolOp) || !c.unifier.tryUnify(t, v)) {
-      if (t.kind === 'adt' || t.kind === 'param') {
-        compileError(
-          expr.span,
-          `${typeToString(resolve(targetType))} に演算子 ${expr.op}= は使えません（演算子の多重定義は、この採点環境では使えません）。`
-        );
-      }
-      compileError(
-        expr.span,
-        `${typeToString(resolve(targetType))} に ${typeToString(resolve(valueType))} を ${expr.op}= で計算できません（型をそろえてください）。`
-      );
-    }
-    if (bitwise) {
-      c.deferredChecks.push(() => {
-        if (normalize(shallow(resolve(targetType, true))).kind === 'float') {
-          compileError(expr.span, `${typeToString(resolve(targetType))} に ${expr.op}= は使えません。`);
-        }
-      });
-    }
-  }
-  requireMutablePlace(c, expr.target, '書き換える');
-  return UNIT;
+/** What `*p` of a raw pointer reaches, which only unsafe code reads; `&raw const *p` names the place unread. */
+function rawPointee(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, pointer: Type & { kind: 'adt' }): Type {
+  if (c.body.rawDeref !== expr) c.requireUnsafe(expr.span, '生ポインタの参照外し（*p）');
+  return pointer.args[0];
 }
 
+// code-gauge-allow functionCognitiveComplexity -- References, raw references and constant promotion follow rustc case by case.
 export function refExpr(c: Checker, expr: Extract<Expr, { kind: 'ref' }>, expected: Type | undefined): Type {
   const e = expected ? normalize(shallow(expected)) : undefined;
   let inner = e?.kind === 'ref' ? e.target : undefined;
@@ -300,9 +392,37 @@ export function refExpr(c: Checker, expr: Extract<Expr, { kind: 'ref' }>, expect
     const target = shallow(inner);
     if (target.kind === 'dyn' && !target.trait.fnSig) inner = undefined;
   }
-  const type = c.expr(expr.operand, inner);
+  c.body.rawBorrowing = expr.raw === true && expr.operand.kind === 'path';
+  c.body.rawDeref = expr.raw && expr.operand.kind === 'unary' && expr.operand.op === '*' ? expr.operand : undefined;
+  let type: Type;
+  try {
+    type = c.expr(expr.operand, inner);
+  } finally {
+    c.body.rawBorrowing = false;
+    c.body.rawDeref = undefined;
+  }
   if (expr.mutable) requireMutablePlace(c, expr.operand, '&mut で借りる');
+  if (!expr.raw) rejectStaticMutBorrow(c, expr.operand, expr.span);
+  if (expr.raw) {
+    if (!isPlaceExpr(c, expr.operand))
+      compileError(expr.operand.span, '&raw の後には、変数やフィールドなどを書いてください。');
+    return c.program.builtinType(expr.mutable ? 'MutPtr' : 'ConstPtr', [type]);
+  }
   return ref(type, expr.mutable);
+}
+
+/**
+ * Rejects a borrow of a `static mut` or of a field of one, as rustc 2024's `static_mut_refs` does, whether written
+ * (`&A`, `&T.f`) or made by a formatting macro or a method's autoref. A borrow of an element (`&mut A[0]`) borrows
+ * what the index gives, which rustc accepts.
+ */
+export function rejectStaticMutBorrow(c: Checker, place: Expr, span: Span): void {
+  let root = place;
+  while (root.kind === 'field') root = root.operand;
+  const res: PathRes | undefined = root.kind === 'path' ? c.annotations.paths.get(root) : undefined;
+  if (res?.kind === 'const' && res.def.ast.isMutable) {
+    compileError(span, 'static mut の参照は作れません（&raw const や &raw mut を使ってください）。');
+  }
 }
 
 export function checkCast(c: Checker, expr: Extract<Expr, { kind: 'cast' }>): Type {
@@ -380,13 +500,13 @@ function stripAll(type: Type): Type {
   return t;
 }
 
-function isStrLike(type: Type): boolean {
+export function isStrLike(type: Type): boolean {
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));
   return t.kind === 'str';
 }
 
-function isIntegral(type: Type): boolean {
+export function isIntegral(type: Type): boolean {
   const t = normalize(shallow(type));
   return t.kind === 'int' || (t.kind === 'var' && t.v.literal === 'int');
 }

@@ -1,20 +1,23 @@
 import type { Expr, FormatArgs, FormatPiece, MacroCall, Span } from './ast';
 import { stringByteLength, stringCapacity, StringGrowth } from './capacity';
 import type { Compiler, Eval } from './compiler';
-import { evaluateValues, stringish, withEvaluatedValues } from './compilerCommon';
+import { derefAll, evaluateValues, stringish, withEvaluatedValues } from './compilerCommon';
 import { compilePatternInput, takesWhole } from './compilerPatterns';
+import { dropsBorrowedTemporary } from './compilerTemporaries';
 import type { WriteChunk } from './debugText';
-import type { Spec } from './fmt';
+import { type Spec, UnsupportedFormat } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
 import { allocVecElements } from './natives/capacityNatives';
+import { writeTarget, writeToStream } from './natives/io';
 import { sizeOf } from './natives/layout';
 import { cloneValue, valuesEqual } from './ops';
-import { FmtFailure, type Frame, RustPanic, writtenText } from './runtime';
+import { FmtFailure, type Frame, RustPanic, UnsupportedAtRun, writtenText } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { outputStream, resolve, shallow } from './types';
 import { utf8Length } from './utf8';
 import {
+  type BufferedWriter,
   EnumValue,
   type FormatterValue,
   isPlace,
@@ -57,7 +60,7 @@ export function compileMacro(c: Compiler, expr: Expr, macro: MacroCall): Eval {
 }
 
 function matchesMacro(c: Compiler, macro: Macro<'matches'>): Eval {
-  const input = compilePatternInput(c, macro.value);
+  const input = compilePatternInput(c, macro.value, [macro.pattern]);
   const matcher = c.compileMatcher(macro.pattern);
   const slots = c.patternSlots(macro.pattern);
   const takeAll = takesWhole(c, macro.value, macro.pattern);
@@ -114,6 +117,8 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
   }
   const stream = outputStream(inner);
   if (stream) return writeStream(c, macro, target, format, stream, newline);
+  const written = writeTarget(inner);
+  if (written) return writeFile(c.program, target, format, newline, written === 'buffered', macro.target.span);
   const { program } = c;
   return (frame) => {
     let formatter = target(frame);
@@ -126,6 +131,33 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
     value.text += written;
     return writeResult(program, failed);
   };
+}
+
+function writeFile(
+  program: Program,
+  target: Eval,
+  format: FormatEval,
+  newline: string,
+  buffered: boolean,
+  span: Span
+): Eval {
+  return (frame) => {
+    const error = buffered
+      ? writeBuffered(derefAll(target(frame)) as BufferedWriter, format, frame, newline)
+      : writeToStream(target(frame), formatPartly(format, frame).text + newline, span);
+    return error ? new EnumValue(program.adtDef('Result'), 1, [error]) : writeResult(program, false);
+  };
+}
+
+/** Writes to a `BufWriter` piece by piece, as `write_fmt` does, which decides when its buffer fills. */
+function writeBuffered(writer: BufferedWriter, format: FormatEval, frame: Frame, newline: string): Value | undefined {
+  let error: Value | undefined;
+  const write = (chunk: string): void => {
+    if (chunk !== '') error ??= writer.write(chunk);
+  };
+  formatPartly(format, frame, write);
+  write(newline);
+  return error;
 }
 
 function writeStream(
@@ -345,17 +377,25 @@ function plainPlaceholder(part: Exclude<FormatPiece, string>, arg: Expr): string
 }
 
 function compileFormat(c: Compiler, format: FormatArgs, pieces = foldFormatPieces(format)): FormatEval {
-  const args = format.args.map((arg) => c.read(arg));
+  // A formatting macro borrows its arguments, so one no variable holds is a temporary that goes with the statement.
+  const args = format.args.map((arg) => dropsBorrowedTemporary(c, arg, c.read(arg)));
   const types = format.args.map((arg) => runtimeType(arg.ty!));
   return (frame, write) =>
     withEvaluatedValues(frame, args, (values) => {
       frame.runtime.spend();
-      return c.support.formatter.format(
-        pieces,
-        values,
-        types.map((type) => type(frame)),
-        write
-      );
+      try {
+        return c.support.formatter.format(
+          pieces,
+          values,
+          types.map((type) => type(frame)),
+          write
+        );
+      } catch (error) {
+        if (error instanceof UnsupportedFormat) {
+          throw new UnsupportedAtRun(`${error.what}は、この採点環境では使えません。`, format.span);
+        }
+        throw error;
+      }
     });
 }
 

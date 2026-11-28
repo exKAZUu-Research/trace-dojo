@@ -1,11 +1,11 @@
-import type { Condition, Expr, Pattern } from './ast';
+import type { Condition, Expr, MatchArm, Pattern } from './ast';
 import type { Compiler, Eval } from './compiler';
-import { compilePatternInput, takesWhole } from './compilerPatterns';
+import { compileGuardedMatcher, compilePatternInput, takesWhole } from './compilerPatterns';
 import { normalize } from './infer';
-import { ControlSignal, type Frame } from './runtime';
+import { ControlSignal, type Frame, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { resolve, shallow, type Type } from './types';
-import { DONE, type IterValue, UNIT_VALUE, type Value } from './values';
+import { DONE, type IterValue, type Place, UNIT_VALUE, type Value } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 type ConditionalEval = (frame: Frame, onMatch: () => void) => boolean;
@@ -31,39 +31,102 @@ export function compileIf(c: Compiler, expr: ExprOf<'if'>, asStatement: boolean)
 }
 
 export function compileMatch(c: Compiler, expr: ExprOf<'match'>, asStatement: boolean): Eval {
-  const scrutinee = compilePatternInput(c, expr.scrutinee);
-  const arms = expr.arms.map((arm) => {
-    const matcher = c.compileMatcher(arm.pattern);
-    const body = asStatement ? c.statement(arm.body) : c.value(arm.body);
-    const slots = c.patternSlots(arm.pattern);
-    const takeAll = takesWhole(c, expr.scrutinee, arm.pattern);
-    return { matcher, body, slots, takeAll };
-  });
+  const scrutinee = compilePatternInput(
+    c,
+    expr.scrutinee,
+    expr.arms.map((arm) => arm.pattern)
+  );
+  const arms = expr.arms.map((arm) => compileArm(c, expr, arm, asStatement));
   return (frame) => {
     frame.runtime.spend();
     const { value, place } = scrutinee(frame);
     return frame.runtime.withRoots([place], () => {
-      for (const { matcher, body, slots, takeAll } of arms) {
-        if (!matcher(frame, value, () => place)) continue;
-        takeAll?.(frame);
-        try {
-          return body(frame);
-        } finally {
-          frame.endScope(slots);
-        }
+      for (const arm of arms) {
+        const result = arm(frame, value, place);
+        if (result !== NO_MATCH) return result;
       }
       throw new Error('No arm matched');
     });
   };
 }
 
+const NO_MATCH: unique symbol = Symbol('no match');
+
+/** An arm, giving its body's value when its pattern matches and its guard holds, or `NO_MATCH` to try the next. */
+function compileArm(
+  c: Compiler,
+  expr: ExprOf<'match'>,
+  arm: MatchArm,
+  asStatement: boolean
+): (frame: Frame, value: Value, place: Place) => Value | typeof NO_MATCH {
+  const matcher = compileGuardedMatcher(c, arm.pattern);
+  const guard = arm.guard && compileGuard(c, arm.guard);
+  const body = asStatement ? c.statement(arm.body) : c.value(arm.body);
+  const slots = c.patternSlots(arm.pattern);
+  const takeAll = takesWhole(c, expr.scrutinee, arm.pattern);
+  return (frame, value, place) => {
+    const moveOut = matcher(frame, value, () => place);
+    if (!moveOut) return NO_MATCH;
+    const run = (): Value => {
+      moveOut();
+      takeAll?.(frame);
+      try {
+        return body(frame);
+      } finally {
+        frame.endScope(slots);
+      }
+    };
+    if (!guard) return run();
+    let result: Value = UNIT_VALUE;
+    // The guard's `let` bindings live through the arm's body, which runs once every condition holds.
+    const ran = guard.holds(frame, () => {
+      try {
+        result = run();
+      } finally {
+        frame.endScope(guard.slots);
+      }
+    });
+    if (ran) return result;
+    frame.endScope(slots, false);
+    frame.endScope(guard.slots, false);
+    return NO_MATCH;
+  };
+}
+
+/**
+ * A match guard: its conditions in order, each running the next once it holds and the arm last, telling whether all
+ * held; an expression's temporaries go before what follows it runs, as `if`'s do. `slots` are its `let` bindings'.
+ */
+function compileGuard(c: Compiler, conds: Condition[]): { holds: ConditionalEval; slots: number[] } {
+  const parts = conds.map((cond) => compileCondition(c, cond));
+  const slots = conds.flatMap((cond) => (cond.kind === 'let' ? c.patternSlots(cond.pattern) : []));
+  const from = (index: number): ConditionalEval => {
+    if (index === parts.length) {
+      return (_frame, onMatch) => {
+        onMatch();
+        return true;
+      };
+    }
+    const rest = from(index + 1);
+    return (frame, onMatch) => {
+      let held = false;
+      const holds = parts[index](frame, () => {
+        held = rest(frame, onMatch);
+      });
+      return holds && held;
+    };
+  };
+  return { holds: from(0), slots };
+}
+
 export function compileLoop(c: Compiler, expr: ExprOf<'loop'>): Eval {
   const body = c.compileBlock(expr.body, true);
   const label = expr.label;
+  const isBlock = expr.isBlock === true;
   return (frame) => {
     for (;;) {
       frame.runtime.spend();
-      const signal = runBody(body, frame, label);
+      const signal = runBody(body, frame, label, isBlock);
       if (signal) return signal.value ?? UNIT_VALUE;
     }
   };
@@ -94,6 +157,8 @@ export function compileWhile(c: Compiler, expr: ExprOf<'while'>): Eval {
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Runs the loop and drops its iterator when it is left early, as Rust does.
+// code-gauge-allow functionNcss -- Runs the loop and drops its iterator when it is left early, as Rust does.
 export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
   const loopInfo = c.annotations.loops.get(expr);
   if (!loopInfo) throw new Error('Unchecked for');
@@ -105,23 +170,44 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
   const label = expr.label;
   const row = c.stepRow(expr.span);
   const answered = bindsAnswer(expr.pattern);
+  // `for x in &mut it` only borrows `it`, whose owner drops what the loop leaves.
+  const from = normalize(shallow(loopInfo.from));
+  const borrowed = from.kind === 'ref' && from.mutable;
   return (frame) => {
     const source = iterable(frame);
-    const iterator = c.support.toIter(source, fromType(frame)) as IterValue;
+    const iterator = c.support.toIter(source, fromType(frame), expr.iterable.span) as IterValue;
+    const leave = (): void => {
+      if (borrowed) iterator.release();
+      else frame.runtime.dropper?.dropRest(iterator);
+    };
     return frame.runtime.withRoots([iterator], () =>
       frame.runtime.withActiveBorrows([iterator], () => {
-        for (;;) {
-          frame.runtime.spend();
-          const next = iterator.next();
-          if (next === DONE) return UNIT_VALUE;
-          frame.temporaries.push(bind(frame, next));
-          try {
-            stepBinding(frame, row, answered);
-            if (runBody(body, frame, label)) return UNIT_VALUE;
-          } finally {
-            frame.temporaries.pop();
-            frame.endScope(patternSlots);
+        try {
+          for (;;) {
+            frame.runtime.spend();
+            const next = iterator.next();
+            if (next === DONE) {
+              iterator.release();
+              return UNIT_VALUE;
+            }
+            frame.temporaries.push(bind(frame, next));
+            let broke = false;
+            try {
+              stepBinding(frame, row, answered);
+              broke = !!runBody(body, frame, label);
+            } finally {
+              frame.temporaries.pop();
+              frame.endScope(patternSlots);
+            }
+            if (broke) {
+              leave();
+              return UNIT_VALUE;
+            }
           }
+        } catch (error) {
+          // A `return`, a `break` of an outer loop or a panic leaves the loop, which drops its iterator.
+          if (error instanceof ControlSignal || error instanceof RustPanic) leave();
+          throw error;
         }
       })
     );
@@ -132,22 +218,32 @@ function compileCondition(c: Compiler, cond: Condition): ConditionalEval {
   if (cond.kind === 'expr') {
     const value = c.value(cond.expr);
     return (frame, onMatch) => {
-      if (!value(frame)) return false;
+      const mark = frame.runtime.liveGuards.length;
+      const result = value(frame);
+      // A condition's temporaries (a `RefCell`'s guard) go before its branch runs.
+      frame.runtime.releaseGuards(frame, mark);
+      if (!result) return false;
       onMatch();
       return true;
     };
   }
-  const input = compilePatternInput(c, cond.value);
+  const input = compilePatternInput(c, cond.value, [cond.pattern]);
   const matcher = c.compileMatcher(cond.pattern);
   const takeAll = takesWhole(c, cond.value, cond.pattern);
   return (frame, onMatch) => {
+    const mark = frame.runtime.liveGuards.length;
     const { value, place } = input(frame);
-    return frame.runtime.withRoots([place], () => {
-      if (!matcher(frame, value, () => place)) return false;
-      takeAll?.(frame);
-      onMatch();
-      return true;
-    });
+    // Edition 2024 drops the scrutinee's temporaries when the matched branch ends, or before `else` runs.
+    try {
+      return frame.runtime.withRoots([place], () => {
+        if (!matcher(frame, value, () => place)) return false;
+        takeAll?.(frame);
+        onMatch();
+        return true;
+      });
+    } finally {
+      frame.runtime.releaseGuards(frame, mark);
+    }
   };
 }
 
@@ -156,12 +252,12 @@ function stepBinding(frame: Frame, row: number | undefined, answered: boolean): 
 }
 
 /** Runs a loop's body once, returning the `break` that ends the loop, if any; a `continue` goes on. */
-function runBody(body: Eval, frame: Frame, label: string | undefined): ControlSignal | undefined {
+function runBody(body: Eval, frame: Frame, label: string | undefined, isBlock = false): ControlSignal | undefined {
   try {
     body(frame);
   } catch (error) {
     if (!(error instanceof ControlSignal) || error.kind === 'return') throw error;
-    if (error.label !== undefined && error.label !== label) throw error;
+    if (error.label === undefined ? isBlock : error.label !== label) throw error;
     if (error.kind === 'break') return error;
   }
   return undefined;

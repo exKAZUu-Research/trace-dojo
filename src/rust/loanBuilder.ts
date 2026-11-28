@@ -3,7 +3,14 @@ import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
+import { type ClosureSummary, relateSummaryCall, summarizeClosure } from './closureSummaries';
 import { normalize } from './infer';
+import {
+  signatureLifetimeError,
+  type SignatureNames,
+  staticInputError,
+  staticItemBoundError,
+} from './lifetimeRelations';
 import {
   type Access,
   type AccessKind,
@@ -14,9 +21,23 @@ import {
   type Point,
   type Var,
 } from './loanGraph';
-import { type BindingMode, matchDeref, project } from './loanPlaces';
+import {
+  type BindingMode,
+  derefCoercedLayout,
+  derefCoercedPlace,
+  derefProjection,
+  matchDeref,
+  project,
+  reborrowedPointeeLayout,
+  refTarget,
+  relateArrayBorrow,
+  storedElement,
+  tupleElem,
+  variantOf,
+} from './loanPlaces';
 import { isMutableReference, reborrowedIteratorLayout, reborrowsIterator } from './receiverReborrow';
 import {
+  derefLayout,
   derefSteps,
   dropSlots,
   elementLayout,
@@ -31,31 +52,19 @@ import {
   ownedDerefLayout,
   regionsOf,
   relate,
+  relateLoopItem,
   type RVar,
   typeAfter,
 } from './regions';
 import { relateCallThroughBound, relateOpaqueCall, SignatureInstance } from './signatureInstance';
 import { markExtendedTemporaries, promotable } from './temporaryScopes';
-import { arrayTryFrom } from './traitConversions';
 import type { TraitSolver } from './traits';
 import { relateReturnedError } from './tryErrors';
-import { type ClosureType, type FnDef, resolve, shallow, substitute, type Type } from './types';
+import { type ClosureType, type FnDef, resolve, shallow, substitute, type Type, UNIT } from './types';
 
 /** The temporary that holds a value with borrows, or undefined for a value without any. */
 type Value = Var | undefined;
 
-/**
- * Which regions of a closure's parameters its result may hold: `[param, region of the param, region of the result]`;
- * `captures` lists the regions of the result that may hold borrows of what the closure captures.
- */
-interface ClosureSummary {
-  edges: [number, number, number][];
-  captures: number[];
-  /** The closure's body, where rustc reports a result that outlives its parameters' borrows. */
-  body: Span;
-}
-
-/** What the builders of a function and of the closures in it share. */
 interface LoanCheck {
   budget: ExecutionBudget;
   errors: LoanError[];
@@ -65,7 +74,6 @@ interface Shared extends LoanCheck {
   summaries: Map<ClosureType, ClosureSummary>;
 }
 
-/** What binding a pattern does at one point. */
 interface Binding {
   accesses: Access[];
   gens: Loan[];
@@ -77,6 +85,7 @@ interface Binding {
 
 interface LoopFrame {
   label: string | undefined;
+  isBlock: boolean;
   head: number;
   breaks: number[];
   result: Value;
@@ -118,28 +127,36 @@ export class LoanBuilder {
     this.graph = new LoanGraph(shared.budget);
   }
 
-  /** Checks a function's body, reporting the conflicts of borrows to `errors`. */
   static checkFn(
     annotations: Annotations,
     solver: TraitSolver,
     context: FnContext,
-    fn: { params: Pattern[]; body: Block; ret: Type; end: Span },
+    fn: { params: Pattern[]; body: Block; ret: Type; end: Span; signature: SignatureNames },
     check: LoanCheck
   ): void {
     const builder = new LoanBuilder(annotations, solver, context, { ...check, summaries: new Map() });
     const params = fn.params.map((pattern) => ({ pattern, type: pattern.ty }));
-    builder.build(params, fn.body, fn.ret, fn.end);
+    builder.build(params, fn.body, fn.ret, fn.end, fn.signature);
   }
 
   /**
    * Builds and checks a body whose parameters (and `self`) hold their arguments at the entry, returning the variables
    * that hold the parameters.
    */
-  private build(params: { pattern: Pattern; type: Type | undefined }[], body: Expr, ret: Type, end: Span): Var[] {
+  // code-gauge-allow functionNcss -- Builds the entry, the body and the exit checks of a function in order.
+  private build(
+    params: { pattern: Pattern; type: Type | undefined }[],
+    body: Expr,
+    ret: Type,
+    end: Span,
+    signature?: SignatureNames
+  ): Var[] {
     this.current = this.graph.newPoint();
     this.returnVar = this.newVar('{return}', ret);
     this.returnType = ret;
     this.makeUniversal(this.returnVar);
+    if (signature?.staticReturn)
+      for (const region of this.graph.varRegions[this.returnVar]) this.outlives(region, this.static());
     const receiver = this.context.locals.filter((local) => local.isSelf);
     const defs = receiver.map((local) => this.universalLocal(local));
     const parameterLocals = [
@@ -162,31 +179,27 @@ export class LoanBuilder {
     if (this.current !== undefined) this.exits.push(this.current);
     this.join(this.exits);
     this.endLocals(parameterLocals, end);
-    this.checkStaticInputs([...defs, ...paramVars], body.span);
-    this.graph.check(this.shared.errors);
-    return paramVars;
-  }
-
-  private checkStaticInputs(inputs: Var[], span: Span): void {
-    const root = this.staticRegion;
-    if (root === undefined || inputs.length === 0) return;
-    const reachable = new Set([root]);
-    const edges = new Map<RVar, RVar[]>();
-    this.shared.budget.spend(this.graph.outlives.length);
-    for (const [sup, sub] of this.graph.outlives) {
-      const destinations = edges.get(sub);
-      if (destinations) destinations.push(sup);
-      else edges.set(sub, [sup]);
-    }
-    for (const region of reachable) for (const next of edges.get(region) ?? []) reachable.add(next);
-    if (
-      inputs.some((input) => this.graph.varRegions[input].some((region) => region !== root && reachable.has(region)))
-    ) {
-      this.shared.errors.push({
-        span,
-        message: "引数から借りた参照を、この 'static が必要なトレイトオブジェクトには保存できません。",
+    const inputs = [...defs, ...paramVars];
+    const regions = inputs.map((v) => regionsOf(this.layouts[v], 'borrowed'));
+    const relationError =
+      signature &&
+      signatureLifetimeError(signature, {
+        inputs: inputs.map((v) => this.layouts[v]),
+        inputTypes: [...receiver.map((local) => local.type), ...params.map(({ type }) => type ?? UNIT)],
+        receivers: receiver.length,
+        ret: { layout: this.layouts[this.returnVar], type: ret },
+        outlives: this.graph.outlives,
+        staticRegion: this.staticRegion,
+        body,
       });
-    }
+    // The signature's own lifetime error explains the same flow better than the trait object's message.
+    const staticError =
+      !relationError &&
+      staticInputError(this.graph.outlives, regions, this.staticRegion, body.span, this.shared.budget);
+    if (staticError) this.shared.errors.push(staticItemBoundError(params, body.span) ?? staticError);
+    this.graph.check(this.shared.errors);
+    if (relationError) this.shared.errors.push(relationError);
+    return paramVars;
   }
 
   private universalLocal(local: LocalVar): Var {
@@ -198,9 +211,6 @@ export class LoanBuilder {
   private makeUniversal(v: Var): void {
     for (const region of this.graph.varRegions[v]) this.graph.universal.add(region);
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Points, variables, and regions
 
   private readonly outlives: Outlives = (sup, sub) => {
     if (sup !== sub) this.graph.outlives.push([sup, sub]);
@@ -273,7 +283,6 @@ export class LoanBuilder {
     return value === undefined ? NONE : this.layouts[value];
   }
 
-  /** Moves a value into a variable (a temporary, or the result of a branch or a block). */
   private store(value: Value, into: Value): void {
     if (value === undefined && into === undefined) return;
     this.point({ uses: value === undefined ? [] : [value], defs: into === undefined ? [] : [into] });
@@ -297,9 +306,6 @@ export class LoanBuilder {
     return { place: { root: this.varOf(local), proj: [] }, kind: 'storageDead', span: end };
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Places
-
   /** The place an expression denotes, evaluating the indexes in it, or undefined for an expression that is no place. */
   private place(expr: Expr, mutable = false): Place | undefined {
     switch (expr.kind) {
@@ -319,7 +325,7 @@ export class LoanBuilder {
       case 'unary': {
         if (expr.op !== '*') return undefined;
         const base = this.placeOrTemp(expr.operand, mutable);
-        return { root: base.root, proj: [...base.proj, isReference(expr.operand.ty) ? '*' : '#'] };
+        return { root: base.root, proj: [...base.proj, derefProjection(expr.operand.ty)] };
       }
       default: {
         return undefined;
@@ -345,7 +351,6 @@ export class LoanBuilder {
     return project(place, '[]');
   }
 
-  /** The place an expression denotes, or a temporary that holds its value. */
   private placeOrTemp(expr: Expr, mutable = false): Place {
     return this.place(expr, mutable) ?? this.temporaryPlace(expr, mutable);
   }
@@ -388,9 +393,10 @@ export class LoanBuilder {
   private project(layout: Layout, elem: string): Layout {
     switch (elem) {
       case '*': {
-        return layout.kind === 'ref' ? layout.target : layout.kind === 'opaque' ? layout : NONE;
+        return derefLayout(layout);
       }
-      case '#': {
+      case '#':
+      case '&': {
         return ownedDerefLayout(layout);
       }
       case '[]': {
@@ -405,7 +411,6 @@ export class LoanBuilder {
     }
   }
 
-  /** Reads a place by value, copying or moving it. */
   private read(place: Place, type: Type | undefined, span: Span, kind: AccessKind = this.readKind(type)): Value {
     const temp = this.temp(type);
     this.point({ uses: [place.root], defs: temp === undefined ? [] : [temp], accesses: [{ place, kind, span }] });
@@ -467,9 +472,6 @@ export class LoanBuilder {
     this.point({ uses: [value], defs: [reborrowed] });
     return reborrowed;
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Statements
 
   private block(block: Block): Value {
     const locals: LocalVar[] = [];
@@ -556,16 +558,13 @@ export class LoanBuilder {
     this.bind(pattern, source);
   }
 
-  /** What a pattern matching an expression matches: the place it denotes, or a temporary with its value. */
   private source(expr: Expr): Place {
+    const coerced = derefCoercedPlace(this.annotations, expr, (e) => this.place(e));
+    if (coerced) return coerced.place;
     const place = this.annotations.reborrows.has(expr) ? undefined : this.place(expr);
     return place ?? this.valuePlace(this.value(expr));
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Patterns
-
-  /** Binds a pattern's variables, moving, copying, or borrowing the parts of the place they bind. */
   private bind(pattern: Pattern, source: Place): void {
     const binding: Binding = { accesses: [], gens: [], defs: [], relations: [], dropSources: [] };
     this.bindPart(binding, pattern, source, undefined);
@@ -590,26 +589,39 @@ export class LoanBuilder {
     }
   }
 
-  /** Binds a part of a pattern to a place, which bindings take by reference in the binding mode `byRef`. */
   // code-gauge-allow functionNcss -- One case per kind of pattern.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern.
   private bindPart(binding: Binding, p: Pattern, place: Place, byRef: BindingMode): void {
     switch (p.kind) {
       case 'binding': {
-        this.bindVariable(binding, p, place, byRef);
+        const explicit = p.byRef === 'refMut' ? 'mut' : p.byRef && 'shared';
+        this.bindVariable(binding, p, place, explicit ?? byRef);
         if (p.sub) this.bindPart(binding, p.sub, place, byRef);
+        return;
+      }
+      case 'slice': {
+        const [sub, mode] = matchDeref(p, place, byRef);
+        for (const elem of p.elems) this.bindPart(binding, elem, project(sub, '[]'), mode);
+        return;
+      }
+      case 'range': {
+        binding.accesses.push({ place: matchDeref(p, place, byRef)[0], kind: 'read', span: p.span });
+        return;
+      }
+      case 'rest': {
         return;
       }
       case 'tuple':
       case 'tupleStruct': {
         const [sub, mode] = matchDeref(p, place, byRef);
-        const prefix = p.kind === 'tuple' ? '' : `${this.variantOf(p)}:`;
+        const prefix = p.kind === 'tuple' ? '' : `${variantOf(this.annotations, p)}:`;
         for (const [index, elem] of p.elems.entries())
           this.bindPart(binding, elem, project(sub, `${prefix}${index}`), mode);
         return;
       }
       case 'struct': {
         const [sub, mode] = matchDeref(p, place, byRef);
-        const variant = this.variantOf(p);
+        const variant = variantOf(this.annotations, p);
         for (const field of p.fields) {
           this.bindPart(binding, field.pattern, project(sub, `${variant}:${field.name}`), mode);
         }
@@ -634,7 +646,6 @@ export class LoanBuilder {
     }
   }
 
-  /** A variable of a pattern borrows the place it binds in a binding mode by reference, and copies or moves it else. */
   private bindVariable(binding: Binding, p: Pattern, place: Place, mode: BindingMode): void {
     const local = this.annotations.bindings.get(p);
     if (!local) {
@@ -658,22 +669,31 @@ export class LoanBuilder {
     binding.relations.push(() => this.relateBorrow(place, mutable, target, region));
   }
 
-  private variantOf(pattern: Pattern): number {
-    const res = this.annotations.paths.get(pattern);
-    return res?.kind === 'ctor' ? res.variant : 0;
-  }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Expressions
-
-  /** Evaluates an expression for its value, moving or copying the place it denotes. */
   private value(expr: Expr): Value {
+    // A reference coerced to the shared reference it holds copies that one, rather than reborrowing the outer one.
+    const coerced = derefCoercedPlace(this.annotations, expr, (e) => this.place(e));
+    if (coerced) return this.read(coerced.place, coerced.type, expr.span);
     const mutable = this.annotations.reborrows.get(expr);
     if (mutable !== undefined && isMutableReference(expr.ty)) {
       const place = this.place(expr, mutable);
       if (place) return this.borrow(project(place, '*'), mutable, expr.span, refTarget(expr.ty)).value;
     }
-    return this.valueInner(expr);
+    return this.derefCoercedValue(expr, this.valueInner(expr));
+  }
+
+  /**
+   * A value no place holds (a call's result) coerced through shared references (`&&'a str` to `&str`) is the inner
+   * reference it copies, whose region is its own, not the outer one's.
+   */
+  private derefCoercedValue(expr: Expr, value: Value): Value {
+    if (value === undefined) return value;
+    const layout =
+      derefCoercedLayout(this.annotations, expr, this.layout(value)) ??
+      reborrowedPointeeLayout(this.annotations, expr, this.layout(value));
+    if (!layout) return value;
+    const inner = this.newVarWithLayout('{coerced}', layout);
+    this.point({ uses: [value], defs: [inner] });
+    return inner;
   }
 
   // code-gauge-allow functionNcss -- One case per kind of expression.
@@ -793,7 +813,7 @@ export class LoanBuilder {
   private loopExpr(expr: Extract<Expr, { kind: 'loop' | 'while' | 'for' }>): Value {
     switch (expr.kind) {
       case 'loop': {
-        return this.loop(expr.label, expr.ty, () => this.block(expr.body));
+        return this.loop(expr.label, expr.ty, () => this.block(expr.body), expr.isBlock);
       }
       case 'while': {
         const pattern = expr.cond.kind === 'let' ? expr.cond.pattern : undefined;
@@ -811,7 +831,6 @@ export class LoanBuilder {
     }
   }
 
-  /** `break`, `continue`, and `return` go on elsewhere, after which nothing runs. */
   // code-gauge-allow functionCognitiveComplexity -- Each kind of jump goes on at its own point.
   private jump(expr: Extract<Expr, { kind: 'break' | 'continue' | 'return' }>): void {
     const value = expr.kind !== 'continue' && expr.value ? this.value(expr.value) : undefined;
@@ -1006,28 +1025,57 @@ export class LoanBuilder {
   private match(expr: Extract<Expr, { kind: 'match' }>): Value {
     const source = this.source(expr.scrutinee);
     this.point({ uses: [source.root], accesses: [{ place: source, kind: 'read', span: expr.scrutinee.span }] });
-    const start = this.current;
+    let start = this.current;
     const result = this.temp(expr.ty);
     const ends: (number | undefined)[] = [];
     for (const arm of expr.arms) {
       this.current = start;
+      const failures: (number | undefined)[] = [];
       this.patternScope(arm.pattern, arm.body, () => {
         this.bind(arm.pattern, source);
-        const value = this.value(arm.body);
-        if (this.current !== undefined) this.store(value, result);
+        this.guarded(arm.guard ?? [], arm.body, failures, () => {
+          const value = this.value(arm.body);
+          if (this.current !== undefined) this.store(value, result);
+        });
       });
       ends.push(this.current);
+      if (arm.guard) {
+        this.join([start, ...failures]);
+        start = this.current;
+      }
     }
     this.join(expr.arms.length === 0 ? [] : ends);
     return result;
   }
 
-  /** A loop whose body `body` builds, which goes round again from its end. */
-  private loop(label: string | undefined, type: Type | undefined, body: () => void): Value {
+  /**
+   * Evaluates a match guard's conditions in order, each `let` binding for the rest and the arm's body, collecting the
+   * points from which the program goes on to the next arm when one does not hold.
+   */
+  private guarded(conds: Condition[], body: Expr, failures: (number | undefined)[], visit: () => void): void {
+    const [cond, ...rest] = conds;
+    if (!cond) {
+      visit();
+      return;
+    }
+    this.patternScope(cond.kind === 'let' ? cond.pattern : undefined, body, () => {
+      failures.push(this.condition(cond));
+      this.guarded(rest, body, failures, visit);
+    });
+  }
+
+  private loop(label: string | undefined, type: Type | undefined, body: () => void, isBlock = false): Value {
     const head = this.graph.newPoint();
     if (this.current !== undefined) this.graph.points[this.current].succ.push(head);
     this.current = head;
-    const frame: LoopFrame = { label, head, breaks: [], result: this.temp(type), scopeDepth: this.scopes.length };
+    const frame: LoopFrame = {
+      label,
+      isBlock,
+      head,
+      breaks: [],
+      result: this.temp(type),
+      scopeDepth: this.scopes.length,
+    };
     this.loops.push(frame);
     body();
     if (this.current !== undefined) this.graph.points[this.current].succ.push(head);
@@ -1044,9 +1092,7 @@ export class LoanBuilder {
     return this.loop(expr.label, undefined, () => {
       const item = this.temp(itemType);
       this.point({ uses: [iterator], defs: item === undefined ? [] : [item] });
-      for (const region of regionsOf(this.layout(item))) {
-        if (!this.graph.universal.has(region)) outlivesAll(this.outlives, this.layouts[iterator], region);
-      }
+      relateLoopItem(this.outlives, this.layouts[iterator], this.layout(item));
       if (this.current !== undefined) this.loops.at(-1)?.breaks.push(this.current);
       this.patternScope(expr.pattern, expr.body, () => {
         this.bind(expr.pattern, this.valuePlace(item));
@@ -1058,13 +1104,10 @@ export class LoanBuilder {
   private findLoop(label: string | undefined): LoopFrame | undefined {
     for (let index = this.loops.length - 1; index >= 0; index--) {
       const loop = this.loops[index];
-      if (label === undefined || loop.label === label) return loop;
+      if (label === undefined ? !loop.isBlock : loop.label === label) return loop;
     }
     return undefined;
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Calls
 
   // code-gauge-allow functionCognitiveComplexity -- A call defines the result layout and relates it to its borrowed inputs.
   private call(expr: Extract<Expr, { kind: 'call' }>): Value {
@@ -1095,7 +1138,6 @@ export class LoanBuilder {
     return result;
   }
 
-  /** The point of a call, which uses its inputs and defines its result. */
   private callPoint(expr: Expr, inputs: Value[], accesses: Access[]): Value {
     const result = this.temp(expr.ty);
     const uses = inputs.filter((v) => v !== undefined);
@@ -1121,13 +1163,11 @@ export class LoanBuilder {
   }
 
   private storeCollectionElement(target: Place, fn: FnDef, args: Value[], point: number): void {
-    const key = fn.nativeKey;
-    if (!key || !/^(Vec|VecDeque|BinaryHeap)<_>::(push|push_back|push_front|insert|extend)$/.test(key)) return;
-    const argument = args[key.endsWith('::insert') ? 1 : 0];
+    const argument = storedElement(fn, args);
     if (argument !== undefined) this.storeDrop(point, target, { root: argument, proj: [] });
   }
 
-  /** A method's receiver after its adjustment: autoref borrows it, and `&mut` references (also by value) are reborrowed. */
+  /** A method's receiver after its adjustment: autoref borrows it, and `&mut` references (also by value) reborrow. */
   private receiver(
     expr: Extract<Expr, { kind: 'methodCall' }>,
     method: MethodRes | undefined
@@ -1167,19 +1207,15 @@ export class LoanBuilder {
     const signature = new SignatureInstance(fn, typeArgs, this.fresh, this.outlives, () => this.static());
     signature.bindInputs(inputs);
     signature.bindOutput(result, inputs);
-    this.relateArrayBorrow(fn, typeArgs, inputs[0], result);
-    signature.relateBounds((callee, args, ret, higherRanked) => this.applyClosure(callee, args, ret, higherRanked));
-  }
-
-  private relateArrayBorrow(fn: FnDef, typeArgs: readonly Type[], input: Layout, result: Layout): void {
-    const name = fn.trait?.builtin;
-    if (name !== 'TryInto' && name !== 'TryFrom') return;
-    const [from, to] = name === 'TryInto' ? typeArgs : [typeArgs[1], typeArgs[0]];
-    if (arrayTryFrom(from, to)?.mode !== 'borrow') return;
-    relate(
+    relateArrayBorrow(
       this.outlives,
-      input,
+      fn,
+      typeArgs,
+      inputs[0],
       fieldLayout(result, 0, 0, () => this.static())
+    );
+    signature.relateBounds((callee, args, ret, higherRanked, higherRankedResult) =>
+      this.applyClosure(callee, args, ret, higherRanked, undefined, higherRankedResult)
     );
   }
 
@@ -1187,13 +1223,13 @@ export class LoanBuilder {
    * Relates the arguments and the result of a call of a closure (or of what a type parameter or a trait object for one
    * stands for): as its summary says for a closure of this function, conservatively otherwise.
    */
-  // code-gauge-allow functionCognitiveComplexity -- Applies a closure's bound or summary, or relates every region.
   private applyClosure(
     callee: Layout,
     args: Layout[],
     result: Layout,
     higherRanked: boolean[] = [],
-    calleeType?: Type
+    calleeType?: Type,
+    higherRankedResult: ReadonlySet<RVar> = new Set()
   ): void {
     // A callee known only by a closure bound relates them as the bound says.
     const regions = { fresh: this.fresh, outlives: this.outlives, staticRegion: () => this.static() };
@@ -1204,30 +1240,22 @@ export class LoanBuilder {
       relateOpaqueCall(this.outlives, callee, args, result, higherRanked);
       return;
     }
-    const params = closure.params.map((type) => layoutOf(type, this.fresh, () => this.static()));
-    const ret = layoutOf(closure.ret, this.fresh);
-    for (const [index, arg] of args.entries()) relate(this.outlives, arg, params[index] ?? NONE);
-    relate(this.outlives, ret, result);
-    const retRegions = regionsOf(ret);
-    for (const [param, region, retRegion] of summary.edges) {
-      // A bound `F: FnMut(&T) -> K` takes every lifetime of its reference, which `K` cannot name.
-      if (higherRanked[param] && region === 0) {
-        this.shared.errors.push({
-          span: summary.body,
-          message:
-            'このクロージャーは、引数の参照から借りた値を返せません（呼び出すたびに違う寿命の参照を受け取るため）。',
-        });
-      }
-      const from = regionsOf(params[param] ?? NONE)[region];
-      if (from !== undefined && retRegions[retRegion] !== undefined) this.outlives(from, retRegions[retRegion]);
-    }
-    for (const retRegion of summary.captures) {
-      if (retRegions[retRegion] !== undefined) this.outlives(callee.region, retRegions[retRegion]);
-    }
+    const call = {
+      args,
+      result,
+      callee: callee.region,
+      higherRanked,
+      higherRankedResult,
+      captured: (local: LocalVar, region: number): RVar | undefined =>
+        this.reaches(local) ? this.graph.varRegions[this.varOf(local)][region] : callee.region,
+    };
+    relateSummaryCall(closure, summary, call, regions, this.shared.errors);
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Closures and macros
+  /** Whether this body has the variable of its own, or captures it, rather than reaching it through a closure. */
+  private reaches(local: LocalVar): boolean {
+    return local.owner === this.context || this.context.captures.includes(local);
+  }
 
   /** A closure borrows, or moves, the places it captures when it is created, and holds them while it lives. */
   // code-gauge-allow functionNcss -- Follows rustc's capture modes case by case.
@@ -1275,45 +1303,35 @@ export class LoanBuilder {
     return temp;
   }
 
-  /** Which regions of the parameters (and of the captures) the result of this closure's body may hold. */
-  // code-gauge-allow functionCognitiveComplexity -- Searches the outlives graph from each region of the parameters.
   private summarize(paramVars: Var[], bodySpan: Span): ClosureSummary {
-    const edges = new Map<RVar, RVar[]>();
-    for (const [sup, sub] of this.graph.outlives) {
-      const list = edges.get(sup);
-      if (list) list.push(sub);
-      else edges.set(sup, [sub]);
-    }
-    const ret = this.graph.varRegions[this.returnVar];
-    const reached = (from: RVar[]): number[] => {
-      const seen = new Set(from);
-      const stack = [...from];
-      while (stack.length > 0) {
-        for (const next of edges.get(stack.pop() as RVar) ?? []) {
-          if (!seen.has(next)) {
-            seen.add(next);
-            stack.push(next);
-          }
-        }
-      }
-      return ret.flatMap((region, index) => (seen.has(region) ? [index] : []));
-    };
-    const summary: ClosureSummary = { edges: [], captures: [], body: bodySpan };
-    for (const [param, v] of paramVars.entries()) {
-      for (const [index, region] of this.graph.varRegions[v].entries()) {
-        for (const retRegion of reached([region])) summary.edges.push([param, index, retRegion]);
-      }
-    }
-    const captureRegions = this.context.captures.flatMap((local) => this.graph.varRegions[this.varOf(local)]);
+    const { varRegions } = this.graph;
+    const captures = this.context.captures.map((local): [LocalVar, RVar[]] => [local, varRegions[this.varOf(local)]]);
     const captureLoans = this.graph.points
       .flatMap((point) => point.gens)
       .filter((loan) => {
         const local = this.locals.get(loan.place.root);
-        return local !== undefined && this.context.captures.includes(local);
+        return local !== undefined && this.context.captures.includes(local) && !this.borrowsThroughShared(loan.place);
       })
       .map((loan) => loan.region);
-    summary.captures = reached([...captureRegions, ...captureLoans]);
-    return summary;
+    return summarizeClosure({
+      outlives: this.graph.outlives,
+      ret: varRegions[this.returnVar],
+      params: paramVars.map((v) => varRegions[v]),
+      captures,
+      captureLoans,
+      span: bodySpan,
+    });
+  }
+
+  /**
+   * Whether a place is behind a shared reference the variable holds, so that borrowing it borrows what the reference
+   * points to, as the reference's own regions say, not what a closure capturing the variable holds.
+   */
+  private borrowsThroughShared(place: Place): boolean {
+    const deref = place.proj.indexOf('*');
+    if (deref === -1) return false;
+    const layout = this.placeLayouts(place)[deref];
+    return layout.kind === 'ref' && !layout.mutable;
   }
 
   /** Formatting macros borrow each argument until they have formatted them all. */
@@ -1407,24 +1425,8 @@ export class LoanBuilder {
     if (this.current !== undefined) loan.activation = this.current;
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Helpers
-
   private isCopy(type: Type | undefined): boolean {
     if (!type) return true;
     return this.solver.isCopy(resolve(type, true));
   }
-}
-
-function tupleElem(layout: Layout, index: number): Layout {
-  return layout.kind === 'tuple' ? (layout.elems[index] ?? NONE) : NONE;
-}
-
-function refTarget(type: Type | undefined): Type | undefined {
-  const t = type && normalize(shallow(type));
-  return t?.kind === 'ref' ? t.target : undefined;
-}
-
-function isReference(type: Type | undefined): boolean {
-  return type !== undefined && normalize(shallow(type)).kind === 'ref';
 }

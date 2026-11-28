@@ -15,6 +15,8 @@ import { type Frame, MOVED, Runtime, UNASSIGNED } from './runtime';
 import { concreteType } from './runtimeTypes';
 import { shallow, type Type } from './types';
 import {
+  BorrowGuard,
+  CellBox,
   DynValue,
   EnumValue,
   FnValue,
@@ -22,6 +24,7 @@ import {
   IterValue,
   MapValue,
   SetValue,
+  SharedBox,
   sliceItems,
   SliceView,
   StructValue,
@@ -260,6 +263,10 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
   // A part moved out (`let a = s.a;`) leaves what held it.
   if (v === MOVED || t.kind === 'closure' || t.kind === 'fn') return undefined;
   if (v instanceof DynValue) return displayNodeOf(v.value, v.type, seen);
+  // An `Rc`, a cell, or a `RefCell`'s guard shows what it holds.
+  if (t.kind === 'adt' && (v instanceof SharedBox || v instanceof CellBox || v instanceof BorrowGuard)) {
+    return displayNodeOf(v instanceof BorrowGuard ? v.cell.value : v.value, t.args[0], seen);
+  }
   if (v instanceof TurtleValue) {
     if (!v.state.isAlive) return undefined;
     return {

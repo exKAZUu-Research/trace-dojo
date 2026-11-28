@@ -22,6 +22,7 @@ pub mod marker {
     pub trait Copy: Clone {}
     pub trait Send {}
     pub trait Sync {}
+    pub trait Unpin {}
 }
 pub mod clone {
     pub trait Clone: Sized {
@@ -38,23 +39,33 @@ pub mod default {
 pub mod ops {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub enum Bound<T> { Included(T), Excluded(T), Unbounded }
-    pub trait Add<Rhs = Self> {}
-    pub trait Sub<Rhs = Self> {}
-    pub trait Mul<Rhs = Self> {}
-    pub trait Div<Rhs = Self> {}
-    pub trait Rem<Rhs = Self> {}
-    pub trait Neg {}
-    pub trait Not {}
-    pub trait AddAssign<Rhs = Self> {}
-    pub trait SubAssign<Rhs = Self> {}
-    pub trait MulAssign<Rhs = Self> {}
-    pub trait DivAssign<Rhs = Self> {}
-    pub trait RemAssign<Rhs = Self> {}
-    pub trait Index<Idx> {}
-    pub trait IndexMut<Idx> {}
-    pub trait Deref {}
-    pub trait DerefMut {}
-    pub trait Drop {}
+    pub trait Add<Rhs = Self> { type Output; fn add(self, rhs: Rhs) -> Self::Output; }
+    pub trait Sub<Rhs = Self> { type Output; fn sub(self, rhs: Rhs) -> Self::Output; }
+    pub trait Mul<Rhs = Self> { type Output; fn mul(self, rhs: Rhs) -> Self::Output; }
+    pub trait Div<Rhs = Self> { type Output; fn div(self, rhs: Rhs) -> Self::Output; }
+    pub trait Rem<Rhs = Self> { type Output; fn rem(self, rhs: Rhs) -> Self::Output; }
+    pub trait BitAnd<Rhs = Self> { type Output; fn bitand(self, rhs: Rhs) -> Self::Output; }
+    pub trait BitOr<Rhs = Self> { type Output; fn bitor(self, rhs: Rhs) -> Self::Output; }
+    pub trait BitXor<Rhs = Self> { type Output; fn bitxor(self, rhs: Rhs) -> Self::Output; }
+    pub trait Shl<Rhs = Self> { type Output; fn shl(self, rhs: Rhs) -> Self::Output; }
+    pub trait Shr<Rhs = Self> { type Output; fn shr(self, rhs: Rhs) -> Self::Output; }
+    pub trait Neg { type Output; fn neg(self) -> Self::Output; }
+    pub trait Not { type Output; fn not(self) -> Self::Output; }
+    pub trait AddAssign<Rhs = Self> { fn add_assign(&mut self, rhs: Rhs); }
+    pub trait SubAssign<Rhs = Self> { fn sub_assign(&mut self, rhs: Rhs); }
+    pub trait MulAssign<Rhs = Self> { fn mul_assign(&mut self, rhs: Rhs); }
+    pub trait DivAssign<Rhs = Self> { fn div_assign(&mut self, rhs: Rhs); }
+    pub trait RemAssign<Rhs = Self> { fn rem_assign(&mut self, rhs: Rhs); }
+    pub trait BitAndAssign<Rhs = Self> { fn bitand_assign(&mut self, rhs: Rhs); }
+    pub trait BitOrAssign<Rhs = Self> { fn bitor_assign(&mut self, rhs: Rhs); }
+    pub trait BitXorAssign<Rhs = Self> { fn bitxor_assign(&mut self, rhs: Rhs); }
+    pub trait ShlAssign<Rhs = Self> { fn shl_assign(&mut self, rhs: Rhs); }
+    pub trait ShrAssign<Rhs = Self> { fn shr_assign(&mut self, rhs: Rhs); }
+    pub trait Index<Idx> { type Output; fn index(&self, index: Idx) -> &Self::Output; }
+    pub trait IndexMut<Idx>: Index<Idx> { fn index_mut(&mut self, index: Idx) -> &mut Self::Output; }
+    pub trait Deref { type Target; fn deref(&self) -> &Self::Target; }
+    pub trait DerefMut: Deref { fn deref_mut(&mut self) -> &mut Self::Target; }
+    pub trait Drop { fn drop(&mut self); }
     pub trait Fn {}
     pub trait FnMut {}
     pub trait FnOnce {}
@@ -275,6 +286,8 @@ pub mod slice {
     pub type Windows<'a, T> = IterImpl<'a, &'a [T], WindowsShape>;
     pub type Chunks<'a, T> = IterImpl<'a, &'a [T], ChunksShape>;
     impl<T> [T] {
+        pub fn as_ptr(&self) -> super::ptr::ConstPtr<T>;
+        pub fn as_mut_ptr(&mut self) -> super::ptr::MutPtr<T>;
         pub const fn len(&self) -> usize;
         pub const fn is_empty(&self) -> bool;
         pub fn first(&self) -> Option<&T>;
@@ -435,22 +448,22 @@ pub mod char {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct TryFromCharError;
     impl u8 {
-        pub fn is_ascii(&self) -> bool;
-        pub fn is_ascii_digit(&self) -> bool;
-        pub fn is_ascii_hexdigit(&self) -> bool;
-        pub fn is_ascii_alphabetic(&self) -> bool;
-        pub fn is_ascii_alphanumeric(&self) -> bool;
-        pub fn is_ascii_uppercase(&self) -> bool;
-        pub fn is_ascii_lowercase(&self) -> bool;
-        pub fn is_ascii_punctuation(&self) -> bool;
-        pub fn is_ascii_whitespace(&self) -> bool;
-        pub fn is_ascii_graphic(&self) -> bool;
-        pub fn is_ascii_control(&self) -> bool;
-        pub fn to_ascii_uppercase(&self) -> u8;
-        pub fn to_ascii_lowercase(&self) -> u8;
+        pub const fn is_ascii(&self) -> bool;
+        pub const fn is_ascii_digit(&self) -> bool;
+        pub const fn is_ascii_hexdigit(&self) -> bool;
+        pub const fn is_ascii_alphabetic(&self) -> bool;
+        pub const fn is_ascii_alphanumeric(&self) -> bool;
+        pub const fn is_ascii_uppercase(&self) -> bool;
+        pub const fn is_ascii_lowercase(&self) -> bool;
+        pub const fn is_ascii_punctuation(&self) -> bool;
+        pub const fn is_ascii_whitespace(&self) -> bool;
+        pub const fn is_ascii_graphic(&self) -> bool;
+        pub const fn is_ascii_control(&self) -> bool;
+        pub const fn to_ascii_uppercase(&self) -> u8;
+        pub const fn to_ascii_lowercase(&self) -> u8;
         pub fn make_ascii_uppercase(&mut self);
         pub fn make_ascii_lowercase(&mut self);
-        pub fn eq_ignore_ascii_case(&self, other: &u8) -> bool;
+        pub const fn eq_ignore_ascii_case(&self, other: &u8) -> bool;
     }
     impl char {
         pub fn is_alphabetic(self) -> bool;
@@ -461,22 +474,22 @@ pub mod char {
         pub fn is_lowercase(self) -> bool;
         pub fn is_control(self) -> bool;
         pub fn is_digit(self, radix: u32) -> bool;
-        pub fn is_ascii(&self) -> bool;
-        pub fn is_ascii_digit(&self) -> bool;
-        pub fn is_ascii_hexdigit(&self) -> bool;
-        pub fn is_ascii_alphabetic(&self) -> bool;
-        pub fn is_ascii_alphanumeric(&self) -> bool;
-        pub fn is_ascii_uppercase(&self) -> bool;
-        pub fn is_ascii_lowercase(&self) -> bool;
-        pub fn is_ascii_punctuation(&self) -> bool;
-        pub fn is_ascii_whitespace(&self) -> bool;
-        pub fn is_ascii_graphic(&self) -> bool;
-        pub fn is_ascii_control(&self) -> bool;
-        pub fn to_ascii_uppercase(&self) -> char;
-        pub fn to_ascii_lowercase(&self) -> char;
+        pub const fn is_ascii(&self) -> bool;
+        pub const fn is_ascii_digit(&self) -> bool;
+        pub const fn is_ascii_hexdigit(&self) -> bool;
+        pub const fn is_ascii_alphabetic(&self) -> bool;
+        pub const fn is_ascii_alphanumeric(&self) -> bool;
+        pub const fn is_ascii_uppercase(&self) -> bool;
+        pub const fn is_ascii_lowercase(&self) -> bool;
+        pub const fn is_ascii_punctuation(&self) -> bool;
+        pub const fn is_ascii_whitespace(&self) -> bool;
+        pub const fn is_ascii_graphic(&self) -> bool;
+        pub const fn is_ascii_control(&self) -> bool;
+        pub const fn to_ascii_uppercase(&self) -> char;
+        pub const fn to_ascii_lowercase(&self) -> char;
         pub fn make_ascii_uppercase(&mut self);
         pub fn make_ascii_lowercase(&mut self);
-        pub fn eq_ignore_ascii_case(&self, other: &char) -> bool;
+        pub const fn eq_ignore_ascii_case(&self, other: &char) -> bool;
         pub fn to_uppercase(self) -> CaseIter;
         pub fn to_lowercase(self) -> CaseIter;
         pub fn escape_default(self) -> EscapeDefault;
@@ -755,6 +768,7 @@ pub mod num {
         pub fn rem_euclid(self, rhs: F) -> F;
         pub fn div_euclid(self, rhs: F) -> F;
         pub const fn copysign(self, sign: F) -> F;
+        pub const fn midpoint(self, other: F) -> F;
     }
     impl bool {
         pub fn then<T, F: FnOnce() -> T>(self, f: F) -> Option<T>;
@@ -882,10 +896,96 @@ pub mod result {
         pub fn transpose(self) -> Option<Result<T, E>>;
     }
 }
+pub mod ptr {
+    pub struct ConstPtr<T>;
+    pub struct MutPtr<T>;
+    pub fn null<T>() -> ConstPtr<T>;
+    pub fn null_mut<T>() -> MutPtr<T>;
+    impl<T> ConstPtr<T> {
+        pub unsafe fn add(self, count: usize) -> ConstPtr<T>;
+        pub unsafe fn sub(self, count: usize) -> ConstPtr<T>;
+        pub unsafe fn offset(self, count: isize) -> ConstPtr<T>;
+        pub fn is_null(self) -> bool;
+        pub unsafe fn read(self) -> T;
+        pub unsafe fn as_ref(self) -> Option<&T>;
+    }
+    impl<T> MutPtr<T> {
+        pub unsafe fn add(self, count: usize) -> MutPtr<T>;
+        pub unsafe fn sub(self, count: usize) -> MutPtr<T>;
+        pub unsafe fn offset(self, count: isize) -> MutPtr<T>;
+        pub fn is_null(self) -> bool;
+        pub unsafe fn read(self) -> T;
+        pub unsafe fn write(self, value: T);
+        pub unsafe fn as_ref(self) -> Option<&T>;
+        pub unsafe fn as_mut(self) -> Option<&mut T>;
+    }
+    impl<T> ConstPtr<[T]> { pub fn len(self) -> usize; pub fn is_empty(self) -> bool; }
+    impl<T> MutPtr<[T]> { pub fn len(self) -> usize; pub fn is_empty(self) -> bool; }
+}
+pub mod rc {
+    pub struct Rc<T>;
+    impl<T> Rc<T> {
+        pub fn new(value: T) -> Rc<T>;
+        pub fn strong_count(this: &Rc<T>) -> usize;
+        pub fn weak_count(this: &Rc<T>) -> usize;
+        pub fn downgrade(this: &Rc<T>) -> Weak<T>;
+        pub fn ptr_eq(this: &Rc<T>, other: &Rc<T>) -> bool;
+        pub fn try_unwrap(this: Rc<T>) -> Result<T, Rc<T>>;
+        pub fn into_inner(this: Rc<T>) -> Option<T>;
+        pub fn get_mut(this: &mut Rc<T>) -> Option<&mut T>;
+        pub fn make_mut(this: &mut Rc<T>) -> &mut T where T: Clone;
+        pub fn unwrap_or_clone(this: Rc<T>) -> T where T: Clone;
+        pub fn as_ref(&self) -> &T;
+    }
+    impl<'a> From<&'a str> for Rc<str> { fn from(text: &str) -> Rc<str>; }
+    impl From<String> for Rc<str> { fn from(text: String) -> Rc<str>; }
+    impl<T> From<Vec<T>> for Rc<[T]> { fn from(items: Vec<T>) -> Rc<[T]>; }
+    pub struct Weak<T>;
+    impl<T> Weak<T> {
+        pub fn new() -> Weak<T>;
+        pub fn upgrade(&self) -> Option<Rc<T>>;
+        pub fn strong_count(&self) -> usize;
+        pub fn weak_count(&self) -> usize;
+        pub fn ptr_eq(&self, other: &Weak<T>) -> bool;
+    }
+}
+pub mod cell {
+    pub struct RefCell<T>;
+    impl<T> RefCell<T> {
+        pub fn new(value: T) -> RefCell<T>;
+        pub fn borrow(&self) -> Ref<T>;
+        pub fn borrow_mut(&self) -> RefMut<T>;
+        pub fn replace(&self, t: T) -> T;
+        pub fn replace_with<F: FnOnce(&mut T) -> T>(&self, f: F) -> T;
+        pub fn take(&self) -> T where T: Default;
+        pub fn into_inner(self) -> T;
+        pub fn get_mut(&mut self) -> &mut T;
+        pub fn swap(&self, other: &RefCell<T>);
+    }
+    pub struct Ref<T>;
+    impl<T> Ref<T> {
+        pub fn clone(orig: &Ref<T>) -> Ref<T>;
+    }
+    pub struct RefMut<T>;
+    pub struct Cell<T>;
+    impl<T> Cell<T> {
+        pub fn new(value: T) -> Cell<T>;
+        pub fn get(&self) -> T where T: Copy;
+        pub fn set(&self, val: T);
+        pub fn replace(&self, val: T) -> T;
+        pub fn take(&self) -> T where T: Default;
+        pub fn into_inner(self) -> T;
+        pub fn get_mut(&mut self) -> &mut T;
+        pub fn swap(&self, other: &Cell<T>);
+        pub fn update<F: FnOnce(T) -> T>(&self, f: F) where T: Copy;
+    }
+}
 pub mod boxed {
     pub struct Box<T>;
     impl<T> Box<T> {
         pub fn new(x: T) -> Box<T>;
+        pub fn pin(x: T) -> super::pin::Pin<Box<T>>;
+        pub fn into_pin(boxed: Box<T>) -> super::pin::Pin<Box<T>>;
         pub fn as_ref(&self) -> &T;
         pub fn as_mut(&mut self) -> &mut T;
     }
@@ -911,7 +1011,11 @@ pub mod error {
 }
 pub mod iter {
     pub struct IterImpl<'a, T, S>;
-    pub trait Iterator {}
+    pub trait Iterator {
+        type Item;
+        fn next(&mut self) -> Option<Self::Item>;
+        fn size_hint(&self) -> (usize, Option<usize>);
+    }
     pub trait IntoIterator {}
     pub trait FromIterator<A>: Sized { fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self; }
     pub trait Extend<A> {}
@@ -942,6 +1046,9 @@ pub mod iter {
         pub struct CharsShape;
         pub struct BytesShape;
         pub struct DynIteratorShape<D>;
+        pub struct IoLinesShape;
+        pub struct ReceiverShape;
+        pub struct UserIterShape<I>;
         pub struct CharIndicesShape;
         pub struct SplitWhitespaceShape;
         pub struct LinesShape;
@@ -1385,6 +1492,49 @@ pub mod io {
     #[derive(Debug)]
     pub struct Error { inner: () }
     pub type Result<T> = core::result::Result<T, Error>;
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+    pub enum ErrorKind {
+        NotFound, PermissionDenied, ConnectionRefused, ConnectionReset, HostUnreachable, NetworkUnreachable,
+        ConnectionAborted, NotConnected, AddrInUse, AddrNotAvailable, NetworkDown, BrokenPipe, AlreadyExists,
+        WouldBlock, NotADirectory, IsADirectory, DirectoryNotEmpty, ReadOnlyFilesystem, StaleNetworkFileHandle,
+        InvalidInput, InvalidData, TimedOut, WriteZero, StorageFull, NotSeekable, QuotaExceeded, FileTooLarge,
+        ResourceBusy, ExecutableFileBusy, Deadlock, CrossesDevices, TooManyLinks, InvalidFilename,
+        ArgumentListTooLong, Interrupted, Unsupported, UnexpectedEof, OutOfMemory, Other,
+    }
+    impl Error {
+        pub fn new<E: super::fmt::Display>(kind: ErrorKind, error: E) -> Error;
+        pub fn other<E: super::fmt::Display>(error: E) -> Error;
+        pub fn kind(&self) -> ErrorKind;
+    }
+    impl From<ErrorKind> for Error { fn from(kind: ErrorKind) -> Error; }
+    pub trait Read {
+        fn read(&mut self, buf: &mut [u8]) -> Result<usize>;
+        fn read_to_string(&mut self, buf: &mut String) -> Result<usize>;
+        fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize>;
+    }
+    pub trait BufRead: Read {
+        fn read_line(&mut self, buf: &mut String) -> Result<usize>;
+        fn lines(self) -> IterImpl<Result<String>, super::iter::shape::IoLinesShape> where Self: Sized;
+    }
+    pub struct Stdin { inner: () }
+    pub struct StdinLock { inner: () }
+    pub fn stdin() -> Stdin;
+    impl Stdin {
+        pub fn lock(&self) -> StdinLock;
+        pub fn read_line(&self, buf: &mut String) -> Result<usize>;
+        pub fn lines(self) -> IterImpl<Result<String>, super::iter::shape::IoLinesShape>;
+    }
+    impl Read for Stdin {}
+    impl Read for StdinLock {}
+    impl BufRead for StdinLock {}
+    pub fn read_to_string<R: Read>(reader: R) -> Result<String>;
+    pub struct BufReader<R> { inner: R }
+    impl<R: Read> BufReader<R> { pub fn new(inner: R) -> BufReader<R>; }
+    impl<R: Read> Read for BufReader<R> {}
+    impl<R: Read> BufRead for BufReader<R> {}
+    pub struct BufWriter<W: Write> { inner: W }
+    impl<W: Write> BufWriter<W> { pub fn new(inner: W) -> BufWriter<W>; }
+    impl<W: Write> Write for BufWriter<W> {}
     pub trait Write {
         fn write(&mut self, buf: &[u8]) -> Result<usize>;
         fn write_all(&mut self, buf: &[u8]) -> Result<()>;
@@ -1402,6 +1552,302 @@ pub mod io {
     impl Write for StdoutLock {}
     impl Write for Stderr {}
     impl Write for StderrLock {}
+}
+pub mod ffi {
+    /** A C string: its bytes without the terminating NUL, which no byte inside is. */
+    pub struct CStr;
+    impl CStr {
+        pub fn to_bytes(&self) -> &[u8];
+        pub fn to_bytes_with_nul(&self) -> &[u8];
+        pub fn to_str(&self) -> Result<&str, super::str::Utf8Error>;
+        pub fn count_bytes(&self) -> usize;
+        pub fn is_empty(&self) -> bool;
+    }
+    pub fn c_str_literal(bytes: &'static [u8]) -> &'static CStr;
+}
+pub mod future {
+    use super::pin::Pin;
+    use super::task::{Context, Poll};
+    pub trait Future {
+        type Output;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output>;
+    }
+    /** The future of an \`async\` block or function. */
+    pub struct AsyncFuture<T>;
+    impl<T> Future for AsyncFuture<T> {
+        type Output = T;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<T>;
+    }
+    impl<F: Future + Unpin + ?Sized> Future for Box<F> {
+        type Output = F::Output;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<F::Output>;
+    }
+    impl<'a, F: Future + Unpin + ?Sized> Future for &'a mut F {
+        type Output = F::Output;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<F::Output>;
+    }
+    impl<F: Future + ?Sized> Future for Pin<Box<F>> {
+        type Output = F::Output;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<F::Output>;
+    }
+    impl<'a, F: Future + ?Sized> Future for Pin<&'a mut F> {
+        type Output = F::Output;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<F::Output>;
+    }
+    pub trait IntoFuture {
+        type Output;
+        type IntoFuture: Future<Output = Self::Output>;
+        fn into_future(self) -> Self::IntoFuture;
+    }
+    impl<F: Future> IntoFuture for F {
+        type Output = F::Output;
+        type IntoFuture = F;
+        fn into_future(self) -> F;
+    }
+    pub struct Ready<T>;
+    impl<T> Future for Ready<T> {
+        type Output = T;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<T>;
+    }
+    pub struct Pending<T>;
+    impl<T> Future for Pending<T> {
+        type Output = T;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<T>;
+    }
+    pub fn ready<T>(t: T) -> Ready<T>;
+    pub fn pending<T>() -> Pending<T>;
+}
+pub mod task {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum Poll<T> { Ready(T), Pending }
+    impl<T> Poll<T> {
+        pub fn is_ready(&self) -> bool;
+        pub fn is_pending(&self) -> bool;
+        pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Poll<U>;
+    }
+    pub struct Context { inner: () }
+    impl Context {
+        pub fn from_waker(waker: &Waker) -> Context;
+        pub fn waker(&self) -> &Waker;
+    }
+    #[derive(Debug)]
+    pub struct Waker { inner: () }
+    impl Waker {
+        pub fn noop() -> &'static Waker;
+        pub fn wake(self);
+        pub fn wake_by_ref(&self);
+        pub fn will_wake(&self, other: &Waker) -> bool;
+    }
+    impl Clone for Waker { fn clone(&self) -> Waker; }
+}
+pub mod pin {
+    pub struct Pin<P>;
+    impl<'a, T: ?Sized + super::marker::Unpin> Pin<&'a mut T> {
+        pub fn new(pointer: &'a mut T) -> Pin<&'a mut T>;
+    }
+    impl<P> Pin<P> {
+        pub unsafe fn new_unchecked(pointer: P) -> Pin<P>;
+        pub fn into_inner(pin: Pin<P>) -> P;
+    }
+    impl<'a, T> Pin<&'a mut T> {
+        pub fn as_mut(&mut self) -> Pin<&mut T>;
+        pub fn get_mut(self) -> &'a mut T;
+        pub fn set(&mut self, value: T);
+    }
+    impl<T> Pin<Box<T>> {
+        pub fn as_mut(&mut self) -> Pin<&mut T>;
+    }
+    pub fn pin_value<T>(value: T) -> Pin<&'static mut T>;
+}
+pub mod time {
+    pub struct Duration { inner: () }
+    impl Duration {
+        pub const ZERO: Duration;
+        pub const MAX: Duration;
+        pub const fn new(secs: u64, nanos: u32) -> Duration;
+        pub const fn from_secs(secs: u64) -> Duration;
+        pub const fn from_millis(millis: u64) -> Duration;
+        pub const fn from_micros(micros: u64) -> Duration;
+        pub const fn from_nanos(nanos: u64) -> Duration;
+        pub const fn as_secs(&self) -> u64;
+        pub const fn as_millis(&self) -> u128;
+        pub const fn as_micros(&self) -> u128;
+        pub const fn as_nanos(&self) -> u128;
+        pub fn as_secs_f64(&self) -> f64;
+        pub const fn subsec_millis(&self) -> u32;
+        pub const fn subsec_nanos(&self) -> u32;
+        pub fn abs_diff(self, other: Duration) -> Duration;
+    }
+    impl super::ops::Add for Duration { type Output = Duration; fn add(self, rhs: Duration) -> Duration; }
+    impl super::ops::Sub for Duration { type Output = Duration; fn sub(self, rhs: Duration) -> Duration; }
+    impl super::ops::Mul<u32> for Duration { type Output = Duration; fn mul(self, rhs: u32) -> Duration; }
+    impl super::ops::Mul<Duration> for u32 { type Output = Duration; fn mul(self, rhs: Duration) -> Duration; }
+    impl super::ops::Div<u32> for Duration { type Output = Duration; fn div(self, rhs: u32) -> Duration; }
+    impl super::ops::AddAssign for Duration { fn add_assign(&mut self, rhs: Duration); }
+    impl super::ops::SubAssign for Duration { fn sub_assign(&mut self, rhs: Duration); }
+    impl super::ops::MulAssign<u32> for Duration { fn mul_assign(&mut self, rhs: u32); }
+    impl super::ops::DivAssign<u32> for Duration { fn div_assign(&mut self, rhs: u32); }
+}
+pub mod thread {
+    use super::pseudo::Any;
+    pub struct JoinHandle<T> { inner: () }
+    impl<T> JoinHandle<T> {
+        pub fn join(self) -> Result<T, Box<dyn Any + Send>>;
+        pub fn is_finished(&self) -> bool;
+        pub fn thread(&self) -> &Thread;
+    }
+    pub fn spawn<F: FnOnce() -> T + Send + 'static, T: Send + 'static>(f: F) -> JoinHandle<T>;
+    pub fn sleep(dur: super::time::Duration);
+    pub fn yield_now();
+    pub fn current() -> Thread;
+    pub fn scope<F: FnOnce(&Scope) -> T, T>(f: F) -> T;
+    pub struct Scope { inner: () }
+    impl Scope {
+        pub fn spawn<F: FnOnce() -> T + Send, T: Send>(&self, f: F) -> ScopedJoinHandle<T>;
+    }
+    pub struct ScopedJoinHandle<T> { inner: () }
+    impl<T> ScopedJoinHandle<T> {
+        pub fn join(self) -> Result<T, Box<dyn Any + Send>>;
+        pub fn is_finished(&self) -> bool;
+    }
+    pub struct Thread { inner: () }
+    impl Thread {
+        pub fn id(&self) -> ThreadId;
+        pub fn name(&self) -> Option<&str>;
+    }
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+    pub struct ThreadId(u64);
+}
+pub mod sync {
+    pub struct Arc<T>;
+    impl<T> Arc<T> {
+        pub fn new(value: T) -> Arc<T>;
+        pub fn strong_count(this: &Arc<T>) -> usize;
+        pub fn ptr_eq(this: &Arc<T>, other: &Arc<T>) -> bool;
+        pub fn try_unwrap(this: Arc<T>) -> Result<T, Arc<T>>;
+        pub fn into_inner(this: Arc<T>) -> Option<T>;
+        pub fn as_ref(&self) -> &T;
+    }
+    impl<'a> From<&'a str> for Arc<str> { fn from(text: &str) -> Arc<str>; }
+    impl From<String> for Arc<str> { fn from(text: String) -> Arc<str>; }
+    impl<T> From<Vec<T>> for Arc<[T]> { fn from(items: Vec<T>) -> Arc<[T]>; }
+    pub struct Mutex<T>;
+    impl<T> Mutex<T> {
+        pub fn new(value: T) -> Mutex<T>;
+        pub fn lock(&self) -> LockResult<MutexGuard<T>>;
+        pub fn try_lock(&self) -> Result<MutexGuard<T>, TryLockError<MutexGuard<T>>>;
+        pub fn into_inner(self) -> LockResult<T>;
+        pub fn get_mut(&mut self) -> LockResult<&mut T>;
+        pub fn is_poisoned(&self) -> bool;
+        pub fn clear_poison(&self);
+    }
+    pub struct MutexGuard<T>;
+    pub struct Condvar { inner: () }
+    impl Condvar {
+        pub fn new() -> Condvar;
+        pub fn wait<T>(&self, guard: MutexGuard<T>) -> LockResult<MutexGuard<T>>;
+        pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, condition: F) -> LockResult<MutexGuard<T>>;
+        pub fn notify_one(&self);
+        pub fn notify_all(&self);
+    }
+    pub struct RwLock<T>;
+    impl<T> RwLock<T> {
+        pub fn new(value: T) -> RwLock<T>;
+        pub fn read(&self) -> LockResult<RwLockReadGuard<T>>;
+        pub fn write(&self) -> LockResult<RwLockWriteGuard<T>>;
+        pub fn into_inner(self) -> LockResult<T>;
+        pub fn get_mut(&mut self) -> LockResult<&mut T>;
+        pub fn is_poisoned(&self) -> bool;
+        pub fn clear_poison(&self);
+    }
+    pub struct RwLockReadGuard<T>;
+    pub struct RwLockWriteGuard<T>;
+    pub type LockResult<G> = Result<G, PoisonError<G>>;
+    pub struct PoisonError<T> { guard: T }
+    impl<T> PoisonError<T> {
+        pub fn into_inner(self) -> T;
+        pub fn get_ref(&self) -> &T;
+        pub fn get_mut(&mut self) -> &mut T;
+    }
+    pub enum TryLockError<T> { Poisoned(PoisonError<T>), WouldBlock }
+    pub mod mpsc {
+        pub struct Sender<T>;
+        impl<T> Sender<T> { pub fn send(&self, t: T) -> Result<(), SendError<T>>; }
+        pub struct Receiver<T>;
+        impl<T> Receiver<T> {
+            pub fn recv(&self) -> Result<T, RecvError>;
+            pub fn try_recv(&self) -> Result<T, TryRecvError>;
+            pub fn iter(&self) -> IterImpl<T, super::super::iter::shape::ReceiverShape>;
+            pub fn try_iter(&self) -> IterImpl<T, super::super::iter::shape::ReceiverShape>;
+        }
+        pub fn channel<T>() -> (Sender<T>, Receiver<T>);
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        pub struct SendError<T>(pub T);
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct RecvError;
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum TryRecvError { Empty, Disconnected }
+    }
+}
+pub mod fs {
+    use super::io::Result;
+    use super::pseudo::{AsPath, AsBytes};
+    pub struct File { inner: () }
+    impl File {
+        pub fn open<P: AsPath>(path: P) -> Result<File>;
+        pub fn create<P: AsPath>(path: P) -> Result<File>;
+        pub fn create_new<P: AsPath>(path: P) -> Result<File>;
+        pub fn options() -> OpenOptions;
+    }
+    impl super::io::Read for File {}
+    impl super::io::Write for File {}
+    pub struct OpenOptions { inner: () }
+    impl OpenOptions {
+        pub fn new() -> OpenOptions;
+        pub fn read(&mut self, read: bool) -> &mut OpenOptions;
+        pub fn write(&mut self, write: bool) -> &mut OpenOptions;
+        pub fn append(&mut self, append: bool) -> &mut OpenOptions;
+        pub fn truncate(&mut self, truncate: bool) -> &mut OpenOptions;
+        pub fn create(&mut self, create: bool) -> &mut OpenOptions;
+        pub fn create_new(&mut self, create_new: bool) -> &mut OpenOptions;
+        pub fn open<P: AsPath>(&self, path: P) -> Result<File>;
+    }
+    pub fn read_to_string<P: AsPath>(path: P) -> Result<String>;
+    pub fn read<P: AsPath>(path: P) -> Result<Vec<u8>>;
+    pub fn write<P: AsPath, C: AsBytes>(path: P, contents: C) -> Result<()>;
+    pub fn remove_file<P: AsPath>(path: P) -> Result<()>;
+    pub fn create_dir<P: AsPath>(path: P) -> Result<()>;
+    pub fn create_dir_all<P: AsPath>(path: P) -> Result<()>;
+    pub fn remove_dir<P: AsPath>(path: P) -> Result<()>;
+    pub fn rename<P: AsPath, Q: AsPath>(from: P, to: Q) -> Result<()>;
+    pub fn copy<P: AsPath, Q: AsPath>(from: P, to: Q) -> Result<u64>;
+    pub fn exists<P: AsPath>(path: P) -> Result<bool>;
+}
+pub mod path {
+    use super::pseudo::AsPath;
+    pub struct Path { inner: () }
+    pub struct PathBuf { inner: () }
+    pub struct Display<'a>;
+    impl Path {
+        pub fn new<S: AsPath>(s: &S) -> &Path;
+        pub fn exists(&self) -> bool;
+        pub fn is_file(&self) -> bool;
+        pub fn is_dir(&self) -> bool;
+        pub fn to_str(&self) -> Option<&str>;
+        pub fn display(&self) -> Display<'_>;
+        pub fn join<P: AsPath>(&self, path: P) -> PathBuf;
+        pub fn to_path_buf(&self) -> PathBuf;
+    }
+    impl PathBuf {
+        pub fn new() -> PathBuf;
+        pub fn from<S: AsPath>(s: S) -> PathBuf;
+        pub fn push<P: AsPath>(&mut self, path: P);
+        pub fn as_path(&self) -> &Path;
+        pub fn exists(&self) -> bool;
+        pub fn to_str(&self) -> Option<&str>;
+        pub fn display(&self) -> Display<'_>;
+        pub fn join<P: AsPath>(&self, path: P) -> PathBuf;
+    }
 }
 pub mod process {
     pub fn exit(code: i32) -> !;
@@ -1533,6 +1979,7 @@ pub mod prelude {
     pub use super::marker::Copy;
     pub use super::marker::Send;
     pub use super::marker::Sync;
+    pub use super::marker::Unpin;
     pub use super::marker::Sized;
     pub use super::cmp::PartialEq;
     pub use super::cmp::Eq;
@@ -1542,6 +1989,8 @@ pub mod prelude {
     pub use super::iter::Iterator;
     pub use super::iter::IntoIterator;
     pub use super::iter::DoubleEndedIterator;
+    pub use super::future::Future;
+    pub use super::future::IntoFuture;
     pub use super::iter::ExactSizeIterator;
     pub use super::iter::FromIterator;
     pub use super::iter::Extend;
@@ -1558,6 +2007,9 @@ pub mod prelude {
     pub use super::dojo::Turtle;
 }
 pub mod pseudo {
+    pub trait Any: super::fmt::Debug {}
+    pub trait AsPath {}
+    pub trait AsBytes {}
     pub trait Integer {}
     pub trait SignedInteger {}
     pub trait UnsignedInteger {}

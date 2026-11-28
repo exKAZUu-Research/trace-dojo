@@ -28,10 +28,8 @@ export interface Access {
 export interface Loan {
   place: Place;
   mutable: boolean;
-  /** The region the borrow must stay valid for. */
   region: RVar;
   span: Span;
-  /** The point that creates the loan. */
   point: number;
   /** For a two-phase borrow, the point that activates it, before which it only reserves the place. */
   activation?: number;
@@ -247,7 +245,6 @@ export class LoanGraph {
     return { definitions, deinitializes, drops };
   }
 
-  /** The variables live on entry to each point. */
   private liveness(): BitSet[] {
     const words = Math.ceil(this.names.length / 32);
     this.budget.spend(this.points.length * words);
@@ -336,6 +333,8 @@ function conflicts(loan: Loan, access: Access, at: number): boolean {
   for (let index = 0; index < common; index++) {
     const a = borrowed[index];
     const b = accessed[index];
+    // A `Deref` impl's target (`&`) borrows its whole owner, and an element (`[]`) may be any of them.
+    if (a === '&' || b === '&') break;
     if (a !== b && a !== '[]' && b !== '[]') return false;
   }
   // Assigning a place, or ending its storage, leaves alone what it refers to.

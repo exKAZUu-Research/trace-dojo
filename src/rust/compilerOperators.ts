@@ -1,15 +1,18 @@
 import type { Expr, Span } from './ast';
 import { concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
+import { fnCall } from './compilerCalls';
 import { derefAll, evaluateValues, isStringType, stringish, stripRefs, withEvaluatedValues } from './compilerCommon';
+import { pointee, userDerefCall, withoutPin } from './compilerPlaces';
+import { dropsBorrowedTemporary } from './compilerTemporaries';
 import { floatNumber, negateFloat } from './floatBits';
-import { normalize } from './infer';
+import { derefOnce } from './methods';
 import { btreeSetOp, hashSetMembers, type SetOp } from './natives/setOps';
 import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, valuesUnequal, wrap } from './ops';
 import type { Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { type IntName, resolve, shallow, type Type } from './types';
-import { DONE, type Place, SetValue, textOf, UNIT_VALUE } from './values';
+import { type IntName, resolve, type Type } from './types';
+import { DONE, type Place, type RawPtr, SetValue, textOf, UNIT_VALUE } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 
@@ -20,10 +23,33 @@ const BTREE_OPS: Record<string, SetOp> = {
   '^': 'symmetric_difference',
 };
 
+function compileOverloaded(c: Compiler, expr: Expr, compileOperands: () => Eval[]): Eval | undefined {
+  const operator = c.annotations.operators.get(expr);
+  if (!operator) return undefined;
+  // Compiling the operands only for an operator that calls an impl keeps each operand compiled once.
+  // A std impl that panics where it is called (`Duration / 0`) reports the expression's start, as rustc does.
+  return fnCall(c, operator.fn, operator.typeArgs, compileOperands(), expr.span.row, expr.span);
+}
+
+// code-gauge-allow functionCognitiveComplexity -- One case per unary operator, including overloaded ones.
+// code-gauge-allow functionNcss -- One case per unary operator, including overloaded ones.
 export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
+  const overloaded = expr.op === '*' ? undefined : compileOverloaded(c, expr, () => [c.value(expr.operand)]);
+  if (overloaded) return overloaded;
   const operand = expr.op === '*' ? c.read(expr.operand) : c.value(expr.operand);
   if (expr.op === '*') {
-    const operandType = normalize(shallow(expr.operand.ty!));
+    const operandType = withoutPin(expr.operand.ty!);
+    if (
+      operandType.kind === 'adt' &&
+      (operandType.def.builtin === 'ConstPtr' || operandType.def.builtin === 'MutPtr')
+    ) {
+      return (frame) => pointee(derefAll(operand(frame)) as RawPtr, expr.span).get();
+    }
+    if (derefOnce(c.program, operandType)?.kind === 'user') {
+      const call = userDerefCall(c, operandType, false, expr.span);
+      const held = dropsBorrowedTemporary(c, expr.operand, operand);
+      return (frame) => call(frame, derefAll(held(frame)));
+    }
     if (operandType.kind === 'ref' && operandType.mutable) return (frame) => (operand(frame) as Place).get();
     return operand;
   }
@@ -55,13 +81,16 @@ export function compileBinary(c: Compiler, expr: ExprOf<'binary'>): Eval {
       ? (frame) => (left(frame) as boolean) && (right(frame) as boolean)
       : (frame) => (left(frame) as boolean) || (right(frame) as boolean);
   }
-  const left = c.read(expr.left);
-  const right = c.read(expr.right);
-  const leftCoerced = c.annotations.coercions.get(expr.left) ? c.value(expr.left) : left;
-  const rightCoerced = c.annotations.coercions.get(expr.right) ? c.value(expr.right) : right;
-  if (['==', '!=', '<', '<=', '>', '>='].includes(op)) return comparison(expr, leftCoerced, rightCoerced);
-  const arithmeticLeft = op === '+' && isStringType(expr.left.ty!) ? c.value(expr.left) : left;
-  return arithmetic(expr, arithmeticLeft, right, rightCoerced);
+  const overloaded = compileOverloaded(c, expr, () => [c.value(expr.left), c.value(expr.right)]);
+  if (overloaded) return overloaded;
+  // Each operand compiles once: as its value where a coercion applies or `String +` takes it, otherwise as it is.
+  const comparing = ['==', '!=', '<', '<=', '>', '>='].includes(op);
+  const leftAsValue =
+    c.annotations.coercions.has(expr.left) || (!comparing && op === '+' && isStringType(expr.left.ty!));
+  const left = leftAsValue ? c.value(expr.left) : c.read(expr.left);
+  const right = c.annotations.coercions.has(expr.right) ? c.value(expr.right) : c.read(expr.right);
+  if (comparing) return comparison(expr, left, right);
+  return arithmetic(expr, left, right);
 }
 
 function comparison(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
@@ -81,7 +110,7 @@ function comparison(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
     });
 }
 
-function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerced: Eval): Eval {
+function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
   const { op } = expr;
   const type = numericType(expr.ty!);
   const span = expr.span;
@@ -99,7 +128,7 @@ function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerce
     return (frame) => {
       const target = left(frame);
       const text = textOf(target);
-      const addition = textOf(rightCoerced(frame));
+      const addition = textOf(right(frame));
       frame.runtime.allocateString(text.length + addition.length, addition.length);
       return concatStrings(target, addition);
     };
@@ -131,7 +160,14 @@ function intArithmetic(op: string, name: IntName, left: Eval, right: Eval, span:
 
 // code-gauge-allow functionNcss -- One case per kind of expression, statement, or pattern.
 export function compileCompoundAssign(c: Compiler, expr: ExprOf<'compoundAssign'>): Eval {
-  const place = c.place(expr.target);
+  const target = c.place(expr.target);
+  const overloaded = compileOverloaded(c, expr, () => [target, c.value(expr.value)]);
+  if (overloaded)
+    return (frame) => {
+      overloaded(frame);
+      return UNIT_VALUE;
+    };
+  const place = target;
   const value = c.value(expr.value);
   const type = numericType(expr.target.ty!);
   const span = expr.span;

@@ -1,32 +1,48 @@
 // code-gauge-allow-file fileNcss -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
-import { patternBindings } from './astWalk';
+import { patternBindingParts, patternBindings } from './astWalk';
 import type { Checker } from './checker';
 import { compileCall, compileMethodCall } from './compilerCalls';
 import { construct, derefAll, evaluateValues, isPlaceExpr, isRefType, LocalPlace } from './compilerCommon';
 import { compileFor, compileIf, compileLoop, compileMatch, compileWhile } from './compilerControl';
 import { compileMacro } from './compilerMacros';
 import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
-import { compileConstant, compileMatcher, compilePatternInput, type Matcher, takesWhole } from './compilerPatterns';
-import { compileField, compileIndex, compilePlace } from './compilerPlaces';
+import {
+  compileConstant,
+  compileMatcher,
+  compilePatternInput,
+  type Matcher,
+  readsThroughUserImpl,
+  takesWhole,
+} from './compilerPatterns';
+import { compileField, compileIndex, compilePlace, readPlace, unionFields, userDerefCall } from './compilerPlaces';
+import { dropsBorrowedTemporary, holdTemporary } from './compilerTemporaries';
+import type { Dropper } from './drops';
 import type { Formatter } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
 import { type CaptureMode, captureStoragePlaces } from './loanCaptures';
+import { derefOnce } from './methods';
 import { castValue, copyValue, needsCopy } from './ops';
-import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
-import { runtimeType } from './runtimeTypes';
+import { ControlSignal, type Frame, type FunctionInfo, MOVED, RustPanic, UNASSIGNED } from './runtime';
+import { concreteType, runtimeType } from './runtimeTypes';
+import { markExtendedTemporaries } from './temporaryScopes';
 import { trackCollectionStorage } from './turtleTypes';
-import { type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
+import { constArgValue, type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
   AccessorPlace,
+  type CellBox,
   CellPlace,
   DynValue,
   EnumValue,
   FnValue,
+  FutureValue,
+  isPlace,
   type Place,
   RangeValue,
+  RawPtr,
+  type SharedBox,
   StructValue,
   textOf,
   UNIT_VALUE,
@@ -40,17 +56,22 @@ export type PlaceEval = (frame: Frame) => Place;
 
 export interface CompiledFn {
   info: FunctionInfo;
-  /** Stores the arguments in the parameters' slots. */
   bind: (frame: Frame, args: Value[]) => void;
   body: Eval;
+  /** The slots the body's own variables are in, in the order declared, which go the last declared first. */
+  bodySlots?: readonly number[];
+  /** The slots each parameter binds, in the order declared; the parameters go after the body, the last one first. */
+  paramSlots?: readonly (readonly number[])[];
 }
 
-/** What compiled code calls into: functions, closures, natives, conversions, and formatting. */
 type CaptureCopy = (value: Value, type: Type) => Value;
 
 export interface ClosureCapture {
   place: Place;
   duplicate?: (copy: CaptureCopy) => ClosureCapture;
+  /** For a variable the closure owns, its type, by which the closure drops it when it goes. */
+  owned?: Type;
+  ownedFields?: { path: number[]; type: Type }[];
 }
 
 interface FieldCapture {
@@ -62,12 +83,15 @@ export interface CallSupport {
   callFn(def: FnDef, typeArgs: Type[], args: Value[], callRow: number | undefined, span: Span, frame: Frame): Value;
   callValue(callee: Value, args: Value[], callRow: number | undefined): Value;
   makeClosure(compiled: CompiledFn, frame: Frame, captures: ClosureCapture[]): Value;
-  toIter(value: Value, from: Type): Value;
+  toIter(value: Value, from: Type, span?: Span): Value;
   constValue(def: ConstDef, frame: Frame, typeArgs: Type[]): Value;
   builtinConst(name: string): Value;
   formatter: Formatter;
   convertError(value: Value, from: Type, to: Type, frame: Frame): Value;
   strSlice(text: string, range: RangeValue | undefined, span: Span): string;
+  dropper: Dropper;
+  /** The one place a `static mut` lives in. */
+  staticPlace(def: ConstDef, frame: Frame): Place;
 }
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
@@ -109,13 +133,15 @@ const READERS: { [K in Expr['kind']]: Reader<K> } = {
   macro: (c, expr) => compileMacro(c, expr, expr.macro),
 };
 
-/** Compiles the checked bodies of a program into closures over frames. */
 export class Compiler {
   readonly annotations: Annotations;
   private readonly compiled = new Map<FnContext, CompiledFn>();
   private fn!: FnContext;
   /** Whether the body being compiled records steps (tracing, and not an atomic function's body). */
   private recordsSteps = false;
+  /** The operands of `&` whose temporaries a `let` extends, with the slot of the variable they live as long as. */
+  private readonly extendedOperands = new WeakMap<Expr, number>();
+  private readonly temporaryHolders = new WeakMap<Stmt, number>();
 
   constructor(
     readonly program: Program,
@@ -145,13 +171,14 @@ export class Compiler {
       const params: { local: LocalVar | undefined; pattern: Pattern | undefined }[] = [];
       if (item.selfParam) params.push({ local: context.locals.find((local) => local.isSelf), pattern: undefined });
       for (const param of item.params) params.push({ local: undefined, pattern: param.pattern });
-      const binders = params.map(({ local, pattern }) => this.paramBinder(local, pattern));
+      const binders = params.map(({ local, pattern }, index) => this.paramBinder(local, pattern, index));
       compiled.bind = (frame, args) => {
         for (const [index, binder] of binders.entries()) binder(frame, args[index]);
       };
+      compiled.paramSlots = params.map(({ local, pattern }) => (local ? [local.slot] : this.patternSlots(pattern!)));
       const body = item.body!;
-      const run = this.compileBlock(body, isUnit(resolve(def.ret, true)), false);
-      compiled.body = run;
+      compiled.body = this.compileBlock(body, isUnit(resolve(def.ret, true)), false);
+      compiled.bodySlots = this.declaredSlots(body);
       this.fillInfo(info, context);
     });
     return compiled;
@@ -195,9 +222,6 @@ export class Compiler {
     }
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Steps
-
   stepRow(span: Span): number | undefined {
     return this.recordsSteps ? span.row : undefined;
   }
@@ -214,26 +238,29 @@ export class Compiler {
     };
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Blocks and statements
-
   compileBlock(block: Block, tailAsStatement = false, clearsLocals = true): Eval {
     const stmts = block.stmts.map((stmt) => this.compileStmt(stmt));
-    const tail = block.tail && (tailAsStatement ? this.statement(block.tail) : this.value(block.tail));
-    const declared = block.stmts.flatMap((stmt) => (stmt.kind === 'let' ? this.patternSlots(stmt.pattern) : []));
+    // A tail whose value is not used is a statement, whose temporaries go at its end, as at each loop iteration's. Its
+    // value goes with the statement the block is, after the block's variables.
+    const tail =
+      block.tail && (tailAsStatement ? this.releasingTemporaries(this.statement(block.tail)) : this.value(block.tail));
+    const declared = this.declaredSlots(block);
     const count = stmts.length;
     const run: Eval = (frame) => {
       for (let index = 0; index < count; index++) stmts[index](frame);
       return tail ? tail(frame) : UNIT_VALUE;
     };
     if (!clearsLocals || declared.length === 0) return run;
-    return (frame) => {
-      try {
-        return run(frame);
-      } finally {
-        frame.endScope(declared);
-      }
-    };
+    return scoped(run, declared);
+  }
+
+  /** The slots of a block's variables, and of the temporaries a `let` that binds none extends, in order. */
+  private declaredSlots(block: Block): number[] {
+    return block.stmts.flatMap((stmt) => {
+      if (stmt.kind !== 'let') return [];
+      const holder = this.temporaryHolders.get(stmt);
+      return holder === undefined ? this.patternSlots(stmt.pattern) : [holder];
+    });
   }
 
   statement(expr: Expr, span = expr.span): Eval {
@@ -248,12 +275,8 @@ export class Compiler {
         return this.compileLet(stmt);
       }
       case 'expr': {
-        const value = this.statement(stmt.expr, stmt.span);
-        return (frame) => {
-          frame.runtime.spend();
-          value(frame);
-          return UNIT_VALUE;
-        };
+        const value = stmt.hidden ? this.value(stmt.expr, true) : this.statement(stmt.expr, stmt.span);
+        return this.expressionStatement(value, stmt.expr);
       }
       case 'empty': {
         return () => UNIT_VALUE;
@@ -261,7 +284,44 @@ export class Compiler {
     }
   }
 
+  /** Runs an expression as a statement: its value and its temporaries go at its end, also when it breaks out. */
+  private expressionStatement(value: Eval, expr: Expr): Eval {
+    const dropped = this.droppedType(expr.ty);
+    const run = this.releasingTemporaries(value, (frame, result) => {
+      if (dropped) frame.runtime.dropper?.drop(result, dropped(frame));
+    });
+    return (frame) => {
+      run(frame);
+      return UNIT_VALUE;
+    };
+  }
+
+  /**
+   * Runs an expression whose temporaries go at its end, also when it breaks out, and gives its value; `before` takes
+   * the value before the temporaries go, as the value is the last of them.
+   */
+  private releasingTemporaries(value: Eval, before?: (frame: Frame, result: Value) => void): Eval {
+    return (frame) => {
+      frame.runtime.spend();
+      const mark = frame.runtime.liveGuards.length;
+      try {
+        const result = value(frame);
+        before?.(frame, result);
+        return result;
+      } catch (error) {
+        // A guard the statement holds goes as the panic unwinds, which poisons its lock.
+        if (error instanceof RustPanic) frame.runtime.unwinding = true;
+        throw error;
+      } finally {
+        frame.runtime.releaseGuards(frame, mark);
+      }
+    };
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of let statement (plain, destructuring, let-else).
+  // code-gauge-allow functionNcss -- One case per kind of let statement (plain, destructuring, let-else).
   private compileLet(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
+    if (stmt.init) this.extendTemporaries(stmt);
     if (!stmt.init) {
       const locals = patternBindings(stmt.pattern, this.annotations);
       return (frame) => {
@@ -269,37 +329,77 @@ export class Compiler {
         return UNIT_VALUE;
       };
     }
-    // Destructuring a place moves the parts its bindings take; the place keeps the rest.
-    if (stmt.pattern.kind !== 'binding' && isPlaceExpr(stmt.init, this.annotations)) return this.destructure(stmt);
+    // Destructuring a place moves the parts its bindings take; the place keeps the rest. `let ref x = place` borrows it.
+    const destructures = stmt.pattern.kind !== 'binding' || stmt.pattern.byRef !== undefined;
+    if (destructures && isPlaceExpr(stmt.init, this.annotations)) return this.destructure(stmt);
     if (stmt.else) {
       const init = this.value(stmt.init);
-      const matcher = this.compileMatcher(stmt.pattern);
+      const bindRest = this.compileTemporaryBinder(stmt.pattern, stmt.init);
       const elseBlock = this.compileBlock(stmt.else, true);
       const run: Eval = (frame) => {
         frame.runtime.spend();
-        const value = init(frame);
-        if (!matcher(frame, value, undefined)) elseBlock(frame);
+        if (!bindRest(frame, init(frame))) elseBlock(frame);
         return UNIT_VALUE;
       };
       return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
     }
-    const bind = this.compileBinder(stmt.pattern);
+    if (stmt.hidden) {
+      const bind =
+        stmt.pattern.kind === 'binding'
+          ? this.compileBinder(stmt.pattern)
+          : this.compileTemporaryBinder(stmt.pattern, stmt.init);
+      const init = this.value(stmt.init);
+      return (frame) => {
+        bind(frame, init(frame));
+        return UNIT_VALUE;
+      };
+    }
     const local =
       stmt.pattern.kind === 'binding' && !stmt.pattern.sub ? this.annotations.bindings.get(stmt.pattern) : undefined;
+    const bind = local ? this.compileBinder(stmt.pattern) : this.compileTemporaryBinder(stmt.pattern, stmt.init);
     const init = this.bindingValue(stmt.init, local?.slot);
     const run: Eval = (frame) => {
       frame.runtime.spend();
+      const mark = frame.runtime.liveGuards.length;
       bind(frame, init(frame));
+      frame.runtime.releaseGuards(frame, mark);
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
   }
 
-  private paramBinder(local: LocalVar | undefined, pattern: Pattern | undefined): (frame: Frame, value: Value) => void {
+  /**
+   * Keeps the temporaries a `let` extends (`let r = &make();`) until its variables go, after all of them; for a `let`
+   * that binds none (`let _ = &make();`), until its block ends, in a slot of their own.
+   */
+  private extendTemporaries(stmt: Extract<Stmt, { kind: 'let' }>): void {
+    const operands: Expr[] = [];
+    markExtendedTemporaries(stmt.init!, this.annotations, (operand) => operands.push(operand));
+    if (operands.length === 0) return;
+    let slot = patternBindings(stmt.pattern, this.annotations).at(0)?.slot;
+    if (slot === undefined) {
+      slot = this.fn.slotCount++;
+      this.temporaryHolders.set(stmt, slot);
+    }
+    for (const operand of operands) this.extendedOperands.set(operand, slot);
+  }
+
+  /**
+   * Binds a parameter. What a pattern parameter (`_`, `(a, _)`, `P { p, .. }`) does not bind goes with the parameter,
+   * after the variables it binds.
+   */
+  private paramBinder(
+    local: LocalVar | undefined,
+    pattern: Pattern | undefined,
+    index: number
+  ): (frame: Frame, value: Value) => void {
     if (local) return (frame, value) => void (frame.locals[local.slot] = value);
     const bind = this.compileOwnedBinder(pattern!);
+    const type = pattern!.ty && runtimeType(pattern!.ty);
     return (frame, value) => {
-      frame.temporaries.push(bind(frame, value));
+      const place = bind(frame, value);
+      frame.temporaries.push(place);
+      if (type) frame.paramLeftovers.set(index, () => frame.runtime.dropper?.drop(place.get(), type(frame)));
     };
   }
 
@@ -346,11 +446,11 @@ export class Compiler {
   }
 
   /**
-   * A shared borrow of an owned place, whose referent the variable in `slot` follows. A coercion (to a trait object, say)
-   * applies to the value read from that one evaluation of the place, so an index's expression runs once.
+   * A shared borrow of an owned place, whose referent the variable in `slot` follows. A coercion (to a trait object,
+   * say) applies to the value read from that one evaluation of the place, so an index's expression runs once.
    */
   private directBorrow(expr: Expr, operand: Expr, slot: number): Eval {
-    const place = this.place(operand);
+    const place = readsThroughUserImpl(this, operand) ? readPlace(this.read(operand)) : this.place(operand);
     let root = operand;
     while (root.kind === 'field' || root.kind === 'index' || root.kind === 'unary') root = root.operand;
     const res = this.annotations.paths.get(root);
@@ -369,29 +469,47 @@ export class Compiler {
   }
 
   private destructure(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
-    const input = compilePatternInput(this, stmt.init!);
+    const input = compilePatternInput(this, stmt.init!, [stmt.pattern]);
     const matcher = this.compileMatcher(stmt.pattern);
     const takeAll = takesWhole(this, stmt.init!, stmt.pattern);
     const elseBlock = stmt.else && this.compileBlock(stmt.else, true);
     const run: Eval = (frame) => {
       frame.runtime.spend();
+      const mark = frame.runtime.liveGuards.length;
       const { value, place } = input(frame);
       const matched = frame.runtime.withRoots([place], () => matcher(frame, value, () => place));
       if (matched) takeAll?.(frame);
-      else elseBlock?.(frame);
+      // The temporaries the place is read through (a `RefCell`'s guard) go at the statement's end, or before `else`.
+      frame.runtime.releaseGuards(frame, mark);
+      if (!matched) elseBlock?.(frame);
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, false);
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Patterns
-
-  /** Binds an irrefutable pattern to a value. */
   compileBinder(pattern: Pattern): (frame: Frame, value: Value) => void {
     const matcher = this.compileMatcher(pattern);
     return (frame, value) => {
       matcher(frame, value, undefined);
+    };
+  }
+
+  /**
+   * Binds a pattern to a value no variable holds, telling whether it matched. What the bindings leave of the value goes
+   * at once, or before `else` when it does not match; with a `ref` binding into it, when the bindings go.
+   */
+  private compileTemporaryBinder(pattern: Pattern, init: Expr): (frame: Frame, value: Value) => boolean {
+    const matcher = this.compileMatcher(pattern);
+    const dropped = this.droppedType(init.ty);
+    if (!dropped) return (frame, value) => matcher(frame, value, undefined);
+    const parts = patternBindingParts(pattern, this.annotations);
+    const holder = parts.some((part) => part.throughRef) ? parts[0].local.slot : undefined;
+    return (frame, value) => {
+      const place = new CellPlace(value);
+      const matched = frame.runtime.withRoots([place], () => matcher(frame, value, () => place));
+      if (matched && holder !== undefined) holdTemporary(frame, place, dropped(frame), holder);
+      else frame.runtime.dropper?.drop(place.get(), dropped(frame));
+      return matched;
     };
   }
 
@@ -408,7 +526,6 @@ export class Compiler {
     return compileMatcher(this, pattern);
   }
 
-  /** The slots of the variables a pattern binds, which go out of scope with the pattern. */
   patternSlots(pattern: Pattern): number[] {
     return patternBindings(pattern, this.annotations).map((local) => local.slot);
   }
@@ -416,9 +533,6 @@ export class Compiler {
   isCopy(type: Type): boolean {
     return this.checker.solver.isCopy(resolve(type, true));
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Expressions
 
   /** An expression's value where it is moved or copied: a `Copy` aggregate read from a place is copied. */
   value(expr: Expr, asStatement = false): Eval {
@@ -440,8 +554,8 @@ export class Compiler {
   private valueFromPlace(expr: Expr, read: Eval, type: Type): Eval {
     if (!isPlaceExpr(expr, this.annotations)) return read;
     if (this.isCopy(type)) return needsCopy(type) ? (frame) => copyValue(read(frame)) : read;
-    // Moving a whole variable out leaves it without a value, which the trace no longer shows. A `&mut` is not `Copy`, so
-    // it moves too (where rustc reborrows it instead, `adjustedValue` has returned before this).
+    // Moving a whole variable out leaves it without a value, which the trace no longer shows. A `&mut` is not `Copy`,
+    // so it moves too (where rustc reborrows it instead, `adjustedValue` has returned before this).
     if (expr.kind === 'path') {
       const res = this.annotations.paths.get(expr);
       const moves = !isRefType(res?.kind === 'local' ? res.local.type : type) || isMutableRef(type);
@@ -454,8 +568,7 @@ export class Compiler {
         };
       }
     }
-    // A closure moves out only what it captured by value, which its own storage holds.
-    if ((expr.kind === 'path' || expr.kind === 'field' || expr.kind === 'unary') && this.ownedPlace(expr)) {
+    if (this.movesOutOfPlace(expr)) {
       const place = this.place(expr);
       return (frame) => {
         const target = place(frame);
@@ -465,6 +578,15 @@ export class Compiler {
       };
     }
     return read;
+  }
+
+  /**
+   * Whether moving the value leaves its place without it: a closure moves out only what it captured by value, which
+   * its own storage holds, and a field moves out of a temporary (`make_pair().0`), which then drops only the rest.
+   */
+  private movesOutOfPlace(expr: Expr): boolean {
+    if (expr.kind === 'field' && !isPlaceExpr(fieldRoot(expr), this.annotations)) return true;
+    return (expr.kind === 'path' || expr.kind === 'field' || expr.kind === 'unary') && this.ownedPlace(expr);
   }
 
   ownedPlace(expr: Expr): boolean {
@@ -494,19 +616,33 @@ export class Compiler {
         const sourceMut = sourceType.kind === 'ref' && sourceType.mutable;
         const { derefs, fromMut, toStr } = coercion;
         const keepsPlace = sourceMut && !fromMut;
+        // The program's `Deref` impls run on each value they deref, from the referent of the reference.
+        let stepType: Type = sourceType.kind === 'ref' ? sourceType.target : sourceType;
+        const calls = derefs.map((step) => {
+          const self = stepType;
+          stepType = derefOnce(this.program, stepType)?.type ?? stepType;
+          // Into a `&mut` (`set(&mut w)`), the program's `DerefMut` gives the place written through.
+          return step === 'user' ? userDerefCall(this, self, keepsPlace, expr.span) : undefined;
+        });
         return (frame) => {
           let value = read(frame);
           if (fromMut) value = (value as Place).get();
-          for (const step of derefs) if (step === 'mutRef') value = (value as Place).get();
+          for (const [index, step] of derefs.entries()) {
+            if (step === 'mutRef') value = (value as Place).get();
+            else if (step === 'user') value = calls[index]!(frame, keepsPlace ? value : derefAll(value));
+          }
           return toStr && !keepsPlace ? textOf(value) : value;
         };
       }
       case 'dyn': {
-        return dynCoercion(read, runtimeType(coercion.type), coercion.mutable);
+        return dynCoercion(read, runtimeType(coercion.type), coercion);
       }
       case 'intoIter': {
         const from = runtimeType(coercion.from);
         return (frame) => this.support.toIter(read(frame), from(frame));
+      }
+      case 'rawPtr': {
+        return rawPointer(this, expr, read);
       }
     }
   }
@@ -557,11 +693,23 @@ export class Compiler {
         return () => new FnValue((args) => construct(def, variant, args), def.variants[variant].name);
       }
       case 'const': {
+        if (res.def.ast.isMutable) {
+          const def = res.def;
+          return (frame) => this.support.staticPlace(def, frame).get();
+        }
         return compileConstant(this, res);
       }
       case 'builtinConst': {
         const value = this.support.builtinConst(res.name);
         return () => value;
+      }
+      case 'constParam': {
+        const { param } = res;
+        return (frame) => {
+          const value = constArgValue(concreteType({ kind: 'param', param }, frame.typeArgs));
+          if (value === undefined) throw new Error(`No value for the const parameter ${param.name}`);
+          return value;
+        };
       }
       case 'discard': {
         return () => UNIT_VALUE;
@@ -598,15 +746,40 @@ export class Compiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Drops, places and destructuring assignment follow Rust order.
+  // code-gauge-allow functionNcss -- Drops, places and destructuring assignment follow Rust order.
   assign(expr: Extract<Expr, { kind: 'assign' }>): Eval {
-    const value = this.value(expr.value);
     const res = expr.target.kind === 'path' ? this.annotations.paths.get(expr.target) : undefined;
-    if (res?.kind === 'discard') return (frame) => (value(frame), UNIT_VALUE);
+    // `_ = place` neither moves nor drops what the place holds, though evaluating the place still checks its indexes.
+    if (res?.kind === 'discard' && isPlaceExpr(expr.value, this.annotations)) {
+      const place = readsThroughUserImpl(this, expr.value) ? this.read(expr.value) : this.place(expr.value);
+      return (frame) => {
+        place(frame);
+        return UNIT_VALUE;
+      };
+    }
+    const value = this.value(expr.value);
+    // A union's field holds no value that drops (std allows only `Copy` and `ManuallyDrop` ones), so writing it
+    // reads nothing, whichever field the union holds.
+    const unionField = expr.target.kind === 'field' && unionFields(expr.target) !== undefined;
+    const dropped = unionField ? undefined : this.droppedType(expr.target.ty);
+    if (res?.kind === 'discard') {
+      const discarded = this.droppedType(expr.value.ty);
+      return (frame) => {
+        const v = value(frame);
+        if (discarded) frame.runtime.dropper?.drop(v, discarded(frame));
+        return UNIT_VALUE;
+      };
+    }
     if (res?.kind === 'local' && res.local.mode === 'move') {
       const slot = res.local.slot;
       const assigned = this.bindingValue(expr.value, slot);
       return (frame) => {
-        frame.locals[slot] = assigned(frame);
+        const v = assigned(frame);
+        const old = frame.locals[slot];
+        frame.locals[slot] = v;
+        // Assigning replaces the old value, which goes as the variable's value would.
+        if (dropped && old !== UNASSIGNED) frame.runtime.dropper?.drop(old, dropped(frame));
         return UNIT_VALUE;
       };
     }
@@ -614,11 +787,29 @@ export class Compiler {
     return (frame) => {
       const v = value(frame);
       // Evaluating the place can run the program's code, during which only this assignment holds the value.
-      frame.runtime.withRoots([v], () => place(frame).set(v));
+      frame.runtime.withRoots([v], () => {
+        const target = place(frame);
+        const old = dropped ? target.get() : undefined;
+        target.set(v);
+        if (dropped) frame.runtime.dropper?.drop(old, dropped(frame));
+      });
       return UNIT_VALUE;
     };
   }
 
+  extendedTemporarySlot(operand: Expr): number | undefined {
+    return this.extendedOperands.get(operand);
+  }
+
+  /** The concrete type of a value that may need dropping where code discards it, or undefined when none can. */
+  droppedType(type: Type | undefined): ((frame: Frame) => Type) | undefined {
+    // The dropper may switch on only once the program runs (a native activates it), so the check waits until then.
+    if (!type) return undefined;
+    const runtime = runtimeType(type);
+    return (frame) => runtime(frame);
+  }
+
+  // code-gauge-allow functionNcss -- Closures and async blocks share capture compilation.
   closure(expr: Extract<Expr, { kind: 'closure' }>): Eval {
     const info = this.annotations.closures.get(expr);
     if (!info) throw new Error('Unchecked closure');
@@ -629,10 +820,11 @@ export class Compiler {
     this.withFn(context, () => {
       // A closure's steps are recorded as its function's are.
       this.recordsSteps = this.tracing && !outer.isAtomic && !context.isAtomic;
-      const binders = expr.params.map((param) => this.paramBinder(undefined, param.pattern));
+      const binders = expr.params.map((param, index) => this.paramBinder(undefined, param.pattern, index));
       compiled.bind = (frame, args) => {
         for (const [index, binder] of binders.entries()) binder(frame, args[index]);
       };
+      compiled.paramSlots = expr.params.map((param) => this.patternSlots(param.pattern));
       const body = expr.body;
       compiled.body = body.ty && isUnit(resolve(body.ty, true)) ? this.statement(body) : this.value(body);
       this.fillInfo(functionInfo, context);
@@ -646,12 +838,23 @@ export class Compiler {
       const fields = places.map(({ proj, mode }) => ({ path: captureFieldIndices(local.type, proj), mode }));
       return { res, local, fields };
     });
-    return (frame) =>
+    const make = (frame: Frame): Value =>
       this.support.makeClosure(
         compiled,
         frame,
         captures.map((capture) => this.capturePlace(frame, capture, context))
       );
+    if (!expr.isAsync) return make;
+    const kind = expr.isAsync === 'fn' ? '`async fn`' : '`async block`';
+    return (frame) => {
+      const closure = make(frame);
+      let done = false;
+      return new FutureValue(() => {
+        if (done) throw new RustPanic(`${kind} resumed after completion`, expr.span);
+        done = true;
+        return this.support.callValue(closure, [], undefined);
+      }, [closure]);
+    };
   }
 
   private capturePlace(
@@ -694,13 +897,21 @@ export class Compiler {
 
   private ownedValue(value: Value, type: Type): ClosureCapture {
     const place = new CellPlace(value);
-    return { place, duplicate: (copy) => this.ownedValue(copy(place.get(), type), type) };
+    return { place, owned: type, duplicate: (copy) => this.ownedValue(copy(place.get(), type), type) };
   }
 
   private ownedCapture(frame: Frame, value: Value, type: Type, fields: FieldCapture[]): ClosureCapture {
     const place = new CellPlace(value);
+    const ownedFields = fields
+      .filter(({ mode }) => mode === 'value')
+      .map(({ path }) => {
+        let fieldType = type;
+        for (const index of path) fieldType = captureFieldType(fieldType, index);
+        return { path, type: fieldType };
+      });
     return {
       place,
+      ownedFields,
       duplicate: (copy) => {
         const cloned = this.captureFields(frame, place.get(), type, fields, (source, index, item) =>
           copy(source[index], item)
@@ -809,7 +1020,39 @@ function readLiteral(_c: Compiler, expr: ExprOf<'bool' | 'char' | 'str'>): Eval 
   return () => value;
 }
 
-function dynCoercion(read: Eval, type: (frame: Frame) => Type, mutable: boolean): Eval {
+/**
+ * An `Rc` or `Arc` of a trait object made from one of a concrete type: the same allocation and counts, whose value
+ * shows as the trait object.
+ */
+function sharedDyn(box: SharedBox, type: Type): SharedBox {
+  return dynView(box, type);
+}
+
+/** A `Box`, `Rc` or `Arc` of a cell (a `RefCell`, a lock) made one of a cell of a trait object: the same cell. */
+function cellDyn(pointer: Value, type: Type, shared: boolean): Value {
+  const view = (cell: CellBox): CellBox => dynView(cell, type);
+  if (!shared) return view(pointer as CellBox);
+  return new Proxy(pointer as SharedBox, {
+    get: (target, key) => (key === 'value' ? view(target.value as CellBox) : Reflect.get(target, key)),
+  });
+}
+
+/** An object whose `value` shows as a trait object of `type`, the object itself holding the concrete value. */
+function dynView<T extends { value: Value }>(object: T, type: Type): T {
+  return new Proxy(object, {
+    get: (target, key) => (key === 'value' ? new DynValue(type, target.value) : Reflect.get(target, key)),
+    set: (target, key, value) =>
+      Reflect.set(target, key, key === 'value' && value instanceof DynValue ? value.value : value),
+  });
+}
+
+function dynCoercion(
+  read: Eval,
+  type: (frame: Frame) => Type,
+  { mutable, shared, throughCell }: { mutable: boolean; shared?: boolean; throughCell?: boolean }
+): Eval {
+  if (throughCell) return (frame) => cellDyn(derefAll(read(frame)), type(frame), shared === true);
+  if (shared) return (frame) => sharedDyn(derefAll(read(frame)) as SharedBox, type(frame));
   if (!mutable) return (frame) => new DynValue(type(frame), derefAll(read(frame)));
   return (frame) => {
     const target = read(frame) as Place;
@@ -822,15 +1065,64 @@ function dynCoercion(read: Eval, type: (frame: Frame) => Type, mutable: boolean)
   };
 }
 
+/** The value a chain of field accesses starts from: `make()` of `make().a.b`. */
+function fieldRoot(expr: Expr): Expr {
+  let root = expr;
+  while (root.kind === 'field') root = root.operand;
+  return root;
+}
+
 function readRef(c: Compiler, expr: ExprOf<'ref'>): Eval {
-  if (expr.mutable) {
+  if (expr.raw) {
     const place = c.place(expr.operand);
-    return (frame) => place(frame);
+    return (frame) => new RawPtr(place(frame));
   }
-  return c.read(expr.operand);
+  if (expr.mutable) return dropsBorrowedTemporary(c, expr.operand, c.place(expr.operand));
+  return dropsBorrowedTemporary(c, expr.operand, c.read(expr.operand));
+}
+
+/** Runs a block whose variables go when it ends, after the temporaries of its tail (edition 2024). */
+function scoped(run: Eval, declared: number[]): Eval {
+  return (frame) => {
+    const mark = frame.runtime.liveGuards.length;
+    let result: Value | undefined;
+    try {
+      result = run(frame);
+      return result;
+    } catch (error) {
+      // The block's variables go as the panic unwinds, which poisons a lock one of them holds.
+      if (error instanceof RustPanic) frame.runtime.unwinding = true;
+      // A `break` value's temporaries go before the variables, as a tail's do.
+      if (error instanceof ControlSignal) result = error.value;
+      throw error;
+    } finally {
+      frame.runtime.releaseGuards(frame, mark, result);
+      frame.endScope(declared);
+    }
+  };
+}
+
+/**
+ * A raw pointer made of a reference: to the place a borrow written there borrows (so it reads what the place holds
+ * later), or else to the place a `&mut` is, or to the value a shared reference refers to.
+ */
+function rawPointer(c: Compiler, expr: Expr, read: Eval): Eval {
+  if (expr.kind === 'ref' && !expr.raw) {
+    const place = c.place(expr.operand);
+    return (frame) => new RawPtr(place(frame));
+  }
+  return (frame) => {
+    const value = read(frame);
+    if (value instanceof RawPtr) return value;
+    return new RawPtr(isPlace(value) ? value : new CellPlace(value));
+  };
 }
 
 function readCast(c: Compiler, expr: ExprOf<'cast'>): Eval {
+  const target = normalize(shallow(expr.ty!));
+  if (target.kind === 'adt' && (target.def.builtin === 'ConstPtr' || target.def.builtin === 'MutPtr')) {
+    return rawPointer(c, expr.operand, c.value(expr.operand));
+  }
   const operand = c.value(expr.operand);
   const to = resolve(expr.ty!, true);
   return (frame) => castValue(operand(frame), to);
@@ -862,7 +1154,9 @@ function readArrayRepeat(c: Compiler, expr: ExprOf<'arrayRepeat'>): Eval {
   if (c.annotations.unevaluatedRepeatOperands.has(expr.value)) return () => [];
   const value = c.value(expr.value);
   const count = c.value(expr.count);
-  const constant = c.annotations.paths.get(expr.value)?.kind === 'const';
+  const constant =
+    c.annotations.paths.get(expr.value)?.kind === 'const' ||
+    (expr.value.kind === 'block' && expr.value.isConst === true);
   return (frame) => {
     const length = Number(count(frame) as bigint);
     frame.runtime.allocate(length);

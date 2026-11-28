@@ -2,7 +2,7 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
-import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
+import type { Block, Condition, Expr, FnItem, FormatArgs, Generics, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindingParts, patternBindings } from './astWalk';
 import {
   checkConstDrop,
@@ -26,7 +26,6 @@ import { resolve, shallow, substitute as substituteType, type Type } from './typ
 /** Whether a variable holds a value at a point: certainly, certainly not (never assigned or moved), or maybe. */
 interface VarState {
   init: 'yes' | 'no' | 'maybe';
-  /** Where the value moved out, for messages, when it did. */
   movedAt: Span | undefined;
   known?: Known;
   /** Moved-out parts (`x.f`), whose variable can no longer be used as a whole. */
@@ -50,7 +49,7 @@ const BOTTOM: State = new Map();
  * places, and assignments to immutable variables here, and the conflicts of borrows with a {@link LoanBuilder}.
  */
 export class BorrowChecker {
-  private loopStack: { label: string | undefined; breaks: State[]; continues: State[] }[] = [];
+  private loopStack: { label: string | undefined; isBlock: boolean; breaks: State[]; continues: State[] }[] = [];
   /** The captures that the closure being checked moves out, which it owns. */
   private ownedCaptures: readonly LocalVar[] = [];
 
@@ -69,7 +68,13 @@ export class BorrowChecker {
     );
   }
 
-  checkFn(item: FnItem, context: FnContext, ret: Type): void {
+  checkFn(
+    item: FnItem,
+    context: FnContext,
+    ret: Type,
+    implBounds: Generics['lifetimeBounds'] = [],
+    declaredRet?: Type
+  ): void {
     if (!item.body) return;
     const moveError = this.checkMoves(item, item.body, context);
     const loanErrors: LoanError[] = [];
@@ -78,6 +83,16 @@ export class BorrowChecker {
       body: item.body,
       ret,
       end: { row: item.endRow, col: 0 },
+      signature: {
+        params: item.params.map((param) => ({
+          name: param.pattern.kind === 'binding' ? param.pattern.name : '_',
+          span: param.span,
+        })),
+        bounds: [...(item.generics.lifetimeBounds ?? []), ...implBounds],
+        staticReturn: declaredRet !== undefined && isStaticOpaque(declaredRet),
+        declaredRet,
+        span: item.span,
+      },
     };
     LoanBuilder.checkFn(this.annotations, this.solver, context, fn, { errors: loanErrors, budget: this.budget });
     // rustc reports the errors in the order of their positions.
@@ -86,7 +101,6 @@ export class BorrowChecker {
     if (moveError) throw moveError;
   }
 
-  /** Checks the moves and initialization of variables, returning the first error. */
   private checkMoves(item: FnItem, body: Block, context: FnContext): CompileError | undefined {
     const state: State = new Map();
     for (const local of context.locals) {
@@ -103,9 +117,6 @@ export class BorrowChecker {
       return error;
     }
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Statements
 
   private block(block: Block, state: State): State {
     let current = state;
@@ -141,7 +152,7 @@ export class BorrowChecker {
       case 'let': {
         if (!stmt.init) return this.declareEmpty(stmt.pattern, state);
         const { pattern, init } = stmt;
-        if (pattern.kind === 'binding' && !pattern.sub) {
+        if (pattern.kind === 'binding' && !pattern.sub && !pattern.byRef) {
           const known = this.constantValue(init, state);
           let current = this.expr(init, state, 'move');
           for (const local of this.bindingsOf(pattern)) current = setVar(current, local, initState(known));
@@ -161,9 +172,6 @@ export class BorrowChecker {
       }
     }
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Expressions
 
   /**
    * Checks an expression. `mode` tells what happens to its value when it is a place: moved (or copied), read without
@@ -292,16 +300,32 @@ export class BorrowChecker {
   private match(expr: Extract<Expr, { kind: 'match' }>, state: State): State {
     const afterScrutinee = this.patternSource(expr.scrutinee, state);
     let result: State = BOTTOM;
+    // A false guard passes the value on to the later arms, which see what the guard did but no move by the pattern.
+    let next = afterScrutinee;
     for (const arm of expr.arms) {
-      const armState = this.bindPattern(arm.pattern, expr.scrutinee, afterScrutinee);
+      const bound = this.bindPattern(arm.pattern, expr.scrutinee, next);
+      let armState = bound;
+      let failed = BOTTOM;
+      for (const cond of arm.guard ?? []) {
+        const { matched, otherwise } = this.condition(cond, armState);
+        failed = join(failed, otherwise);
+        armState = matched;
+      }
       result = join(result, this.expr(arm.body, armState, 'move'));
+      if (arm.guard) {
+        const passed = new Map(failed);
+        for (const [local, varState] of next) if (bound.get(local) !== varState) passed.set(local, varState);
+        next = join(next, passed);
+      }
     }
     return expr.arms.length === 0 ? afterScrutinee : result;
   }
 
   private loopExpr(expr: Extract<Expr, { kind: 'loop' | 'while' | 'for' }>, state: State): State {
     if (expr.kind === 'for') return this.forLoop(expr, state);
-    if (expr.kind === 'loop') return this.loop(expr.label, state, (s) => this.block(expr.body, s), false);
+    if (expr.kind === 'loop') {
+      return this.loop(expr.label, state, (s) => this.block(expr.body, s), false, expr.isBlock);
+    }
     const body = (s: State): State => {
       const { matched, otherwise } = this.condition(expr.cond, s);
       this.loopStack.at(-1)?.breaks.push(otherwise);
@@ -335,6 +359,10 @@ export class BorrowChecker {
   }
 
   private assignment(expr: Extract<Expr, { kind: 'assign' | 'compoundAssign' }>, state: State): State {
+    // `_ = place` binds nothing, so it reads the place as `let _ = place` does, moving nothing out of it.
+    if (expr.kind === 'assign' && this.annotations.paths.get(expr.target)?.kind === 'discard') {
+      return this.patternSource(expr.value, state);
+    }
     const value = this.expr(expr.value, state, 'move');
     if (expr.kind === 'assign')
       return this.assign(
@@ -359,7 +387,6 @@ export class BorrowChecker {
     return fn && diverges(fn.ret) ? BOTTOM : current;
   }
 
-  /** `break` and `continue` go on at their loop with the state they leave; `return` leaves the function. */
   private jump(expr: Extract<Expr, { kind: 'break' | 'continue' | 'return' }>, state: State): void {
     if (expr.kind === 'continue') {
       this.findLoop(expr.label)?.continues.push(state);
@@ -463,15 +490,22 @@ export class BorrowChecker {
     const { selfMode } = method.fn;
     if (autoref === 'mut' || (selfMode === 'mutRef' && isMutReference(receiver.ty))) return 'mut';
     if (receiverReborrow(method, receiver.ty)) return 'mut';
-    const throughRef = derefs.some((step) => step === 'ref' || step === 'mutRef');
+    // A `Deref` impl lends its target, which a by-value `self` copies, so the receiver stays.
+    const throughRef = derefs.some((step) => step === 'ref' || step === 'mutRef' || step === 'user');
     const moves =
       autoref === 'none' && selfMode === 'value' && !throughRef && !this.isCopy(typeAfter(receiver.ty, derefs));
     return moves ? 'move' : 'read';
   }
 
-  private loop(label: string | undefined, state: State, body: (state: State) => State, exits: boolean): State {
+  private loop(
+    label: string | undefined,
+    state: State,
+    body: (state: State) => State,
+    exits: boolean,
+    isBlock = false
+  ): State {
     // The body runs again after itself: check it once from the entry, then from the join with its end.
-    this.loopStack.push({ label, breaks: [], continues: [] });
+    this.loopStack.push({ label, isBlock, breaks: [], continues: [] });
     let head = state;
     for (let pass = 0; pass < 2; pass++) {
       const frame = this.loopStack.at(-1)!;
@@ -502,7 +536,7 @@ export class BorrowChecker {
   private findLoop(label: string | undefined): { breaks: State[]; continues: State[] } | undefined {
     for (let index = this.loopStack.length - 1; index >= 0; index--) {
       const loop = this.loopStack[index];
-      if (label === undefined || loop.label === label) return loop;
+      if (label === undefined ? !loop.isBlock : loop.label === label) return loop;
     }
     return undefined;
   }
@@ -598,9 +632,6 @@ export class BorrowChecker {
     }
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Places
-
   private usePlace(expr: Extract<Expr, { kind: 'path' }>, state: State, mode: 'move' | 'read' | 'mut'): State {
     const place = this.placeOf(expr);
     if (!place) return state;
@@ -620,7 +651,6 @@ export class BorrowChecker {
     return this.markMoved(state, place, expr.span, false);
   }
 
-  /** Whether an expression is a capture, or a field of one, that the closure being checked owns. */
   private ownsCapture(expr: Expr): boolean {
     let current = expr;
     while (current.kind === 'field') current = current.operand;
@@ -638,7 +668,6 @@ export class BorrowChecker {
     return setVar(state, place.root, { ...varState, partial, movedAt: span });
   }
 
-  /** Requires a variable to hold a value where the program uses it. */
   // code-gauge-allow functionCognitiveComplexity -- Initialization, full moves and partial moves require distinct diagnostics.
   private checkUsable(
     local: LocalVar,
@@ -833,9 +862,6 @@ export class BorrowChecker {
     compileError(expr.span, `${kind}はムーブできません（.clone() で複製するか、& を付けて参照にしてください）。`);
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Helpers
-
   private bindingsOf(pattern: Pattern): LocalVar[] {
     return patternBindings(pattern, this.annotations);
   }
@@ -930,9 +956,19 @@ function isMutReference(type: Type | undefined): boolean {
   return t.kind === 'ref' && t.mutable;
 }
 
+/**
+ * Whether `*` of a value of the type reaches something the value does not own: through a reference, a raw pointer,
+ * or a `Deref` impl, as a `Box` alone owns what it derefs to.
+ */
 function isReference(type: Type | undefined): boolean {
   if (!type) return false;
-  return normalize(shallow(type)).kind === 'ref';
+  const t = normalize(shallow(type));
+  return t.kind === 'ref' || (t.kind === 'adt' && t.def.builtin !== 'Box');
+}
+
+function isStaticOpaque(ret: Type): boolean {
+  const t = shallow(ret);
+  return t.kind === 'opaque' && t.opaque.bounds.some(({ trait }) => trait.builtin === 'Static');
 }
 
 function diverges(ret: Type): boolean {

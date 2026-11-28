@@ -1,5 +1,5 @@
 import { normalize } from './infer';
-import { type AdtDef, childTypes, type ClosureType, shallow, type Type, type TypeParam } from './types';
+import { type AdtDef, childTypes, type ClosureType, type DerefKind, shallow, type Type, type TypeParam } from './types';
 
 /** A region: the points where the borrows of a reference (or of a lifetime parameter) must stay valid. */
 export type RVar = number;
@@ -14,7 +14,15 @@ export type Layout =
   | { kind: 'tuple'; elems: Layout[] }
   | { kind: 'seq'; elem: Layout }
   /** A closure, a trait object, or a type parameter: borrows whose structure the type does not show. */
-  | { kind: 'opaque'; region: RVar; closure?: ClosureType; object?: true; referenceObject?: boolean }
+  | {
+      kind: 'opaque';
+      region: RVar;
+      closure?: ClosureType;
+      object?: true;
+      referenceObject?: boolean;
+      /** A trait object whose lifetime is neither written nor a reference's (`Arc<dyn Job>` in a closure's type). */
+      unwrittenObject?: boolean;
+    }
   | { kind: 'none' };
 
 type AdtLayout = Extract<Layout, { kind: 'adt' }>;
@@ -54,14 +62,14 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
         region: t.objectLifetime === 'static' ? staticRegion() : fresh(),
         object: true,
         referenceObject: t.objectLifetime === 'reference',
+        unwrittenObject: t.objectLifetime === undefined && t.lifetime === undefined,
       };
     }
-    case 'param': {
-      const fixed = t.param.bounds.some(({ trait }) => trait.builtin === 'Static');
-      return { kind: 'opaque', region: fixed ? staticRegion() : fresh() };
-    }
+    case 'param':
     case 'opaque': {
-      return { kind: 'opaque', region: fresh() };
+      const bounds = t.kind === 'param' ? t.param.bounds : t.opaque.bounds;
+      const fixed = bounds.some(({ trait }) => trait.builtin === 'Static');
+      return { kind: 'opaque', region: fixed ? staticRegion() : fresh() };
     }
     default: {
       return NONE;
@@ -73,7 +81,7 @@ function referencedObject(type: Type, region: RVar): Layout | undefined {
   return isReferenceObject(type) ? { kind: 'opaque', region, object: true, referenceObject: true } : undefined;
 }
 
-/** Whether a reference's target is a trait object whose lifetime is the reference's (`&'a dyn T` is `&'a (dyn T + 'a)`). */
+/** Whether a reference's target is a trait object of the reference's lifetime (`&'a dyn T` is `&'a (dyn T + 'a)`). */
 export function isReferenceObject(type: Type): boolean {
   const target = shallow(type);
   return target.kind === 'dyn' && target.objectLifetime === 'reference';
@@ -88,8 +96,10 @@ function adtLayout(def: AdtDef, own: RVar[], args: Layout[]): Layout {
   return own.length === 0 && args.every(isNone) && !declared ? NONE : { kind: 'adt', def, own, args };
 }
 
+/** Whether a field's type holds what must live for `'static`: a `&'static` reference or a `dyn Trait + 'static`. */
 function staticObject(type: Type): boolean {
   const t = shallow(type);
+  if (t.kind === 'ref' && t.lifetime === "'static") return true;
   return (t.kind === 'dyn' && t.objectLifetime === 'static') || childTypes(t).some(staticObject);
 }
 
@@ -111,21 +121,30 @@ export function dropSlots(type: Type, proj: string[] = []): string[][] {
   return t.args.some((arg) => dropSlots(arg).length > 0) ? [proj] : [];
 }
 
-export function regionsOf(layout: Layout): RVar[] {
+/**
+ * The regions of a layout. `borrowed` leaves out a trait object's lifetime that is neither written nor a reference's
+ * (`Arc<dyn Job>` inside a closure's `&Arc<dyn Job>`), which may be `'static` itself, so a parameter does not borrow
+ * it; a written one (`dyn Fn() + 'a`) is borrowed. `structured` leaves out those of closures, type parameters and
+ * trait objects, each of which stands for every lifetime of what it captures or holds, so that it has no one lifetime
+ * to choose.
+ */
+export function regionsOf(layout: Layout, selection: 'all' | 'borrowed' | 'structured' = 'all'): RVar[] {
+  const inner = (part: Layout): RVar[] => regionsOf(part, selection);
   switch (layout.kind) {
     case 'ref': {
-      return [layout.region, ...regionsOf(layout.target)];
+      return [layout.region, ...inner(layout.target)];
     }
     case 'adt': {
-      return [...layout.own, ...layout.args.flatMap(regionsOf)];
+      return [...layout.own, ...layout.args.flatMap(inner)];
     }
     case 'tuple': {
-      return layout.elems.flatMap(regionsOf);
+      return layout.elems.flatMap(inner);
     }
     case 'seq': {
-      return regionsOf(layout.elem);
+      return inner(layout.elem);
     }
     case 'opaque': {
+      if (selection === 'structured' || (selection === 'borrowed' && layout.unwrittenObject)) return [];
       return [layout.region];
     }
     case 'none': {
@@ -200,13 +219,24 @@ function relateAdt(outlives: Outlives, sup: AdtLayout, sub: AdtLayout, invariant
   }
 }
 
-/** The lifetime and type parameters of a type, by index, that it is invariant in. */
 export interface InvariantParams {
   lifetimes: Set<number>;
   params: Set<number>;
 }
 
 const invariantParamsOf = new WeakMap<AdtDef, InvariantParams>();
+
+const INTERIOR_MUTABLE = new Set([
+  'Cell',
+  'RefCell',
+  'RefMut',
+  'Mutex',
+  'MutexGuard',
+  'RwLock',
+  'RwLockWriteGuard',
+  'Sender',
+  'Receiver',
+]);
 
 /**
  * The parameters a type is invariant in: those its fields name behind a `&mut`, or as an argument that another type
@@ -216,6 +246,13 @@ const invariantParamsOf = new WeakMap<AdtDef, InvariantParams>();
 export function invariantParams(def: AdtDef): InvariantParams {
   const known = invariantParamsOf.get(def);
   if (known) return known;
+  // std declares these without fields: what they hold can be written through a shared reference, a guard, or the
+  // other end of a channel.
+  if (INTERIOR_MUTABLE.has(def.builtin ?? '')) {
+    const result = { lifetimes: new Set<number>(), params: new Set([0]) };
+    invariantParamsOf.set(def, result);
+    return result;
+  }
   // Types that refer to each other are invariant in what any of them is, so they are settled together.
   const group: InvarianceGroup = new Map([[def, { lifetimes: new Set(), params: new Set() }]]);
   for (let before = -1, after = groupSize(group); before !== after; before = after, after = groupSize(group)) {
@@ -277,12 +314,63 @@ function markInvariant(
   }
 }
 
+/**
+ * Relates the regions of an item a `for` loop takes from an iterator of layout `iterator`. A part of the item shaped
+ * like an element of the iterator (the item itself, or what a reference in it points to) takes the regions of the
+ * elements of that shape position by position, as `&'a str` from `&[&'a str]` does; every other region of the item
+ * is outlived by all of the iterator's, as the reference `&'1` to an element of `&'1 [T]` is.
+ */
+export function relateLoopItem(outlives: Outlives, iterator: Layout, item: Layout): void {
+  if (regionsOf(item).length === 0) return;
+  const elements = sameShapeParts(iterator, item);
+  if (elements.length > 0) {
+    for (const element of elements) relate(outlives, element, item);
+  } else if (item.kind === 'ref') {
+    outlivesAll(outlives, iterator, item.region);
+    relateLoopItem(outlives, iterator, item.target);
+  } else if (item.kind === 'tuple') {
+    for (const elem of item.elems) relateLoopItem(outlives, iterator, elem);
+  } else {
+    for (const region of regionsOf(item)) outlivesAll(outlives, iterator, region);
+  }
+}
+
+function sameShapeParts(layout: Layout, shape: Layout): Layout[] {
+  const children =
+    layout.kind === 'ref'
+      ? [layout.target]
+      : layout.kind === 'adt'
+        ? layout.args
+        : layout.kind === 'tuple'
+          ? layout.elems
+          : layout.kind === 'seq'
+            ? [layout.elem]
+            : [];
+  return [...(sameShape(layout, shape) ? [layout] : []), ...children.flatMap((child) => sameShapeParts(child, shape))];
+}
+
+function sameShape(a: Layout, b: Layout): boolean {
+  if (a.kind === 'ref' && b.kind === 'ref') return a.mutable === b.mutable && sameShape(a.target, b.target);
+  if (a.kind === 'adt' && b.kind === 'adt') {
+    return (
+      a.def === b.def &&
+      a.own.length === b.own.length &&
+      a.args.length === b.args.length &&
+      a.args.every((arg, index) => sameShape(arg, b.args[index]))
+    );
+  }
+  if (a.kind === 'tuple' && b.kind === 'tuple') {
+    return a.elems.length === b.elems.length && a.elems.every((elem, index) => sameShape(elem, b.elems[index]));
+  }
+  if (a.kind === 'seq' && b.kind === 'seq') return sameShape(a.elem, b.elem);
+  return a.kind === b.kind;
+}
+
 /** Every region of a layout outlives `region`, as a reference to a value of the layout requires. */
 export function outlivesAll(outlives: Outlives, layout: Layout, region: RVar): void {
   for (const r of regionsOf(layout)) outlives(r, region);
 }
 
-/** What the lifetime and type parameters of a declared type stand for in a value's layout. */
 export interface Subst {
   lifetime(name: string | undefined): RVar;
   param(param: TypeParam): Layout | undefined;
@@ -305,6 +393,8 @@ export function instantiate(declared: Type, subst: Subst, fresh: () => RVar): La
       return subst.param(t.param) ?? NONE;
     }
     case 'adt': {
+      // An associated type is a type of its own, which borrows nothing from the value of the type it belongs to.
+      if (t.def.projection) return { kind: 'opaque', region: fresh() };
       const written = t.lifetimes ?? [];
       const own = Array.from({ length: lifetimeCount(t) }, (_, index) => subst.lifetime(written[index]));
       const args = t.args.map((arg) => instantiate(arg, subst, fresh));
@@ -325,7 +415,6 @@ export function instantiate(declared: Type, subst: Subst, fresh: () => RVar): La
   }
 }
 
-/** The layout of a field of a value of a struct or an enum variant. */
 export function fieldLayout(layout: Layout, variant: number, field: number, fresh: () => RVar): Layout {
   if (layout.kind === 'opaque') return layout;
   if (layout.kind !== 'adt') return NONE;
@@ -358,10 +447,19 @@ export function elementLayout(layout: Layout): Layout {
   return layout.args[0] ?? NONE;
 }
 
+/** What `*` reaches: a reference's target, or what a smart pointer or a guard points to (`*rc`, `*guard`). */
+export function derefLayout(layout: Layout): Layout {
+  if (layout.kind === 'ref') return layout.target;
+  if (layout.kind === 'opaque') return layout;
+  return layout.kind === 'adt' && POINTERS.has(layout.def.builtin ?? '') ? (layout.args[0] ?? NONE) : NONE;
+}
+
+const POINTERS = new Set(['Rc', 'Arc', 'Ref', 'RefMut', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard']);
+
 /** The layout after a deref that an owner does: a `Box`'s content, or a collection's slice. */
 export function ownedDerefLayout(layout: Layout): Layout {
   if (layout.kind !== 'adt') return layout;
-  if (layout.def.builtin === 'Box') return layout.args[0] ?? NONE;
+  if (layout.def.builtin === 'Box' || POINTERS.has(layout.def.builtin ?? '')) return layout.args[0] ?? NONE;
   if (layout.def.builtin === 'Vec' || layout.def.builtin === 'VecDeque') {
     const elem = layout.args[0] ?? NONE;
     return isNone(elem) ? NONE : { kind: 'seq', elem };
@@ -369,18 +467,21 @@ export function ownedDerefLayout(layout: Layout): Layout {
   return NONE;
 }
 
-/** The projections of derefs: `*` through a reference, `#` through an owner (a `Box`, a collection's slice). */
-export function derefSteps(derefs: readonly ('ref' | 'mutRef' | 'own')[] | undefined): string[] {
-  return (derefs ?? []).map((step) => (step === 'own' ? '#' : '*'));
+/**
+ * The projections of derefs: `*` through a reference, `#` through an owner (a `Box`, a collection's slice), and `&`
+ * through a `Deref` impl, which borrows the whole owner.
+ */
+export function derefSteps(derefs: readonly DerefKind[] | undefined): string[] {
+  return (derefs ?? []).map((step) => (step === 'ref' || step === 'mutRef' ? '*' : step === 'user' ? '&' : '#'));
 }
 
-/** The type of a receiver after the derefs of its method call's adjustment. */
-export function typeAfter(type: Type | undefined, derefs: readonly ('ref' | 'mutRef' | 'own')[]): Type | undefined {
+export function typeAfter(type: Type | undefined, derefs: readonly DerefKind[]): Type | undefined {
   let t = type && normalize(shallow(type));
   for (let index = 0; index < derefs.length && t; index++) {
     if (t.kind === 'ref') t = normalize(shallow(t.target));
-    else if (t.kind === 'adt' && t.def.builtin === 'Box') t = normalize(shallow(t.args[0]));
-    else if (t.kind === 'adt' && (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque')) {
+    else if (t.kind === 'adt' && (t.def.builtin === 'Box' || POINTERS.has(t.def.builtin ?? ''))) {
+      t = normalize(shallow(t.args[0]));
+    } else if (t.kind === 'adt' && (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque')) {
       t = { kind: 'slice', elem: t.args[0] };
     } else if (t.kind === 'adt' && t.def.builtin === 'String') t = { kind: 'str' };
     else if (t.kind === 'array') t = { kind: 'slice', elem: t.elem };

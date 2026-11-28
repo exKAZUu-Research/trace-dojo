@@ -1,3 +1,4 @@
+import type { FileHandle, TextReader } from '../interpreter/programIo';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CollectionEntries, type CollectionKey } from './collectionEntries';
 import type { DebugPart } from './debugText';
@@ -31,6 +32,17 @@ export type Value =
   | TurtleValue
   | FormatterValue
   | EntryValue
+  | SharedBox
+  | WeakRef
+  | CellBox
+  | BorrowGuard
+  | RawPtr
+  | IoStream
+  | BufferedWriter
+  | ChannelEnd
+  | ThreadHandle
+  | DurationValue
+  | FutureValue
   | undefined;
 
 export const UNIT_VALUE: Value[] = Object.freeze([]) as unknown as Value[];
@@ -71,7 +83,6 @@ export class EnumValue {
   ) {}
 }
 
-/** Where a mutable reference points: a variable, a field, an element, or a value a `Box` holds. */
 export interface Place {
   readonly isPlace: true;
   get(): Value;
@@ -122,7 +133,6 @@ export function isPlace(value: unknown): value is Place {
   return typeof value === 'object' && value !== null && (value as Place).isPlace === true;
 }
 
-/** A shared or mutable slice of an array or `Vec`: a window on its elements. */
 export class SliceView {
   constructor(
     readonly base: Value[],
@@ -161,13 +171,11 @@ export function swapOwnedElements(items: Value[], first: number, second: number)
   [items[first], items[second]] = [items[second], items[first]];
 }
 
-/** The array and offset a slice's elements live in, for places that refer to them. */
 export function sliceBase(value: Value): { base: Value[]; start: number } {
   if (value instanceof SliceView) return { base: value.base, start: value.start };
   return { base: value as Value[], start: 0 };
 }
 
-/** A function, closure, or constructor as a value. */
 export class FnValue {
   constructor(
     readonly call: (args: Value[], callRow: number | undefined) => Value,
@@ -181,17 +189,16 @@ export class FnValue {
    * concrete type), and what it captures by reference stays shared.
    */
   duplicate: ((copy: (value: Value, type: Type) => Value) => FnValue) | undefined;
+  dropCaptures: (() => void) | undefined;
 }
 
 export const DONE: unique symbol = Symbol('done');
 export type Next = Value | typeof DONE;
 
-/** An iterator: `next` yields elements until it returns `DONE`. */
 export class IterValue {
   constructor(
     public next: () => Next,
     public nextBack?: () => Next,
-    /** The number of elements left, for iterators that know it (ExactSizeIterator). */
     public remaining?: () => number | bigint,
     /** Owned values the iterator keeps alive across calls. */
     readonly roots: unknown[] = []
@@ -203,8 +210,16 @@ export class IterValue {
   trustedSizeHint?: boolean;
   stateRoots?: () => Iterable<unknown>;
 
-  /** Elements pushed back by `peekable`. */
   peeked: Next[] | undefined;
+
+  /** What goes when the iterator does: the captured values of the closures its adaptors took (`map(move |x| ..)`). */
+  releases: (() => void)[] | undefined;
+
+  release(): void {
+    const releases = this.releases;
+    this.releases = undefined;
+    for (const release of releases ?? []) release();
+  }
 
   /**
    * The next element when a consumer folds the iterator (`collect`, `sum`, `for_each`), where it differs from `next`:
@@ -225,11 +240,11 @@ export class IterValue {
 
   frontIndex?: () => number;
 
-  /**
-   * An independent copy of the iterator at its position, as `Clone` makes it.
-   */
   fork: (() => IterValue) | undefined;
   ownedItemType?: Type;
+  /** An adapter's source and own state, whose iterators (`chain`'s second, `zip`'s other) go when the adapter does. */
+  adapterSource?: IterValue;
+  adapterState?: object;
   peekedType?: Type;
 }
 
@@ -247,7 +262,6 @@ export class SetValue {
   }
 }
 
-/** A `Range` or `RangeInclusive`, which is its own iterator. */
 export class RangeValue {
   constructor(
     public start: Value,
@@ -271,7 +285,6 @@ export interface RangeEndpoint {
   included: boolean;
 }
 
-/** A trait object: a value with the type that decides which implementation its methods run. */
 export class DynValue {
   constructor(
     readonly type: Type,
@@ -283,7 +296,6 @@ export class TurtleValue {
   constructor(readonly state: TurtleState) {}
 }
 
-/** The `fmt::Formatter` that a `Display` or `Debug` implementation writes to. */
 export class FormatterValue {
   text = '';
   constructor(
@@ -305,11 +317,154 @@ export class FormatterValue {
   }
 }
 
-/** An entry of a map (`map.entry(key)`), which knows its key and whether the map has it. */
 export class EntryValue {
   constructor(
     readonly map: MapValue,
     readonly lookup: CollectionKey<[Value, Value]>,
     readonly key: Value
   ) {}
+}
+
+export class SharedBox {
+  strong = 1;
+  weak = 0;
+  constructor(public value: Value) {}
+}
+
+/** A `Weak` pointer, to an allocation that may have gone (or none, from `Weak::new`). */
+export class WeakRef {
+  constructor(readonly box: SharedBox | undefined) {}
+}
+
+/**
+ * A value with interior mutability (`Cell`, `RefCell`, and the locks of threads), which the program changes through
+ * shared references; `RefCell` counts its borrows to panic as std does on a conflicting one.
+ */
+export class CellBox {
+  /** The shared borrows in use, or -1 while a mutable one is. */
+  borrows = 0;
+  /** Whether a thread panicked while it held the lock for writing, as a `Mutex` or an `RwLock` records. */
+  poisoned = false;
+  /** For a lock, the threads holding it, one entry per guard. */
+  readonly holders: number[] = [];
+  constructor(public value: Value) {}
+}
+
+export class BorrowGuard {
+  released = false;
+  constructor(
+    readonly cell: CellBox,
+    readonly mutable: boolean,
+    /** For a lock's guard, whether a panic is unwinding the thread, which poisons a lock held for writing. */
+    readonly unwinding?: () => boolean,
+    readonly holder?: number
+  ) {}
+
+  release(): void {
+    if (this.released) return;
+    this.released = true;
+    if (this.holder !== undefined) this.cell.holders.splice(this.cell.holders.indexOf(this.holder), 1);
+    if (this.mutable && this.unwinding?.()) this.cell.poisoned = true;
+    if (this.mutable) this.cell.borrows = 0;
+    else this.cell.borrows--;
+  }
+
+  place(): Place {
+    const { cell } = this;
+    return new AccessorPlace(
+      () => cell.value,
+      (value) => {
+        cell.value = value;
+      }
+    );
+  }
+}
+
+let nextAddress = 0x7f_f7_b0_00_00_00;
+
+/** A raw pointer (`*const T`, `*mut T`): the place it points to, or none for a null pointer. */
+export class RawPtr {
+  /** The address `{:?}` shows, which only tells pointers apart, as real addresses differ between runs. */
+  readonly address: number;
+  constructor(readonly place: Place | undefined) {
+    this.address = place ? (nextAddress += 16) : 0;
+  }
+}
+
+export class IoStream {
+  constructor(
+    readonly reader: TextReader | undefined,
+    readonly writer: FileHandle | undefined,
+    /** For a `File`, what its `Debug` shows. */
+    readonly file?: { fd: number; path: string }
+  ) {}
+}
+
+/** std's default capacity of a `BufWriter`, in bytes. */
+const BUF_WRITER_CAPACITY = 8 * 1024;
+
+/**
+ * A `BufWriter`: the text written to it that it has not passed on yet to the writer it wraps, which a full buffer,
+ * `flush`, and its drop pass on, as std's buffers bytes up to its capacity. `writeInner` gives the `io::Error` of a
+ * failed write.
+ */
+export class BufferedWriter {
+  private pending = '';
+  private pendingBytes = 0;
+  constructor(private readonly writeInner: (text: string) => Value | undefined) {}
+
+  write(text: string): Value | undefined {
+    const bytes = new TextEncoder().encode(text).length;
+    if (this.pendingBytes + bytes > BUF_WRITER_CAPACITY) {
+      const error = this.flush();
+      if (error) return error;
+    }
+    if (bytes >= BUF_WRITER_CAPACITY) return this.writeInner(text);
+    this.pending += text;
+    this.pendingBytes += bytes;
+    return undefined;
+  }
+
+  flush(): Value | undefined {
+    const text = this.pending;
+    this.pending = '';
+    this.pendingBytes = 0;
+    return text ? this.writeInner(text) : undefined;
+  }
+}
+
+export class ChannelEnd {
+  /** Whether the `Receiver` has gone, after which a send gives back its message as an error. */
+  receiverDropped = false;
+  /** The `Sender`s that have not gone, while one of which a receive with nothing to receive waits. */
+  senders = 1;
+  constructor(readonly queue: Value[]) {}
+}
+
+export class ThreadHandle {
+  state: 'pending' | 'running' | 'done' | 'panicked' = 'pending';
+  result: Value;
+  /** Whether a thread joined it, which `thread::scope` leaves to report its panic. */
+  joined = false;
+  constructor(
+    readonly id: number,
+    readonly run: () => Value
+  ) {}
+}
+
+export const PENDING: unique symbol = Symbol('pending');
+
+export class FutureValue {
+  constructor(
+    readonly poll: (context: Value) => Value | typeof PENDING,
+    /** What the future keeps alive, such as its closure, for garbage collection. */
+    readonly roots: unknown[] = []
+  ) {}
+}
+
+/** The longest `Duration`, in nanoseconds: `u64::MAX` seconds and 999_999_999 nanoseconds. */
+export const MAX_DURATION = (2n ** 64n - 1n) * 1_000_000_000n + 999_999_999n;
+
+export class DurationValue {
+  constructor(readonly nanos: bigint) {}
 }

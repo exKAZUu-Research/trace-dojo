@@ -198,7 +198,6 @@ export function dequeDrain(items: Value[], start: number, end: number, capacity:
   });
 }
 
-/** `as_slices`: the elements from the head to the buffer's end, then those that wrap. */
 export function dequeSlices(items: Value[], capacity: number): [SliceView, SliceView] {
   const first = firstSliceLength(items, capacity);
   return [new SliceView(items, 0, first), new SliceView(items, first, items.length)];

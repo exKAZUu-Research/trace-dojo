@@ -1,10 +1,8 @@
 import type { Value } from '../../values';
 
-/**
- * What std's `core::slice::sort::shared` gives both sorts: the small sorts, the pivot choice, and the search for an
- * existing run, step by step, so that a comparison function sees the calls rustc's makes. Every type the interpreter
- * has is `Freeze`, which picks the small sorts std uses for such types.
- */
+// What std's `core::slice::sort::shared` gives both sorts: the small sorts, the pivot choice, and the search for an
+// existing run, step by step, so that a comparison function sees the calls rustc's makes. Every type the interpreter
+// has is `Freeze`, which picks the small sorts std uses for such types.
 
 export type IsLess = (a: Value, b: Value) => boolean;
 
@@ -14,7 +12,6 @@ export interface SortElement {
   isCopy: boolean;
 }
 
-/** A sort in progress: its comparison, its element, and the scratch the stable sort and the small sorts use. */
 export interface Sorter {
   isLess: IsLess;
   element: SortElement;

@@ -1,10 +1,9 @@
 // code-gauge-allow-file fileNcss -- One native per method of the standard library.
 import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, vecCapacity } from '../capacity';
 import type { DebugPart } from '../debugText';
-import { floatNumber } from '../floatBits';
 import { normalize } from '../infer';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
-import { intoIterItem, intoIterShape } from '../iterTypes';
+import { intoIterItem, intoIterShape, isUserIterator } from '../iterTypes';
 import {
   allocateCollectionSnapshot,
   castValue,
@@ -18,7 +17,6 @@ import {
   valuesEqual,
   valuesUnequal,
   withCloneResults,
-  wrap,
 } from '../ops';
 import { MOVED } from '../runtime';
 import { iteratorCapability } from '../traits';
@@ -30,6 +28,7 @@ import {
   DynValue,
   ElementPlace,
   EnumValue,
+  isPlace,
   IterValue,
   MapValue,
   type Next,
@@ -46,11 +45,14 @@ import {
 import { checkTableCapacity, checkVecCapacity } from './capacityNatives';
 import { defaultValue } from './core';
 import { dequeIterator } from './dequeHead';
+import { extreme, extremeByKey } from './extremes';
 import { layoutOf, sizeOf } from './layout';
 import { outcomeIter } from './options';
 import { rangeIterator } from './rangeIterator';
+import { countsWhatIsLeft, hidesCount, sizeHintShape, UNBOUNDED_SHAPES } from './sizeHint';
 import { lessByPartialOrd, sortSlice } from './sorting';
 import { collectString } from './stringBuilder';
+import { sumOrProduct } from './sums';
 import {
   call,
   define,
@@ -63,9 +65,9 @@ import {
   ordering,
   placeOf,
   some,
+  unsupportedAtRun,
 } from './support';
 
-/** An iterator over an array's elements from `start` to `end`, from both ends. */
 export function arrayIter(
   array: Value[],
   start = 0,
@@ -127,14 +129,12 @@ export function ownedIter(
   return iter;
 }
 
-/** An iterator of a slice's elements; `places` yields places for `iter_mut`. */
 export function sliceIter(slice: Value, places: boolean): IterValue {
   const { base, start } = sliceBase(slice);
   const length = sliceLength(slice);
   return arrayIter(base, start, start + length, places ? (i) => new ElementPlace(base, i) : (i) => base[i]);
 }
 
-/** The iterator `for` uses for a value of a type, as `IntoIterator` makes it. */
 // code-gauge-allow functionCognitiveComplexity -- One case per kind of iterable type.
 export function toIterator(value: Value, from: Type): Value {
   const t = normalize(shallow(from));
@@ -159,9 +159,13 @@ export function toIterator(value: Value, from: Type): Value {
   throw new Error(`Cannot iterate ${t.kind}`);
 }
 
-/** The iterator of a standard collection, of its elements (`value`) or of references to them (`ref`, `mut`). */
 function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value' | 'ref' | 'mut'): Value | undefined {
   switch (type.def.builtin) {
+    case 'Box': {
+      // A `Box` is its value: `Box<[T]>` iterates as an owned array does.
+      const content = normalize(shallow(type.args[0]));
+      return mode === 'value' && content.kind === 'slice' ? ownedIter(sliceItems(value), content.elem) : undefined;
+    }
     case 'Vec':
     case 'BinaryHeap': {
       return mode === 'value' ? ownedIter(value as Value[], type.args[0]) : sliceIter(value, mode === 'mut');
@@ -180,7 +184,8 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
     case 'Range':
     case 'RangeInclusive':
     case 'RangeFrom': {
-      return mode === 'value' ? rangeIterator(value as RangeValue, type.args[0]) : undefined;
+      // A range iterates by advancing itself, which a `&mut` of it does in place.
+      return mode === 'ref' ? undefined : rangeIterator(value as RangeValue, type.args[0]);
     }
     case 'Option':
     case 'Result': {
@@ -216,8 +221,13 @@ export function setIter(set: SetValue, item: Type, owned = false): IterValue {
   return owned ? ownedIter(values, item) : snapshotIter(values, item);
 }
 
+/**
+ * The iterator a method of std's iterators is called on: one a `&mut` reaches (`(&mut it).take(2)`, `it.next()`) is
+ * borrowed, so what the method leaves stays its owner's.
+ */
 function iterOf(value: Value): IterValue {
-  return deref(value) as IterValue;
+  const iter = deref(value) as IterValue;
+  return isPlace(value) ? borrowedView(iter) : iter;
 }
 
 /** Takes the next element, honoring elements that `peek` looked at. */
@@ -237,18 +247,21 @@ export function extendedValue(target: Type, item: Type): (value: Value) => Value
 }
 
 function nthBack(ctx: NativeContext, iter: IterValue, n: bigint): Next {
-  return iter.nthBack ? iter.nthBack(n) : nthItem(ctx, n, () => iter.nextBack!());
+  return iter.nthBack ? iter.nthBack(n) : nthItem(ctx, n, () => iter.nextBack!(), ctx.typeArgs[0]);
 }
 
+/** The `n`th element of an iterator, of the item type `ctx.typeArgs[0]`; those it passes go at once, as std's do. */
 function nth(ctx: NativeContext, iter: IterValue, n: bigint): Next {
   if (iter.nth && !iter.peeked?.length) return iter.nth(n);
-  return nthItem(ctx, n, () => nextOf(iter));
+  return nthItem(ctx, n, () => nextOf(iter), ctx.typeArgs[0]);
 }
 
-function nthItem(ctx: NativeContext, n: bigint, next: () => Next): Next {
+function nthItem(ctx: NativeContext, n: bigint, next: () => Next, itemType?: Type): Next {
   for (let index = 0n; index < n; index++) {
     ctx.runtime.spend();
-    if (next() === DONE) return DONE;
+    const item = next();
+    if (item === DONE) return DONE;
+    if (itemType) ctx.interp.dropper.drop(item, itemType);
   }
   return next();
 }
@@ -269,7 +282,7 @@ export function iteratorLowerBound(iter: IterValue, shape?: Type): bigint {
 function lowerBoundOfShape(iter: IterValue, shape: Extract<Type, { kind: 'adt' }>): bigint {
   const { name } = shape.def;
   if (name === 'RangeShape' || name === 'RangeInclusiveShape') return lengthOf(iter);
-  if (name === 'RangeFromShape' || name === 'RepeatShape' || name === 'RepeatWithShape') return intMax('usize');
+  if (UNBOUNDED_SHAPES.has(name)) return intMax('usize');
   if (name === 'CharsShape' || name === 'CharIndicesShape') {
     const bytes = iter.remainingTextBytes?.() ?? 0;
     return BigInt(Math.ceil(bytes / 4)) + BigInt(iter.peeked?.filter((item) => item !== DONE).length ?? 0);
@@ -382,6 +395,9 @@ function adapter<S extends object>(
   // An adapter whose `fold` folds its source (`Map`, `Filter`, ...) takes its source's elements as it folds.
   if (folds && source.foldNext) iter.foldNext = parts(foldingView(source), state).next;
   iter.fork = () => adapter(cloneIterator(source), forkState(state), parts, forkState, folds);
+  // Its source and the iterators its state holds go with the adapter (`into_iter().map(..)` dropped early).
+  iter.adapterSource = source;
+  iter.adapterState = state;
   return iter;
 }
 
@@ -393,7 +409,7 @@ function forkAdapterState<S extends object>(state: S): S {
 }
 
 /** The iterator as a fold takes it: its pushed-back elements, then its `foldNext`. */
-function foldingView(iter: IterValue): IterValue {
+export function foldingView(iter: IterValue): IterValue {
   return new IterValue(
     () => nextForFold(iter),
     iter.nextBack,
@@ -401,7 +417,6 @@ function foldingView(iter: IterValue): IterValue {
   );
 }
 
-/** An adapter that maps each element, from either end. */
 function mapped(
   source: IterValue,
   map: (item: Value, callback: Value) => Next,
@@ -423,7 +438,6 @@ function mapped(
   );
 }
 
-/** An adapter that finds the next element `pick` keeps (mapped), from either end. */
 function picked(
   ctx: NativeContext,
   source: IterValue,
@@ -459,9 +473,15 @@ function takeWhile(ctx: NativeContext, source: IterValue, callback: IteratorCall
       if (item === DONE) return DONE;
       if (truthy(call(ctx, state.callback.value, [item]))) return item;
       state.done = true;
+      dropItem(ctx, item);
       return DONE;
     },
   }));
+}
+
+/** Drops an element an iterator method takes and throws away, of the item type `ctx.typeArgs[0]`, as std's do. */
+export function dropItem(ctx: NativeContext, item: Value): void {
+  ctx.interp.dropper.drop(item, ctx.typeArgs[0]);
 }
 
 function truthy(value: Value): boolean {
@@ -513,7 +533,6 @@ function flattened(
 
 type End = 'front' | 'back';
 
-/** The inner iterators of a flattening adapter, at its front and its back. */
 interface FlattenState {
   front: IterValue | undefined;
   back: IterValue | undefined;
@@ -554,12 +573,29 @@ function takeInner(state: FlattenState, end: End): Next {
   return item;
 }
 
-/** The iterator an element of `flatten` (or a result of `flat_map`'s function) makes, as `IntoIterator` does. */
 function innerIter(ctx: NativeContext, value: Value, type: Type): IterValue {
   return ctx.interp.toIter(value, type) as IterValue;
 }
 
 define({
+  // The provided `size_hint`: std's `(0, None)` for the program's iterator that does not override it, the exact count
+  // of a std iterator (a range included) that knows how many it has left; other std iterators' bounds are not
+  // reproduced.
+  'Iterator::size_hint': ([self], ctx) => {
+    if (isUserIterator(ctx.typeArgs[0])) return [0n, none(ctx)];
+    const shape = sizeHintShape(ctx, deref(self), ctx.typeArgs[0]);
+    if (UNBOUNDED_SHAPES.has(shape?.def.name ?? '')) return [intMax('usize'), none(ctx)];
+    if (!shape || hidesCount(shape)) unsupportedAtRun(ctx, '残りの個数が決まらない反復子を元にした反復子の size_hint');
+    const iter = iterOf(ctx.interp.toIter(deref(self), ctx.typeArgs[0]));
+    if (!countsWhatIsLeft(iter)) unsupportedAtRun(ctx, 'この反復子の size_hint');
+    const left = lengthOf(iter);
+    return [left, some(ctx, left)];
+  },
+  // `Iterator::next` of an iterator of std, which a type parameter or an opaque type bounded by `Iterator` reaches.
+  'Iterator::next': ([self], ctx) => {
+    const item = nextOf(iterOf(ctx.interp.toIter(deref(self), ctx.typeArgs[0])));
+    return option(ctx, item === DONE ? undefined : item, item !== DONE);
+  },
   'IterImpl<_, _>::next': ([self], ctx) => {
     const item = nextOf(iterOf(self));
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
@@ -571,9 +607,12 @@ define({
   'IterImpl<_, _>::map': ([self, f], ctx) =>
     mapped(iterOf(self), (item, callback) => call(ctx, callback, [item]), new IteratorCallback(f, ctx.typeArgs[3])),
   'IterImpl<_, _>::filter': ([self, f], ctx) =>
-    picked(ctx, iterOf(self), new IteratorCallback(f, ctx.typeArgs[2]), (item, callback) =>
-      truthy(call(ctx, callback, [item])) ? item : DONE
-    ),
+    picked(ctx, iterOf(self), new IteratorCallback(f, ctx.typeArgs[2]), (item, callback) => {
+      if (truthy(call(ctx, callback, [item]))) return item;
+      // The element `filter` rejects goes at once.
+      ctx.interp.dropper.drop(item, ctx.typeArgs[0]);
+      return DONE;
+    }),
   'IterImpl<_, _>::filter_map': ([self, f], ctx) =>
     adapterDebug(
       ctx,
@@ -697,7 +736,10 @@ define({
           ctx.runtime.spend();
           const item = nextOf(src);
           if (item === DONE) return DONE;
-          if (st.skipping && truthy(call(ctx, st.callback.value, [item]))) continue;
+          if (st.skipping && truthy(call(ctx, st.callback.value, [item]))) {
+            dropItem(ctx, item);
+            continue;
+          }
           st.skipping = false;
           return item;
         }
@@ -757,8 +799,9 @@ define({
       },
       remaining: () => (state.done ? 0 : lengthOf(src)),
     })),
-  // `&mut I` iterates as `I` does, so the adapters after `by_ref` advance the same iterator.
-  'IterImpl<_, _>::by_ref': ([self]) => deref(self),
+  // `&mut I` iterates as `I` does, so the adapters after `by_ref` advance the same iterator; they only borrow it, so
+  // dropping them leaves what it has left to its owner.
+  'IterImpl<_, _>::by_ref': ([self]) => borrowedView(deref(self) as IterValue),
   'IterImpl<_, _>::into_iter': ([self]) => iterOf(self),
   'IterImpl<_, PeekableShape<_, _>>::peek': ([self], ctx) => {
     const iter = peekSource(self);
@@ -893,7 +936,7 @@ function flattenDebug(ctx: NativeContext, name: string, iter: IterValue, inner: 
 
 /** The iterator a `Peekable` wraps, which keeps the elements `peek` looked at. */
 function peekSource(self: Value): IterValue {
-  return iterOf(self).roots[0] as IterValue;
+  return (deref(self) as IterValue).roots[0] as IterValue;
 }
 
 /**
@@ -969,7 +1012,6 @@ function secondOfPair(ctx: NativeContext, first: Next, pull: () => Next): Next {
   return first === DONE ? pull() : ctx.runtime.withRoots([first], pull);
 }
 
-/** The shapes of the iterators that are `TrustedRandomAccess` themselves. */
 const RANDOM_ACCESS_SHAPES = new Set([
   'SliceIterShape',
   'SliceIterMutShape',
@@ -994,7 +1036,6 @@ const RANDOM_ACCESS_ADAPTERS = new Set([
   'ZipShape',
 ]);
 
-/** The shapes of the iterators that are `TrustedLen` themselves, whose size hint is exact. */
 const TRUSTED_LEN_SHAPES = new Set([
   ...RANDOM_ACCESS_SHAPES,
   'RangeInclusiveShape',
@@ -1051,7 +1092,6 @@ export function isTrustedLen(...shapes: Type[]): boolean {
   });
 }
 
-/** Whether iterators of these shapes are all `TrustedRandomAccess`, as std implements it. */
 function isTrustedRandomAccess(...shapes: Type[]): boolean {
   return shapes.every((shape) => trustedRandomAccess(shape));
 }
@@ -1130,7 +1170,7 @@ function tryFoldItems(ctx: NativeContext, iter: IterValue, accumulator: Value, c
 function iteratorsEqual(ctx: NativeContext, self: Value, other: Value): boolean {
   const a = iterOf(self);
   const otherType = ctx.typeArgs[2];
-  const b = iterOf(toIterator(other, otherType));
+  const b = iterOf(ctx.interp.toIter(other, otherType));
   const item = intoIterItem(otherType)!;
   for (;;) {
     ctx.runtime.spend();
@@ -1166,39 +1206,51 @@ function iteratorOrder(ctx: NativeContext, first: IterValue, second: IterValue, 
 define({
   'FromIterator::from_iter': ([source], ctx) => {
     const [target, item, from] = ctx.typeArgs;
-    const iter = toIterator(source, from) as IterValue;
+    const iter = ctx.interp.toIter(source, from) as IterValue;
     return ctx.runtime.withRoots([iter], () =>
       collectIterator(ctx, iter, target, item, intoIterShape(ctx.interp.program, from))
     );
   },
-  'IterImpl<_, _>::collect': ([self], ctx) =>
-    collectIterator(ctx, iterOf(self), ctx.typeArgs[2], ctx.typeArgs[0], ctx.typeArgs[1]),
+  'IterImpl<_, _>::collect': ([self], ctx) => {
+    const iter = iterOf(self);
+    const collected = collectIterator(ctx, iter, ctx.typeArgs[2], ctx.typeArgs[0], ctx.typeArgs[1]);
+    // `collect` takes the iterator, so what it has left (`take(1)`) goes when it returns.
+    ctx.interp.dropper.dropRest(iter);
+    return collected;
+  },
   'IterImpl<_, _>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '+'),
   'IterImpl<_, _>::product': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '*'),
   'IterImpl<_, _>::count': ([self], ctx) => {
     let count = 0n;
+    const iter = iterOf(self);
     each(
       ctx,
-      iterOf(self),
-      () => {
+      iter,
+      (item) => {
         count++;
+        dropItem(ctx, item);
       },
       'fold'
     );
+    ctx.interp.dropper.dropRest(iter);
     return count;
   },
   'IterImpl<_, _>::len': ([self]) => lengthOf(iterOf(self)),
   'IterImpl<_, _>::last': ([self], ctx) => {
     const last = new CellPlace(none(ctx));
+    const iter = iterOf(self);
     return ctx.runtime.withRoots([last], () => {
       each(
         ctx,
-        iterOf(self),
+        iter,
         (item) => {
+          const previous = last.value as EnumValue;
+          if (previous.variant === 1) dropItem(ctx, previous.fields[0]);
           last.value = some(ctx, item);
         },
         'fold'
       );
+      ctx.interp.dropper.dropRest(iter);
       return last.value;
     });
   },
@@ -1227,11 +1279,9 @@ define({
     each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? true : undefined)) ?? false,
   'IterImpl<_, _>::all': ([self, f], ctx) =>
     each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? undefined : false)) ?? true,
-  'IterImpl<_, _>::find': ([self, f], ctx) =>
-    each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? some(ctx, item) : undefined)) ?? none(ctx),
+  'IterImpl<_, _>::find': ([self, f], ctx) => each(ctx, iterOf(self), (item) => found(ctx, f, item)) ?? none(ctx),
   'IterImpl<_, _>::rfind': ([self, f], ctx) =>
-    each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? some(ctx, item) : undefined), 'back') ??
-    none(ctx),
+    each(ctx, iterOf(self), (item) => found(ctx, f, item), 'back') ?? none(ctx),
   'IterImpl<_, _>::find_map': ([self, f], ctx) =>
     each(ctx, iterOf(self), (item) => {
       const result = deref(call(ctx, f, [item])) as EnumValue;
@@ -1253,15 +1303,21 @@ define({
     }
   },
   'IterImpl<_, _>::max': ([self], ctx) =>
-    extreme(ctx, iterOf(self), (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, 1),
+    consuming(ctx, iterOf(self), (iter) => extreme(ctx, iter, (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, 1)),
   'IterImpl<_, _>::min': ([self], ctx) =>
-    extreme(ctx, iterOf(self), (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, -1),
-  'IterImpl<_, _>::max_by_key': ([self, f], ctx) => extremeByKey(ctx, iterOf(self), f, ctx.typeArgs[2], 1),
-  'IterImpl<_, _>::min_by_key': ([self, f], ctx) => extremeByKey(ctx, iterOf(self), f, ctx.typeArgs[2], -1),
+    consuming(ctx, iterOf(self), (iter) => extreme(ctx, iter, (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, -1)),
+  'IterImpl<_, _>::max_by_key': ([self, f], ctx) =>
+    consuming(ctx, iterOf(self), (iter) => extremeByKey(ctx, iter, f, ctx.typeArgs[2], 1)),
+  'IterImpl<_, _>::min_by_key': ([self, f], ctx) =>
+    consuming(ctx, iterOf(self), (iter) => extremeByKey(ctx, iter, f, ctx.typeArgs[2], -1)),
   'IterImpl<_, _>::max_by': ([self, f], ctx) =>
-    extreme(ctx, iterOf(self), (a, b) => (deref(call(ctx, f, [a, b])) as EnumValue).variant - 1, 1),
+    consuming(ctx, iterOf(self), (iter) =>
+      extreme(ctx, iter, (a, b) => (deref(call(ctx, f, [a, b])) as EnumValue).variant - 1, 1)
+    ),
   'IterImpl<_, _>::min_by': ([self, f], ctx) =>
-    extreme(ctx, iterOf(self), (a, b) => (deref(call(ctx, f, [a, b])) as EnumValue).variant - 1, -1),
+    consuming(ctx, iterOf(self), (iter) =>
+      extreme(ctx, iter, (a, b) => (deref(call(ctx, f, [a, b])) as EnumValue).variant - 1, -1)
+    ),
   'IterImpl<_, _>::partition': ([self, f], ctx) => {
     const yes: Value[] = [];
     const no: Value[] = [];
@@ -1408,65 +1464,39 @@ function successors(ctx: NativeContext, start: EnumValue, callback: IteratorCall
   });
 }
 
-/**
- * `max_by` and `min_by`: `compare(the best so far, the next)` for each next element, as `cmp::max_by` and
- * `cmp::min_by` call it; `max` keeps the next on `Equal` and `min` keeps the best so far.
- */
-function extreme(ctx: NativeContext, iter: IterValue, compare: (a: Value, b: Value) => number, sign: 1 | -1): Value {
-  const first = nextOf(iter);
-  if (first === DONE) return none(ctx);
-  const best = new CellPlace(first);
-  const rest = foldingView(iter);
-  return ctx.runtime.withRoots([best], () => {
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(rest);
-      if (item === DONE) return some(ctx, best.value);
-      const keep = ctx.runtime.withRoots([item], () => keepsBest(compare(best.value, item), sign));
-      if (!keep) best.value = item;
-    }
-  });
+/** An iterator reached through `&mut` (`by_ref`): it advances the iterator, which its owner drops. */
+export function borrowedView(iter: IterValue): IterValue {
+  const view = new IterValue(
+    () => nextOf(iter),
+    iter.nextBack && (() => iter.nextBack!()),
+    iter.remaining && (() => Number(lengthOf(iter))),
+    [iter]
+  );
+  view.sizeHintLower = iter.sizeHintLower && (() => iter.sizeHintLower!());
+  view.nth = iter.nth && ((n) => iter.nth!(n));
+  view.nthBack = iter.nthBack && ((n) => iter.nthBack!(n));
+  return view;
 }
 
-/** `max_by_key` and `min_by_key`: each key once, in order, compared as `extreme` compares the elements. */
-function extremeByKey(ctx: NativeContext, iter: IterValue, f: Value, keyType: Type, sign: 1 | -1): Value {
-  const first = nextOf(iter);
-  if (first === DONE) return none(ctx);
-  let best = first;
-  let bestKey = ctx.runtime.withRoots([first], () => call(ctx, f, [first]));
-  const rest = foldingView(iter);
-  const retained = [best, bestKey];
-  return ctx.runtime.withRoots(retained, () => {
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(rest);
-      if (item === DONE) return some(ctx, best);
-      const keep = ctx.runtime.withRoots([item], () => {
-        const key = call(ctx, f, [item]);
-        return ctx.runtime.withRoots([key], () => {
-          if (keepsBest(compareValues(keyType, bestKey, key) ?? 0, sign)) return true;
-          bestKey = key;
-          return false;
-        });
-      });
-      if (!keep) {
-        best = item;
-        retained[0] = best;
-        retained[1] = bestKey;
-      }
-    }
-  });
+/** A method that takes the iterator by value, which drops what the iterator has left once it returns. */
+function consuming(ctx: NativeContext, iter: IterValue, use: (iter: IterValue) => Value): Value {
+  const result = use(iter);
+  ctx.interp.dropper.dropRest(iter);
+  return result;
 }
 
-function keepsBest(order: number, sign: 1 | -1): boolean {
-  return sign === 1 ? order > 0 : order <= 0;
+/** `find`'s step: `Some` of an element the predicate takes, or the element dropped. */
+function found(ctx: NativeContext, f: Value, item: Value): Value | undefined {
+  if (truthy(call(ctx, f, [item]))) return some(ctx, item);
+  dropItem(ctx, item);
+  return undefined;
 }
 
 /**
  * The sum or product of `Result`s or `Option`s: of the values in `Ok` or `Some`, or the first `Err` or `None`, after
  * which it takes no more elements.
  */
-function sumOfOutcomes(ctx: NativeContext, iter: IterValue, t: Type & { kind: 'adt' }, op: '+' | '*'): Value {
+export function sumOfOutcomes(ctx: NativeContext, iter: IterValue, t: Type & { kind: 'adt' }, op: '+' | '*'): Value {
   return consumeOutcomes(ctx, iter, t, (values) => sumOrProduct(ctx, values, t.args[0], op));
 }
 
@@ -1490,43 +1520,11 @@ function consumeOutcomes(
   const values = new IterValue(next, undefined, undefined, [iter]);
   values.stateRoots = () => [failure];
   const value = ctx.runtime.withRoots([values], () => consume(values));
-  return failure ?? new EnumValue(target.def, success, [value]);
-}
-
-function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' | '*'): Value {
-  const t = normalize(shallow(type));
-  if (t.kind === 'adt' && (t.def.builtin === 'Result' || t.def.builtin === 'Option')) {
-    return sumOfOutcomes(ctx, iter, t, op);
-  }
-  let total: Value = op === '+' ? (t.kind === 'float' ? -0 : 0n) : t.kind === 'float' ? 1 : 1n;
-  const source = foldingView(iter);
-  for (;;) {
-    ctx.runtime.spend();
-    const item = nextOf(source);
-    if (item === DONE) return total;
-    total =
-      t.kind === 'float'
-        ? floatStep(t.name, op, floatNumber(total), floatNumber(item))
-        : intStep(ctx, t, op, total as bigint, deref(item) as bigint);
-  }
-}
-
-function floatStep(name: 'f32' | 'f64', op: '+' | '*', total: number, value: number): number {
-  const result = op === '+' ? total + value : total * value;
-  return name === 'f32' ? Math.fround(result) : result;
-}
-
-/** One step of an integer sum or product, which panics inside the library's `Sum` and `Product` impls on overflow. */
-function intStep(ctx: NativeContext, type: Type, op: '+' | '*', total: bigint, value: bigint): bigint {
-  const result = op === '+' ? total + value : total * value;
-  if (result !== wrap((type as { name: 'i32' }).name, result)) {
-    libraryPanic(
-      ctx,
-      `attempt to ${op === '+' ? 'add' : 'multiply'} with overflow`,
-      'core/src/iter/traits/accum.rs:206:1'
-    );
-  }
-  return result;
+  if (!failure) return new EnumValue(target.def, success, [value]);
+  // What it gathered before the `None` or `Err` goes after the iterator it stopped in, as std drops them.
+  ctx.interp.dropper.dropRest(iter);
+  ctx.interp.dropper.drop(value, target.args[0]);
+  return failure;
 }
 
 /**
@@ -1580,7 +1578,6 @@ const IN_PLACE_ADAPTERS = new Set([
   'ZipShape',
 ]);
 
-/** The `into_iter` of a `Vec` under adapters that let `collect` reuse its buffer, if the iterator is one. */
 function inPlaceSource(iter: IterValue, shape: Type): IterValue | undefined {
   let t = normalize(shallow(shape));
   let source: IterValue | undefined = iter;
@@ -1708,8 +1705,12 @@ function collectHashMap(ctx: NativeContext, iter: IterValue, types: Type[], shap
     const [key, value] = item as Value[];
     const lookup = map.entries.key(types[0], key);
     const existing = map.entries.get(lookup);
-    if (existing) existing[1] = value;
-    else {
+    if (existing) {
+      // As `insert` does, the map keeps its key and drops the key it is given and the value it replaces.
+      ctx.interp.dropper.drop(key, types[0]);
+      ctx.interp.dropper.drop(existing[1], types[1]);
+      existing[1] = value;
+    } else {
       ctx.runtime.allocate(1);
       map.entries.set(lookup, [key, value]);
     }
@@ -1722,7 +1723,7 @@ function collectHashSet(ctx: NativeContext, iter: IterValue, itemType: Type, sha
   reserveHashInput(ctx, set.entries.table!, iter, shape);
   return collectHash(ctx, iter, set, (item) => {
     const lookup = set.entries.key(itemType, item);
-    if (set.entries.has(lookup)) return;
+    if (set.entries.has(lookup)) return ctx.interp.dropper.drop(item, itemType);
     ctx.runtime.allocate(1);
     set.entries.set(lookup, item);
   });
@@ -1785,7 +1786,8 @@ function collectBTreeMap(ctx: NativeContext, pairs: [Value, Value][], key: Type,
     pairs,
     (entry) => entry[0],
     key,
-    (entry) => map.entries.appendOrdered(entry)
+    (entry) => map.entries.appendOrdered(entry),
+    (entry) => ctx.interp.dropper.drop(entry, item)
   );
   return map;
 }
@@ -1798,7 +1800,8 @@ function collectBTreeSet(ctx: NativeContext, items: Value[], elem: Type): SetVal
     items,
     (value) => value,
     elem,
-    (value) => set.entries.appendOrdered(value)
+    (value) => set.entries.appendOrdered(value),
+    (value) => ctx.interp.dropper.drop(value, elem)
   );
   return set;
 }
@@ -1808,13 +1811,15 @@ function addLastOfEqualKeys<T extends Value>(
   items: T[],
   keyOf: (item: T) => Value,
   keyType: Type,
-  add: (item: T) => void
+  add: (item: T) => void,
+  drop: (item: T) => void
 ): void {
   ctx.runtime.withRoots(items, () => {
     for (let index = 0; index < items.length; index++) {
       const item = items[index];
-      // std's dedup of sorted keys asks whether they differ, which may run a user `ne`.
+      // std's dedup of sorted keys asks whether they differ, which may run a user `ne`; it drops the earlier of equal ones.
       if (index + 1 === items.length || valuesUnequal(keyType, keyOf(item), keyOf(items[index + 1]))) add(item);
+      else drop(item);
     }
   });
 }

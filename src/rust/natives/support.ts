@@ -1,6 +1,6 @@
 import type { Span } from '../ast';
 import type { Interpreter } from '../interpreter';
-import { type Frame, type Runtime, RustPanic } from '../runtime';
+import { type Frame, type Runtime, RustPanic, UnsupportedAtRun } from '../runtime';
 import type { IntName, Type } from '../types';
 import { EnumValue, isPlace, type Place, type Value } from '../values';
 
@@ -109,4 +109,8 @@ export function isSome(value: Value): boolean {
 
 export function int(value: Value): number {
   return Number(deref(value) as bigint);
+}
+
+export function unsupportedAtRun(ctx: NativeContext, what: string): never {
+  throw new UnsupportedAtRun(`${what}は、この採点環境では使えません。`, ctx.span);
 }

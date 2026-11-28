@@ -1,4 +1,4 @@
-import type { Type } from './types';
+import type { IntName, SelfWrapper, Type } from './types';
 
 /** A 0-based source row and the 1-based scalar column used by `dbg!`. Panic locations use the display column. */
 export interface Span {
@@ -11,7 +11,8 @@ export interface Crate {
   items: Item[];
 }
 
-export type Visibility = 'private' | 'pub' | 'super';
+/** Where an item is visible; `in` lists the path of `pub(in path)`, a module around the item. */
+export type Visibility = 'private' | 'pub' | 'super' | { in: string[] };
 
 export type Item =
   | FnItem
@@ -36,12 +37,16 @@ export interface TypeAliasItem {
 
 export interface Attributes {
   derives: { name: string; span: Span }[];
+  isDefault?: boolean;
+  repr?: IntName;
+  /** Whether a `#[repr(..)]` is written, of any kind (`C`, `transparent`, an integer). */
+  hasRepr?: boolean;
 }
 
 export interface Generics {
   params: GenericParamAst[];
-  /** The lifetime parameters' names (`'a`). */
   lifetimes: string[];
+  lifetimeBounds?: { name: string; outlives: string[] }[];
   where: WherePredicate[];
 }
 
@@ -50,6 +55,7 @@ export interface GenericParamAst {
   span: Span;
   bounds: BoundAst[];
   defaultType?: TypeAst;
+  constType?: TypeAst;
 }
 
 export interface WherePredicate {
@@ -58,15 +64,17 @@ export interface WherePredicate {
   span: Span;
 }
 
-/** A bound on a type parameter, an opaque result or a trait. */
 export type BoundAst =
   | { kind: 'trait'; path: PathAst; span: Span }
   | { kind: 'static'; span: Span }
+  | { kind: 'maybeSized'; span: Span }
+  | { kind: 'lifetime'; name: string; span: Span }
   | { kind: 'fn'; trait: 'Fn' | 'FnMut' | 'FnOnce'; params: TypeAst[]; ret: TypeAst | undefined; span: Span };
 
 export interface FnItem {
   kind: 'fn';
   isConst?: boolean;
+  isUnsafe?: boolean;
   name: string;
   span: Span;
   vis: Visibility;
@@ -80,12 +88,15 @@ export interface FnItem {
   endRow: number;
   /** The row of the opening brace, through which a `// atomic` annotation marks the function. */
   headerEndRow: number;
+  /** An `async fn`, whose `ret` and `body` are already those of the function returning the future. */
+  isAsync?: boolean;
 }
 
 export interface SelfParam {
   mode: 'value' | 'ref' | 'mutRef';
+  /** `self: Box<Self>` and the like, which take the receiver's pointer, and which a `Box<dyn Trait>` can call. */
+  wrapper?: SelfWrapper;
   mutable: boolean;
-  /** The lifetime that `&'a self` names. */
   lifetime?: string;
   span: Span;
 }
@@ -105,6 +116,7 @@ export interface StructItem {
   shape: 'named' | 'tuple' | 'unit';
   fields: FieldAst[];
   attrs: Attributes;
+  isUnion?: boolean;
 }
 
 export interface FieldAst {
@@ -130,26 +142,32 @@ export interface VariantAst {
   shape: 'named' | 'tuple' | 'unit';
   fields: FieldAst[];
   discriminant: Expr | undefined;
+  isDefault?: boolean;
 }
 
 export interface TraitItem {
   kind: 'trait';
+  isUnsafe?: boolean;
   name: string;
   span: Span;
   vis: Visibility;
   generics: Generics;
   supertraits: BoundAst[];
   methods: FnItem[];
+  assocTypes: { name: string; bounds: BoundAst[]; generics: Generics; span: Span }[];
+  consts: ConstItem[];
 }
 
 export interface ImplItem {
   kind: 'impl';
+  isUnsafe?: boolean;
   span: Span;
   generics: Generics;
   trait: PathAst | undefined;
   selfType: TypeAst;
   methods: FnItem[];
   consts: ConstItem[];
+  assocTypes: { name: string; type: TypeAst; generics: Generics; span: Span }[];
 }
 
 export interface ConstItem {
@@ -160,6 +178,8 @@ export interface ConstItem {
   type: TypeAst;
   /** Undefined for a constant of the standard library whose value is native. */
   value: Expr | undefined;
+  isStatic?: boolean;
+  isMutable?: boolean;
 }
 
 export interface ModItem {
@@ -174,12 +194,8 @@ export interface UseItem {
   kind: 'use';
   span: Span;
   vis: Visibility;
-  /** Each imported path with the name it binds; `*` imports every public name. */
   entries: { path: string[]; alias: string | undefined; glob: boolean; span: Span }[];
 }
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Types
 
 export type TypeAst =
   | { kind: 'path'; path: PathAst; span: Span }
@@ -191,7 +207,18 @@ export type TypeAst =
   | { kind: 'never'; span: Span }
   | { kind: 'dyn'; bounds: BoundAst[]; lifetime?: string; span: Span }
   | { kind: 'impl'; bounds: BoundAst[]; span: Span }
-  | { kind: 'fnBound'; bound: BoundAst & { kind: 'fn' }; span: Span };
+  | { kind: 'fnBound'; bound: BoundAst & { kind: 'fn' }; span: Span }
+  /** `type`: the type of the const parameter the value is given to, set once that parameter is known. */
+  | { kind: 'constArg'; value: Expr; span: Span; type?: TypeAst }
+  | { kind: 'pointer'; mutable: boolean; target: TypeAst; span: Span }
+  | {
+      kind: 'fnPointer';
+      params: TypeAst[];
+      ret: TypeAst | undefined;
+      isUnsafe?: boolean;
+      bound?: string[];
+      span: Span;
+    };
 
 export interface PathAst {
   segments: PathSegment[];
@@ -200,27 +227,26 @@ export interface PathAst {
 
 export interface PathSegment {
   name: string;
+  /** Set on a path a macro's expansion makes to a helper of the standard library that programs cannot name. */
+  internal?: true;
+  /** For the first segment of `<T as Trait>::name` or `<T>::name`: the type and the trait it is qualified by. */
+  qualified?: { self: TypeAst; trait: PathAst | undefined };
   args: TypeAst[] | undefined;
-  /** The lifetime arguments (`Parser<'a>`). */
   lifetimes?: string[];
-  /** The associated types a trait bound sets (`Iterator<Item = i32>`). */
   bindings?: { name: string; type: TypeAst; span: Span }[];
   span: Span;
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Statements and expressions
-
 export interface Block {
   kind: 'block';
   stmts: Stmt[];
-  /** The expression that gives the block its value. */
   tail: Expr | undefined;
   span: Span;
   endRow: number;
-  /** Items declared inside the block, which are visible throughout it. */
   items: Item[];
   ty?: Type;
+  isConst?: boolean;
+  isUnsafe?: boolean;
 }
 
 export type Stmt =
@@ -231,8 +257,10 @@ export type Stmt =
       init: Expr | undefined;
       else: Block | undefined;
       span: Span;
+      /** A statement the conversion adds, which records no step of the trace. */
+      hidden?: boolean;
     }
-  | { kind: 'expr'; expr: Expr; semi: boolean; span: Span }
+  | { kind: 'expr'; expr: Expr; semi: boolean; span: Span; hidden?: boolean }
   | { kind: 'empty'; span: Span };
 
 interface ExprBase {
@@ -275,7 +303,7 @@ export type Expr = ExprBase &
     | { kind: 'binary'; op: BinaryOp; left: Expr; right: Expr; opSpan: Span }
     | { kind: 'assign'; target: Expr; value: Expr }
     | { kind: 'compoundAssign'; op: ArithOp; target: Expr; value: Expr }
-    | { kind: 'ref'; mutable: boolean; operand: Expr }
+    | { kind: 'ref'; mutable: boolean; operand: Expr; raw?: boolean }
     | { kind: 'cast'; operand: Expr; type: TypeAst }
     | { kind: 'call'; callee: Expr; args: Expr[] }
     | {
@@ -301,7 +329,8 @@ export type Expr = ExprBase &
     | Block
     | { kind: 'if'; cond: Condition; consequent: Block; else: Expr | undefined }
     | { kind: 'match'; scrutinee: Expr; arms: MatchArm[]; endRow: number }
-    | { kind: 'loop'; label: string | undefined; body: Block }
+    /** `isBlock`: a labeled block (`'a: { ... }`) that runs as a loop its end breaks out of, which no unlabeled `break` or `continue` targets. */
+    | { kind: 'loop'; label: string | undefined; body: Block; isBlock?: boolean }
     | { kind: 'while'; label: string | undefined; cond: Condition; body: Block }
     | { kind: 'for'; label: string | undefined; pattern: Pattern; iterable: Expr; body: Block }
     | { kind: 'break'; label: string | undefined; value: Expr | undefined }
@@ -313,6 +342,8 @@ export type Expr = ExprBase &
         params: { pattern: Pattern; type: TypeAst | undefined; span: Span }[];
         ret: TypeAst | undefined;
         body: Expr;
+        /** An `async` block (of an `async fn`), which the checker types as the future of running the closure's body. */
+        isAsync?: 'block' | 'fn';
       }
     | { kind: 'try'; operand: Expr }
     | { kind: 'macro'; macro: MacroCall }
@@ -322,11 +353,15 @@ export type Condition = { kind: 'expr'; expr: Expr } | { kind: 'let'; pattern: P
 
 export interface MatchArm {
   pattern: Pattern;
+  /**
+   * The arm's `if` guard, which runs after the pattern matches and lets later arms try when it is false: conditions
+   * that must all hold, in order, whose `let` patterns bind variables for the arm's body (`if let Some(x) = f(v)`).
+   */
+  guard: Condition[] | undefined;
   body: Expr;
   span: Span;
 }
 
-/** A format string with its arguments, as `println!` and `format!` take them. */
 export interface FormatArgs {
   pieces: FormatPiece[];
   args: Expr[];
@@ -336,7 +371,6 @@ export interface FormatArgs {
 export type FormatPiece = string | FormatSpec;
 
 export interface FormatSpec {
-  /** The index of the argument the placeholder prints. */
   arg: number;
   trait: 'display' | 'debug' | 'lowerHex' | 'upperHex' | 'octal' | 'binary' | 'lowerExp' | 'upperExp';
   fill: string;
@@ -346,7 +380,6 @@ export interface FormatSpec {
   zero: boolean;
   width: { kind: 'literal'; value: number } | { kind: 'arg'; arg: number } | undefined;
   precision: { kind: 'literal'; value: number } | { kind: 'arg'; arg: number } | undefined;
-  /** `{:x?}` and `{:X?}`: `Debug` with integers in hexadecimal. */
   debugHex?: 'x' | 'X';
 }
 
@@ -364,9 +397,6 @@ export type MacroCall =
   /** `dbg!`'s arguments, with their source text as `stringify!` gives it (whitespace runs as single spaces). */
   | { kind: 'dbg'; args: Expr[]; texts: string[] };
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Patterns
-
 interface PatternBase {
   span: Span;
   ty?: Type;
@@ -375,11 +405,29 @@ interface PatternBase {
 export type Pattern = PatternBase &
   (
     | { kind: 'wild' }
-    | { kind: 'binding'; name: string; mutable: boolean; sub: Pattern | undefined }
+    | {
+        kind: 'binding';
+        name: string;
+        mutable: boolean;
+        byRef?: 'ref' | 'refMut';
+        /** Set by the type checker: a default binding mode borrows what it binds (`Some(x)` matching `&mut o`). */
+        inheritedRef?: 'ref' | 'refMut';
+        sub: Pattern | undefined;
+      }
     | { kind: 'lit'; expr: Expr }
     | { kind: 'tuple'; elems: Pattern[] }
     | { kind: 'tupleStruct'; path: PathAst; elems: Pattern[] }
-    | { kind: 'struct'; path: PathAst; fields: { name: string; pattern: Pattern; span: Span }[] }
+    | {
+        kind: 'struct';
+        path: PathAst;
+        fields: { name: string; pattern: Pattern; span: Span }[];
+        rest: boolean;
+      }
+    /** `..` among the elements of a tuple, tuple struct, or slice pattern, which the checker expands for tuples. */
+    | { kind: 'rest' }
+    | { kind: 'range'; start: Pattern | undefined; end: Pattern | undefined; inclusive: boolean }
+    /** `[a, b, rest @ .., z]`; `restIndex` is the position of its `..`, which the checker finds. */
+    | { kind: 'slice'; elems: Pattern[]; restIndex?: number }
     | { kind: 'path'; path: PathAst }
     | { kind: 'ref'; mutable: boolean; pattern: Pattern }
     | { kind: 'or'; alternatives: Pattern[] }

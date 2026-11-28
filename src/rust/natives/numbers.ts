@@ -6,7 +6,16 @@ import { normalize } from '../infer';
 import { bitsOf, copyValue, intArith, needsCopy, overflow, wrap } from '../ops';
 import { arrayTryFrom, intoConversion } from '../traitConversions';
 import { INT_NAMES, intMax, intMin, type IntName, shallow, type Type } from '../types';
-import { EnumValue, sliceItems, sliceLength, StructValue, textOf, type Value } from '../values';
+import {
+  DurationValue,
+  EnumValue,
+  MAX_DURATION,
+  sliceItems,
+  sliceLength,
+  StructValue,
+  textOf,
+  type Value,
+} from '../values';
 import {
   define,
   deref,
@@ -78,7 +87,6 @@ function wrappingPower(name: IntName, base: bigint, exp: bigint): bigint {
   return wrap(name, result);
 }
 
-/** Truncated division and remainder, as Rust's integer `/` and `%` are. */
 function divEuclid(a: bigint, b: bigint): bigint {
   const q = a / b;
   if (a % b < 0n) return b > 0n ? q - 1n : q + 1n;
@@ -167,7 +175,6 @@ function nextMultiple(a: bigint, b: bigint): bigint {
   return remainder === 0n ? a : a + (b - remainder);
 }
 
-/** Integer methods beyond the basic arithmetic: euclidean, shifting, logarithmic, and sign-crossing variants. */
 const integerExtras: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   overflowing_div: ([a, b], ctx) => {
     if ((b as bigint) === 0n) panic(ctx, 'attempt to divide by zero');
@@ -558,6 +565,16 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     const width = floatWidth(ctx);
     return signedFloat(a, width, signBit(sign, width));
   },
+  midpoint: ([a, b], ctx) => {
+    const [x, y] = [float(a), float(b)];
+    // f32 halves the sum in f64; f64 halves before adding near its limits, as the standard library does.
+    if (isF32(ctx)) return Math.fround((x + y) / 2);
+    const [low, high] = [2 ** -1021, Number.MAX_VALUE / 2];
+    if (Math.abs(x) <= high && Math.abs(y) <= high) return (x + y) / 2;
+    if (Math.abs(x) < low) return x + y / 2;
+    if (Math.abs(y) < low) return x / 2 + y;
+    return x / 2 + y / 2;
+  },
 };
 
 function totalOrderKey(value: Value, width: 32 | 64): bigint {
@@ -742,6 +759,7 @@ for (const [name, value] of Object.entries(FLOAT_LIMITS)) {
   consts[`const:${name}`] = (_args, ctx) => {
     const type = normalize(shallow(ctx.typeArgs[0]));
     if (type.kind === 'int') return name === 'MAX' ? intMax(type.name) : intMin(type.name);
+    if (type.kind === 'adt' && type.def.builtin === 'Duration') return new DurationValue(MAX_DURATION);
     return isF32Type(type) ? value.f32 : value.f64;
   };
   consts[`const:f64::${name}`] = () => value.f64;

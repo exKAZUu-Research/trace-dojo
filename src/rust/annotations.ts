@@ -1,23 +1,19 @@
 import type { Expr, Pattern, Span } from './ast';
 import type { Known } from './constLint';
 import type { ProjectedCapture } from './loanCaptures';
-import type { AdtDef, ClosureType, ConstDef, FnDef, TraitRef, Type } from './types';
+import type { AdtDef, ClosureType, ConstDef, DerefKind, FnDef, TraitRef, Type, TypeParam } from './types';
 
-/** A variable of a function or closure: a `let` binding, a parameter, or a binding of a pattern. */
 export interface LocalVar {
   name: string;
   mutable: boolean;
   type: Type;
   slot: number;
   span: Span;
-  /** The function or closure that owns the variable. */
   owner: FnContext;
   isSelf?: boolean;
-  /** How a binding binds the value it matches: by value, or through a shared or mutable reference. */
   mode: 'move' | 'ref' | 'refMut';
 }
 
-/** What a function's or closure's body compiles to: its slots and the variables the trace shows. */
 export interface FnContext {
   name: string;
   locals: LocalVar[];
@@ -27,9 +23,7 @@ export interface FnContext {
   parent: FnContext | undefined;
   isClosure: boolean;
   isAtomic: boolean;
-  /** For a closure, whether it moves its captures (`move ||`). */
   isMove: boolean;
-  /** For a closure, how it uses its captures, which decides the closure trait it implements. */
   closureKind: 'Fn' | 'FnMut' | 'FnOnce';
   /** For a closure, the captured variables it moves out, which it captures by value even without `move`. */
   movedCaptures?: LocalVar[];
@@ -44,15 +38,15 @@ export type PathRes =
   | { kind: 'fn'; fn: FnDef; typeArgs: Type[] }
   | { kind: 'ctor'; def: AdtDef; variant: number; typeArgs: Type[] }
   | { kind: 'const'; def: ConstDef; type: Type; typeArgs: Type[] }
-  /** A constant of a primitive type, such as `i32::MAX` or `f64::consts::PI`. */
   | { kind: 'builtinConst'; type: Type; name: string }
   /** `_` on the left of an assignment. */
-  | { kind: 'discard' };
+  | { kind: 'discard' }
+  | { kind: 'constParam'; param: TypeParam; type: Type };
 
 /** How a method call reaches its receiver: through derefs, then by reference or by value. */
 export interface ReceiverAdjust {
   /** The derefs from the receiver expression's type, each of a reference (`ref`/`mutRef`) or of an owner. */
-  derefs: ('ref' | 'mutRef' | 'own')[];
+  derefs: DerefKind[];
   autoref: 'none' | 'ref' | 'mut';
   /** A receiver used as the iterator it makes: a range, or a type parameter bounded by `Iterator` or `IntoIterator`. */
   asIter: boolean;
@@ -66,7 +60,7 @@ export interface MethodRes {
 }
 
 export interface FieldRes {
-  derefs: ('ref' | 'mutRef' | 'own')[];
+  derefs: DerefKind[];
   index: number;
   /** `Range`'s fields live on a `RangeValue`. */
   range: boolean;
@@ -74,18 +68,24 @@ export interface FieldRes {
 
 export type Coercion =
   /** References that reach the same value: `&String` → `&str`, `&Box<T>` → `&T`, `&&T` → `&T`. */
-  | { kind: 'deref'; derefs: ('ref' | 'mutRef' | 'own')[]; fromMut: boolean; toStr: boolean }
-  /** A value becomes a trait object of the type it has. */
-  | { kind: 'dyn'; type: Type; mutable: boolean; trait: TraitRef }
-  /** A collection becomes an iterator, as `IntoIterator` makes it. */
-  | { kind: 'intoIter'; from: Type };
+  | { kind: 'deref'; derefs: DerefKind[]; fromMut: boolean; toStr: boolean }
+  /**
+   * `shared`: an `Rc` or `Arc` becomes one of a trait object, sharing its counts; `throughCell`: the trait object is in a
+   * `RefCell` or a lock the pointer holds.
+   */
+  | { kind: 'dyn'; type: Type; mutable: boolean; trait: TraitRef; shared?: boolean; throughCell?: boolean }
+  | { kind: 'intoIter'; from: Type }
+  | { kind: 'rawPtr' };
 
 export interface IndexRes {
-  container: 'slice' | 'str' | 'map' | 'vecDeque';
+  /** `user`: a type with an impl of `Index` (and `IndexMut`) that the program writes. */
+  container: 'slice' | 'str' | 'map' | 'vecDeque' | 'user';
+  /** For a `user` container, the type that implements `Index`, and the index's type. */
+  implTypes?: [Type, Type];
   range: boolean;
   /** Whether a library type's `Index` impl indexes it (a `Vec`), whose panics report the `[`'s position. */
   overloaded: boolean;
-  derefs: ('ref' | 'mutRef' | 'own')[];
+  derefs: DerefKind[];
 }
 
 export interface TryRes {
@@ -107,6 +107,8 @@ export class Annotations {
   readonly unevaluatedRepeatOperands = new Set<Expr | Pattern>();
   readonly functionInitializers = new Map<Expr, LocalVar | undefined>();
   readonly methods = new Map<Expr, MethodRes>();
+  /** Operators on types whose impls of the operator traits (`Add`, `Neg`, `AddAssign`, ...) the program writes. */
+  readonly operators = new Map<Expr, { fn: FnDef; typeArgs: Type[] }>();
   readonly fields = new Map<Expr, FieldRes>();
   readonly coercions = new Map<Expr, Coercion>();
   readonly indexes = new Map<Expr, IndexRes>();

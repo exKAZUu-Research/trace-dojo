@@ -1,19 +1,24 @@
 import type { Block, Condition, Expr, Span } from './ast';
+import { forEachDirect } from './astWalk';
 import type { Checker, LoopContext } from './checker';
 import { checkCall, checkMethodCall } from './checkerCalls';
 import { checkClosure } from './checkerClosures';
+import { checkCompoundAssign } from './checkerCompound';
 import { checkMacro } from './checkerMacros';
-import { checkAssign, checkBinary, checkCast, checkCompoundAssign, checkUnary, refExpr } from './checkerOperators';
+import { checkAssign, checkBinary, checkCast, checkUnary, refExpr } from './checkerOperators';
 import { pathExpr, structExpr } from './checkerPaths';
-import { checkPattern } from './checkerPatterns';
+import { checkPattern, requireRefMutSource } from './checkerPatterns';
 import { checkField, checkIndex } from './checkerPlaces';
 import { constInteger } from './constExpressions';
+import { checkConstOperations } from './constLint';
 import { lowerPattern, missingPattern } from './exhaustiveness';
+import { constParamOf } from './genericArgs';
 import { isPseudo, normalize } from './infer';
 import { compileError } from './items';
 import { intoIterItem } from './iterTypes';
 import { RANGE_TYPES } from './traits';
 import {
+  arrayOfLength,
   BOOL,
   CHAR,
   F32,
@@ -133,6 +138,22 @@ function literalExpr(
   }
 }
 
+/** `const { ... }`, which may use no variable from outside it (E0435) and only what constants may do. */
+function constBlock(c: Checker, block: Block, expected: Type | undefined): Type {
+  const outer = new Set(c.body.fn.locals);
+  const type = c.checkBlock(block, expected);
+  const visit = (expr: Expr): void => {
+    const res = expr.kind === 'path' ? c.annotations.paths.get(expr) : undefined;
+    if ((res?.kind === 'local' && outer.has(res.local)) || res?.kind === 'capture') {
+      compileError(expr.span, `const ブロックの中では、外の変数 ${res.local.name} を使えません（E0435）。`);
+    }
+    forEachDirect(expr, visit);
+  };
+  visit(block);
+  checkConstOperations(block, c.annotations);
+  return type;
+}
+
 function controlFlowExpr(
   c: Checker,
   expr: Extract<
@@ -143,7 +164,14 @@ function controlFlowExpr(
 ): Type {
   switch (expr.kind) {
     case 'block': {
-      return c.checkBlock(expr, expected);
+      if (expr.isConst) return constBlock(c, expr, expected);
+      if (!expr.isUnsafe) return c.checkBlock(expr, expected);
+      c.body.unsafeDepth++;
+      try {
+        return c.checkBlock(expr, expected);
+      } finally {
+        c.body.unsafeDepth--;
+      }
     }
     case 'if': {
       return ifExpr(c, expr, expected);
@@ -222,27 +250,40 @@ function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }
   const e = expected ? shallow(expected) : undefined;
   const elem = e?.kind === 'array' ? e.elem : freshVar();
   c.coerceExpr(expr.value, elem);
+  const lengthParam = constParamOf(expr.count, { params: c.body.typeParams });
+  if (lengthParam) {
+    c.coerceExpr(expr.count, USIZE);
+    c.deferredChecks.push(() => requireRepeatable(c, expr, elem));
+    return arrayOfLength(elem, { kind: 'param', param: lengthParam });
+  }
   const len = constUsize(c, expr.count);
   if (len === 0 && c.annotations.paths.get(expr.value)?.kind === 'const') {
     c.annotations.unevaluatedRepeatOperands.add(expr.value);
   }
   c.deferredChecks.push(() => {
-    if (len !== 1 && len !== 0 && !c.solver.isCopy(resolve(elem, true))) {
-      const value = expr.value;
-      if (value.kind !== 'path' || c.annotations.paths.get(value)?.kind !== 'const') {
-        compileError(
-          expr.span,
-          `[値; 個数] の値は Copy の型にしてください（${typeToString(resolve(elem))} は Copy ではありません）。`
-        );
-      }
-    }
+    if (len !== 1 && len !== 0) requireRepeatable(c, expr, elem);
   });
   return { kind: 'array', elem, len };
 }
 
+/** `[value; count]` copies its value unless the value is a constant (a `const` item or block), which is made anew. */
+function requireRepeatable(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }>, elem: Type): void {
+  if (c.solver.isCopy(resolve(elem, true))) return;
+  const value = expr.value;
+  const res = value.kind === 'path' ? c.annotations.paths.get(value) : undefined;
+  // A `static` is one value, not a constant made anew at each use.
+  const constant = (value.kind === 'block' && value.isConst) || (res?.kind === 'const' && !res.def.ast.isStatic);
+  if (!constant) {
+    compileError(
+      expr.span,
+      `[値; 個数] の値は Copy の型にしてください（${typeToString(resolve(elem))} は Copy ではありません）。`
+    );
+  }
+}
+
 function loopExpr(c: Checker, expr: Extract<Expr, { kind: 'loop' }>): Type {
   const breakType = freshVar();
-  inLoop(c, expr.label, breakType, () => blockUnit(c, expr.body));
+  inLoop(c, expr.label, breakType, () => blockUnit(c, expr.body), expr.isBlock);
   return loopBroke(c, expr) ? breakType : NEVER;
 }
 
@@ -306,8 +347,14 @@ function blockUnit(c: Checker, block: Block): void {
   }
 }
 
-function inLoop<T>(c: Checker, label: string | undefined, breakType: Type | undefined, run: () => T): T {
-  const loop: LoopContext = { label, breakType, context: c.body.fn };
+function inLoop<T>(
+  c: Checker,
+  label: string | undefined,
+  breakType: Type | undefined,
+  run: () => T,
+  isBlock = false
+): T {
+  const loop: LoopContext = { label, breakType, context: c.body.fn, isBlock };
   c.body.loops.push(loop);
   try {
     return run();
@@ -322,11 +369,12 @@ function loopBroke(c: Checker, _expr: Expr): boolean {
   return loop?.broke ?? false;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Labeled blocks and loops resolve break and continue by rustc rules.
 function findLoop(c: Checker, label: string | undefined, span: Span, keyword: string): LoopContext {
   for (let index = c.body.loops.length - 1; index >= 0; index--) {
     const loop = c.body.loops[index];
     if (loop.context !== c.body.fn) break;
-    if (label === undefined || loop.label === label) {
+    if (label === undefined ? !loop.isBlock : loop.label === label) {
       if (label !== undefined)
         (loop as LoopContext & { broke?: boolean }).broke =
           keyword === 'break' ? true : (loop as { broke?: boolean }).broke;
@@ -344,6 +392,7 @@ function checkCondition(c: Checker, cond: Condition): void {
   }
   const type = c.expr(cond.value, undefined);
   checkPattern(c, cond.pattern, type, 'move');
+  requireRefMutSource(c, cond.pattern, cond.value);
 }
 
 function ifExpr(c: Checker, expr: Extract<Expr, { kind: 'if' }>, expected: Type | undefined): Type {
@@ -399,6 +448,7 @@ function joinBranches(
   ) as Type;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Checks arms, guards and exhaustiveness in order.
 function matchExpr(c: Checker, expr: Extract<Expr, { kind: 'match' }>, expected: Type | undefined): Type {
   const scrutinee = c.expr(expr.scrutinee, undefined);
   const arms: [Expr, Type][] = [];
@@ -406,6 +456,8 @@ function matchExpr(c: Checker, expr: Extract<Expr, { kind: 'match' }>, expected:
   for (const arm of expr.arms) {
     c.withScope(() => {
       checkPattern(c, arm.pattern, scrutinee, 'move');
+      requireRefMutSource(c, arm.pattern, expr.scrutinee);
+      for (const cond of arm.guard ?? []) checkCondition(c, cond);
       const type = c.expr(arm.body, expected);
       if (shallow(type).kind === 'never') return;
       completes = true;
@@ -436,7 +488,8 @@ function coerceArm(c: Checker, body: Expr, type: Type, result: Type): void {
 }
 
 function checkExhaustive(c: Checker, expr: Extract<Expr, { kind: 'match' }>, scrutinee: Type): void {
-  const patterns = expr.arms.map((arm) => lowerPattern(arm.pattern, c.annotations));
+  // An arm with a guard may not run for a value its pattern matches, so it covers nothing.
+  const patterns = expr.arms.filter((arm) => !arm.guard).map((arm) => lowerPattern(arm.pattern, c.annotations));
   const missing = missingPattern(patterns, resolve(scrutinee, true), c.budget);
   if (missing) {
     compileError(
@@ -460,9 +513,6 @@ function forExpr(c: Checker, expr: Extract<Expr, { kind: 'for' }>): Type {
       );
     }
     compileError(expr.iterable.span, `${t} は for で繰り返せません。`);
-  }
-  if (resolved.kind === 'adt' && resolved.def.builtin === 'RangeFrom') {
-    // An unbounded range iterates forever.
   }
   c.annotations.loops.set(expr, { item, from: iterable });
   c.withScope(() => {

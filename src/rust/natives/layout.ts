@@ -26,7 +26,6 @@ const FAT_POINTER: Layout = { size: 16, align: 8, niche: { size: 8, available: 1
 /** `RawVec`'s capacity is at most `isize::MAX`, which leaves the values above it as a niche of `Vec` and `String`. */
 const CAPACITY_NICHE: Niche = { size: 8, available: 2n ** 63n };
 
-/** The layouts of the standard library's collections, which hold pointers and lengths. */
 const COLLECTION_LAYOUTS: Partial<Record<string, Layout>> = {
   String: { size: 24, align: 8, niche: CAPACITY_NICHE },
   Vec: { size: 24, align: 8, niche: CAPACITY_NICHE },
@@ -36,6 +35,22 @@ const COLLECTION_LAYOUTS: Partial<Record<string, Layout>> = {
   HashSet: { size: 48, align: 8, niche: { size: 8, available: 1n } },
   BTreeMap: { size: 24, align: 8 },
   BTreeSet: { size: 24, align: 8 },
+};
+
+/**
+ * The layouts of std types whose declarations hide their storage (`Duration { inner: () }`), as rustc 1.99.1 lays them
+ * out on a 64-bit target; a size of 0 would make them zero-sized, which sorting and the like skip.
+ */
+const OPAQUE_LAYOUTS: Partial<Record<string, Layout>> = {
+  // `secs: u64` and `nanos: u32`, whose values past 999_999_999 are a niche.
+  Duration: { size: 16, align: 8, niche: { size: 4, available: 2n ** 32n - 1_000_000_000n } },
+  PathBuf: { size: 24, align: 8, niche: CAPACITY_NICHE },
+  File: { size: 4, align: 4, niche: { size: 4, available: 1n } },
+  JoinHandle: { size: 24, align: 8 },
+  Sender: { size: 16, align: 8 },
+  Receiver: { size: 16, align: 8 },
+  Thread: { size: 8, align: 8, niche: { size: 8, available: 1n } },
+  Instant: { size: 16, align: 8 },
 };
 
 export function sizeOf(type: Type): number {
@@ -83,11 +98,18 @@ export function layoutOf(type: Type): Layout {
   }
 }
 
-/** The layout of a standard type whose declaration does not show its storage. */
 function builtinLayout(builtin: string | undefined, args: Type[]): Layout | undefined {
   const collection = COLLECTION_LAYOUTS[builtin as string];
   if (collection) return collection;
-  if (builtin === 'Box') return pointerTo(args[0]);
+  if (builtin === 'Box' || builtin === 'Rc' || builtin === 'Arc' || builtin === 'Weak') return pointerTo(args[0]);
+  // A `Cell` is its value without the value's niche, a `RefCell` its borrow count (an `isize`) and then the value.
+  if (builtin === 'Cell') {
+    const { size, align } = layoutOf(args[0]);
+    return { size, align };
+  }
+  if (builtin === 'RefCell') return structLayout([scalar(8), layoutOf(args[0])]);
+  const opaque = OPAQUE_LAYOUTS[builtin as string];
+  if (opaque) return opaque;
   // std's holds `start`, `end`, and `exhausted: bool`.
   if (builtin === 'RangeInclusive') {
     const bound = layoutOf(args[0]);

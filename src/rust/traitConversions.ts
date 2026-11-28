@@ -62,10 +62,23 @@ function adtConversionExists(solver: TraitSolver, source: Type, t: AdtType): boo
     case 'Box': {
       return boxFrom(solver, source, shallow(t.args[0]));
     }
+    case 'PathBuf': {
+      return pathBufFrom(source);
+    }
     default: {
       return false;
     }
   }
+}
+
+/** std's `From<String>` and `From<&T>` for `PathBuf`, of a `T` that is text or a path. */
+function pathBufFrom(source: Type): boolean {
+  if (source.kind === 'adt' && source.def.builtin === 'String') return true;
+  if (source.kind !== 'ref') return false;
+  const inner = shallow(source.target);
+  return (
+    inner.kind === 'str' || (inner.kind === 'adt' && ['String', 'Path', 'PathBuf'].includes(inner.def.builtin ?? ''))
+  );
 }
 
 function stringFrom(source: Type): boolean {

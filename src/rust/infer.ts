@@ -1,6 +1,7 @@
 import {
   type AdtDef,
   childTypes,
+  constValueType,
   intType,
   mapChildren,
   sameAutoTraits,
@@ -24,7 +25,6 @@ export class Unifier {
     }
   }
 
-  /** Unifies tentatively, undoing every binding when the types do not unify. */
   tryUnify(a: Type, b: Type): boolean {
     const snapshot = this.snapshot();
     if (this.unify(a, b)) return true;
@@ -48,19 +48,12 @@ export class Unifier {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
   // code-gauge-allow functionNcss -- One case per kind of type.
   unify(a: Type, b: Type): boolean {
     const x = normalize(shallow(a));
     const y = normalize(shallow(b));
     if (x === y) return true;
-    if (x.kind === 'var' && y.kind === 'var') {
-      if (x.v === y.v) return true;
-      if (x.v.literal && y.v.literal && x.v.literal !== y.v.literal) return false;
-      if (x.v.literal || (x.v.fallback && !y.v.literal)) this.bind(y.v, x);
-      else this.bind(x.v, y);
-      return true;
-    }
+    if (x.kind === 'var' && y.kind === 'var') return this.unifyVars(x, y);
     if (x.kind === 'var') return this.bindVar(x.v, y);
     if (y.kind === 'var') return this.bindVar(y.v, x);
     if (x.kind !== y.kind) return false;
@@ -74,8 +67,7 @@ export class Unifier {
         return x.elems.length === other.elems.length && x.elems.every((elem, i) => this.unify(elem, other.elems[i]));
       }
       case 'array': {
-        const other = y as typeof x;
-        return x.len === other.len && this.unify(x.elem, other.elem);
+        return this.unifyArrays(x, y as typeof x);
       }
       case 'slice': {
         return this.unify(x.elem, (y as typeof x).elem);
@@ -93,7 +85,7 @@ export class Unifier {
         return x.param === (y as typeof x).param;
       }
       case 'fn': {
-        return this.unifySignatures(x, y as typeof x);
+        return this.unifyFns(x, y as typeof x);
       }
       case 'closure': {
         return x.closure.id === (y as typeof x).closure.id;
@@ -109,6 +101,31 @@ export class Unifier {
         return true;
       }
     }
+  }
+
+  private unifyVars(x: Type & { kind: 'var' }, y: Type & { kind: 'var' }): boolean {
+    if (x.v === y.v) return true;
+    if (x.v.literal && y.v.literal && x.v.literal !== y.v.literal) return false;
+    if (x.v.literal || (x.v.fallback && !y.v.literal)) this.bind(y.v, x);
+    else this.bind(x.v, y);
+    return true;
+  }
+
+  /** Arrays of the same length, which a const parameter or a variable may give. */
+  private unifyArrays(x: Type & { kind: 'array' }, y: Type & { kind: 'array' }): boolean {
+    if (!x.lenType && !y.lenType) return x.len === y.len && this.unify(x.elem, y.elem);
+    const lengths = this.unify(x.lenType ?? constValueType(x.len), y.lenType ?? constValueType(y.len));
+    return lengths && this.unify(x.elem, y.elem);
+  }
+
+  /**
+   * Functions of the same signature; an `unsafe fn` item becomes only an `unsafe fn` pointer, and a safe one either.
+   * Pointers are the same type only when both or neither are `unsafe` (a coercion makes a safe one `unsafe`).
+   */
+  private unifyFns(x: Type & { kind: 'fn' }, y: Type & { kind: 'fn' }): boolean {
+    if ((unsafeItem(x) && isSafePointer(y)) || (unsafeItem(y) && isSafePointer(x))) return false;
+    if (!x.item && !y.item && (x.isUnsafe ?? false) !== (y.isUnsafe ?? false)) return false;
+    return this.unifySignatures(x, y);
   }
 
   private unifyDyn(a: Extract<Type, { kind: 'dyn' }>, b: Extract<Type, { kind: 'dyn' }>): boolean {
@@ -149,14 +166,12 @@ function occurs(v: TypeVar, type: Type): boolean {
 
 interface PseudoTypes {
   parseError: (target: Type) => Type | undefined;
-  /** The item and the shape of the iterator that `IntoIterator` makes of a value of a type. */
   intoItem: (type: Type) => Type | undefined;
   intoShape: (type: Type) => Type | undefined;
-  /** The error of `TryFrom<source>` for `target`. */
   tryFromError: (source: Type, target: Type) => Type | undefined;
+  projection: (type: Type & { kind: 'adt' }) => Type | undefined;
 }
 
-/** The types of the standard library's pseudo-types, once their arguments are known. */
 let pseudoTypes: PseudoTypes | undefined;
 
 export function setPseudoTypes(types: PseudoTypes): void {
@@ -170,6 +185,10 @@ export function setPseudoTypes(types: PseudoTypes): void {
 // code-gauge-allow functionCognitiveComplexity -- Each pseudo-type has its own normalization rules.
 export function normalize(type: Type): Type {
   if (type.kind !== 'adt' || !isPseudo(type.def)) return type;
+  if (type.def.builtin === 'Projection') {
+    const projected = pseudoTypes?.projection(type);
+    return projected ? normalize(shallow(projected)) : type;
+  }
   const arg = normalize(shallow(type.args[0]));
   if (type.def.builtin === 'Indexed') return indexed(type, arg);
   if (arg.kind === 'var') return type;
@@ -235,12 +254,20 @@ export function isPseudo(def: AdtDef): boolean {
     'IntoItem',
     'IntoShape',
     'TryFromError',
+    'Projection',
   ].includes(def.builtin as string);
 }
 
-/** Resolves a type deeply, normalizing pseudo-types. */
 export function deepNormalize(type: Type): Type {
   const t = normalize(shallow(type));
   if (t.kind === 'dyn' || t.kind === 'fn') return t;
   return mapChildren(t, deepNormalize);
+}
+
+function unsafeItem(t: Type & { kind: 'fn' }): boolean {
+  return !!(t.item && 'ast' in t.item && t.item.ast?.isUnsafe);
+}
+
+function isSafePointer(t: Type & { kind: 'fn' }): boolean {
+  return !t.item && !t.isUnsafe;
 }

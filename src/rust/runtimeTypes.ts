@@ -5,7 +5,7 @@ import { hasParams, resolve, shallow, type Subst, substitute, type TraitRef, typ
 /** A type that the compiler resolved, which the running frame completes when it mentions type parameters. */
 export type RuntimeType = (frame: Frame) => Type;
 
-/** Finalizes a type the checker inferred, applying literal defaults, and returns how to make it concrete at run time. */
+/** Finalizes a type the checker inferred, applying literal defaults, and returns how to make it concrete when run. */
 export function runtimeType(type: Type): RuntimeType {
   const resolved = deepNormalize(resolve(type, true));
   if (!hasParams(resolved)) return () => resolved;
@@ -85,7 +85,6 @@ function signatureKey(signature: { params: Type[]; ret: Type }): string {
   return `fn(${signature.params.map(typeKey).join(',')})->${typeKey(signature.ret)}`;
 }
 
-/** Matches a type pattern with type parameters against a concrete type, binding the parameters. */
 // code-gauge-allow functionNcss -- One case per kind of type.
 export function matchConcrete(
   pattern: Type,

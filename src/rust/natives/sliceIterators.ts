@@ -84,7 +84,6 @@ function chunkDebug(
   });
 }
 
-/** The element type of the slices an iterator yields (`&[T]`). */
 function sliceElem(item: Type): Type {
   let t = normalize(shallow(item));
   if (t.kind === 'ref') t = normalize(shallow(t.target));

@@ -1,12 +1,13 @@
 import type { FormatArgs, MacroCall, Span } from './ast';
 import type { Checker } from './checker';
 import { checkElements } from './checkerExpr';
-import { checkComparisonOperands } from './checkerOperators';
+import { checkComparisonOperands, rejectStaticMutBorrow } from './checkerOperators';
 import { traitInScope } from './checkerPaths';
 import { checkPattern } from './checkerPatterns';
 import { requireMutablePlace } from './checkerPlaces';
 import { normalize } from './infer';
 import { compileError, resolveTypePath } from './items';
+import { writeTarget } from './natives/io';
 import { BOOL, freshVar, NEVER, outputStream, resolve, shallow, type Type, typeToString, UNIT, USIZE } from './types';
 
 // code-gauge-allow functionNcss -- One case per kind of macro.
@@ -59,7 +60,7 @@ function writeMacro(c: Checker, macro: Extract<MacroCall, { kind: 'write' }>): T
   const inner = target.kind === 'ref' ? normalize(shallow(target.target)) : target;
   const isFormatter = inner.kind === 'adt' && inner.def.builtin === 'Formatter';
   const isString = inner.kind === 'adt' && inner.def.builtin === 'String';
-  const stream = outputStream(inner);
+  const stream = outputStream(inner) ?? writeTarget(inner);
   if (!isFormatter && !isString && !stream) {
     compileError(
       macro.target.span,
@@ -130,6 +131,8 @@ function formatArgs(c: Checker, format: FormatArgs): void {
     if (typeof piece === 'string') continue;
     const arg = format.args[piece.arg];
     const type = arg.ty ?? c.expr(arg, undefined);
+    // A formatting macro borrows its arguments.
+    rejectStaticMutBorrow(c, arg, arg.span);
     c.requireTrait(type, 'Sized', arg.span);
     const trait = {
       display: 'Display',

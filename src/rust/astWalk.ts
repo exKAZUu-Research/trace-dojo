@@ -32,11 +32,14 @@ export function forEachResult(expr: Expr, visit: (expr: Expr) => void): void {
 
 // code-gauge-allow functionCognitiveComplexity -- The traversal keeps the active labels and evaluation order together.
 function forEachLoopResult(loop: Extract<Expr, { kind: 'loop' }>, visit: (expr: Expr) => void): void {
-  const labels = [loop.label];
+  const labels = [{ label: loop.label, isBlock: loop.isBlock === true }];
   const walk = (expr: Expr): void => {
     if (expr.kind === 'closure') return;
     if (expr.kind === 'break' && expr.value) {
-      const target = expr.label === undefined ? labels.length - 1 : labels.lastIndexOf(expr.label);
+      const target =
+        expr.label === undefined
+          ? labels.findLastIndex((entry) => !entry.isBlock)
+          : labels.findLastIndex((entry) => entry.label === expr.label);
       if (target === 0) forEachResult(expr.value, visit);
     }
     if (expr.kind !== 'for' && expr.kind !== 'while' && expr.kind !== 'loop') {
@@ -45,7 +48,7 @@ function forEachLoopResult(loop: Extract<Expr, { kind: 'loop' }>, visit: (expr: 
     }
     if (expr.kind === 'for') walk(expr.iterable);
     if (expr.kind === 'while') walk(expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value);
-    labels.push(expr.label);
+    labels.push({ label: expr.label, isBlock: expr.kind === 'loop' && expr.isBlock === true });
     walkBlock(expr.body, walk);
     labels.pop();
   };
@@ -144,7 +147,10 @@ function forEachDirectInControlFlow(expr: Expr, visit: (expr: Expr) => void, pat
     case 'match': {
       if (expr.arms.length === 1) visitPatternSource(expr.arms[0].pattern, expr.scrutinee, visit, patternSource);
       else visit(expr.scrutinee);
-      for (const arm of expr.arms) visit(arm.body);
+      for (const arm of expr.arms) {
+        for (const cond of arm.guard ?? []) visitCondition(cond, visit, patternSource);
+        visit(arm.body);
+      }
       return;
     }
     case 'loop': {
@@ -239,9 +245,10 @@ export interface PatternBindingPart {
   local: LocalVar;
   path: string;
   throughRef: boolean;
+  /** Whether the pattern writes `ref mut`, which binds a mutable reference whatever the default binding mode is. */
+  refMut: boolean;
 }
 
-/** The variables a pattern binds, in order, each with the part it binds. */
 // code-gauge-allow functionCognitiveComplexity -- Follows rustc's binding modes case by case.
 // code-gauge-allow functionNcss -- Follows rustc's binding modes case by case.
 export function patternBindingParts(pattern: Pattern, annotations: Annotations): PatternBindingPart[] {
@@ -253,8 +260,14 @@ export function patternBindingParts(pattern: Pattern, annotations: Annotations):
     switch (p.kind) {
       case 'binding': {
         const local = annotations.bindings.get(p);
-        if (local) parts.push({ local, path, throughRef });
+        if (local) {
+          parts.push({ local, path, throughRef: throughRef || p.byRef !== undefined, refMut: p.byRef === 'refMut' });
+        }
         if (p.sub) visit(p.sub, path, throughRef);
+        return;
+      }
+      case 'slice': {
+        for (const [index, elem] of p.elems.entries()) visit(elem, `${path}.${index}`, under);
         return;
       }
       case 'tuple':

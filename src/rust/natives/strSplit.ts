@@ -5,11 +5,9 @@ import { CHAR, REF_STR } from '../types';
 import { decodeUtf8, utf8Length } from '../utf8';
 import { DONE, type FnValue, IterValue, type Next } from '../values';
 
-/**
- * `str::split` and its kin as `core::str` has them: the searchers of patterns (a `char`, a string by the two-way
- * algorithm, chars, or a predicate) and `SplitInternal`, which take the same steps, so that a predicate sees the same
- * calls and `{:?}` shows the same state as std's.
- */
+// `str::split` and its kin as `core::str` has them: the searchers of patterns (a `char`, a string by the two-way
+// algorithm, chars, or a predicate) and `SplitInternal` take the same steps as std's, so that a predicate sees the same
+// calls and `{:?}` shows the same state.
 
 const USIZE_MAX = 18_446_744_073_709_551_615n;
 const encoder = new TextEncoder();
@@ -24,7 +22,6 @@ interface Searcher {
   debug(show: DebugValue): DebugPart;
 }
 
-/** What the pattern a `str` method takes is, by its type. */
 export type PatternKind =
   | { kind: 'char'; char: string }
   | { kind: 'str'; needle: string }
@@ -324,7 +321,6 @@ class TwoWaySearcher implements Searcher {
     return ((this.byteset >> BigInt(byte & 0x3f)) & 1n) !== 0n;
   }
 
-  /** `TwoWaySearcher::next` as std runs it to find the next match. */
   // code-gauge-allow functionCognitiveComplexity -- Follows std's `TwoWaySearcher::next` step by step.
   nextMatch(): [number, number] | undefined {
     const size = this.needleBytes.length;
@@ -357,7 +353,6 @@ class TwoWaySearcher implements Searcher {
     }
   }
 
-  /** `TwoWaySearcher::next_back` as std runs it to find the previous match. */
   // code-gauge-allow functionCognitiveComplexity -- Follows std's `TwoWaySearcher::next_back` step by step.
   nextMatchBack(): [number, number] | undefined {
     const size = this.needleBytes.length;
@@ -532,7 +527,6 @@ class SplitInternal {
 
 export type SplitKind = 'Split' | 'RSplit' | 'SplitTerminator' | 'RSplitTerminator' | 'SplitInclusive';
 
-/** A string's forward, reverse, terminator, and inclusive split iterators. */
 export function splitIter(text: string, pattern: PatternKind, kind: SplitKind): IterValue {
   return splitFrom(new SplitInternal(searcherOf(text, pattern), kind === 'Split' || kind === 'RSplit'), kind);
 }
@@ -578,7 +572,7 @@ function splitNFrom(inner: SplitInternal, count: bigint, reverse: boolean): Iter
   );
 }
 
-/** `lines`: the pieces up to and including each `\n`, without it or a `\r\n`. */
+/** `lines`: the pieces that each `\n` ends, and the rest, without the `\n` or `\r\n`. */
 export function linesIter(text: string): IterValue {
   return linesFrom(new SplitInternal(searcherOf(text, { kind: 'char', char: '\n' }), false));
 }
@@ -594,7 +588,6 @@ function linesFrom(inner: SplitInternal): IterValue {
   );
 }
 
-/** A line without its `\n` or `\r\n`. */
 function lineOf(line: string | undefined): Next {
   if (line === undefined) return DONE;
   if (line.endsWith('\r\n')) return line.slice(0, -2);

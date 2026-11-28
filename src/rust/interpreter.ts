@@ -1,23 +1,30 @@
+// code-gauge-allow-file fileNcss -- The runtime entry points share one interpreter.
 import type { Span } from './ast';
 import type { Checker } from './checker';
 import { type CallSupport, type ClosureCapture, type CompiledFn, Compiler } from './compiler';
-import { derefAll } from './compilerCommon';
+import { derefAll, stripRefs } from './compilerCommon';
 import type { WriteChunk } from './debugText';
+import { Dropper } from './drops';
 import { Formatter, type Spec } from './fmt';
 import { normalize } from './infer';
 import { compileError, type Module, type Program } from './items';
+import { isUserIterator } from './iterTypes';
 import { type NativeContext, NATIVES } from './natives';
 import { toIterator } from './natives/iterators';
+import { receiverIter } from './natives/threads';
 import { cloneValue, compareValues, type OrderMethod, setUserImpls, valuesEqual } from './ops';
 import {
   ControlSignal,
   FmtFailure,
   Frame,
   type FunctionInfo,
+  MOVED,
   OutOfMemory,
+  ProcessExit,
   type Runtime,
   RustPanic,
   StackOverflow,
+  UnsupportedAtRun,
 } from './runtime';
 import { concreteType, matchConcrete, typeIdentity, typeKey } from './runtimeTypes';
 import { nativeArgumentTypes, turtleCaptureRoots } from './turtleTypes';
@@ -40,13 +47,16 @@ import { decodeUtf8, utf8Reader } from './utf8';
 import {
   AccessorPlace,
   CellPlace,
+  DONE,
   DynValue,
   EnumValue,
   FnValue,
   FormatterValue,
   isPlace,
+  IterValue,
   type Place,
   type RangeValue,
+  SharedBox,
   StringValue,
   StructValue,
   textOf,
@@ -61,7 +71,9 @@ interface Dispatch {
   implArgs: Type[] | undefined;
 }
 
-/** Runs a checked program: calls, trait dispatch, natives, and formatting. */
+/** Where a library call that a loop or an adapter makes, not the program, reports a panic it has no place for. */
+const NO_SPAN: Span = { row: 0, col: 1 };
+
 export class Interpreter implements CallSupport {
   runtime!: Runtime;
   readonly formatter: Formatter;
@@ -70,6 +82,7 @@ export class Interpreter implements CallSupport {
   private readonly dispatchCache = new Map<string, Dispatch | undefined>();
   private readonly constValues = new Map<ConstDef, Map<string, Value>>();
   private readonly constFns = new Map<ConstDef, CompiledFn>();
+  readonly dropper: Dropper;
 
   constructor(
     readonly program: Program,
@@ -77,6 +90,14 @@ export class Interpreter implements CallSupport {
     tracing: boolean,
     private readonly beforeConstant?: (def: ConstDef) => void
   ) {
+    this.dropper = new Dropper(
+      program,
+      (fn, typeArgs, args) => {
+        const frame = this.runtime.frames.at(-1) as Frame;
+        return this.callFn(fn, typeArgs, args, undefined, { row: 0, col: 1 }, frame);
+      },
+      (type) => this.revealType(type)
+    );
     this.compiler = new Compiler(program, checker, this, tracing);
     this.formatter = new Formatter({
       userFmt: (trait, type, value, spec, write) => this.userFmt(trait, type, value, spec, write),
@@ -127,9 +148,6 @@ export class Interpreter implements CallSupport {
     return { order: result.variant === 0 ? undefined : (result.fields[0] as EnumValue).variant - 1 };
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Calls
-
   /** Calls a function with concrete type arguments: a trait method dispatches on its `Self` type. */
   callFn(def: FnDef, typeArgs: Type[], args: Value[], callRow: number | undefined, span: Span, frame: Frame): Value {
     if (def.trait && def.trait.methods.get(def.name) === def) {
@@ -150,7 +168,8 @@ export class Interpreter implements CallSupport {
     let self = this.revealType(typeArgs[0]);
     let receiverArgs = args;
     if (self.kind === 'dyn' && def.selfMode) {
-      const unwrapped = unwrapDyn(args[0], def.selfMode === 'mutRef');
+      // `self: Pin<&mut Self>` lends the value mutably as `&mut self` does.
+      const unwrapped = unwrapDyn(args[0], def.selfMode === 'mutRef' || def.selfWrapper === 'Pin');
       self = unwrapped.type;
       receiverArgs = [unwrapped.receiver, ...args.slice(1)];
     }
@@ -161,7 +180,6 @@ export class Interpreter implements CallSupport {
     return this.callNative(def, concrete, receiverArgs, span, frame);
   }
 
-  /** The impl method that a trait method runs for a concrete type, or the trait's default method. */
   private dispatch(
     trait: TraitDef,
     receiver: Type,
@@ -227,7 +245,6 @@ export class Interpreter implements CallSupport {
     return this.invoke(compiled, typeMap, args, callRow, []);
   }
 
-  /** Runs a compiled body in a new frame, returning its value or the value of a `return` in it. */
   invoke(
     compiled: CompiledFn,
     typeArgs: ReadonlyMap<TypeParam, Type>,
@@ -237,17 +254,25 @@ export class Interpreter implements CallSupport {
     onEnd?: (frame: Frame, result: Value | undefined) => void
   ): Value {
     const { runtime } = this;
+    runtime.dropper ??= this.dropper;
     const frame = new Frame(runtime, compiled.info, callRow, typeArgs, captures);
     runtime.pushFrame(frame);
+    const guards = runtime.liveGuards.length;
     let result: Value | undefined;
+    let exiting = false;
     try {
       runtime.withRoots(args, () => compiled.bind(frame, args));
       result = compiled.body(frame);
     } catch (error) {
+      exiting = error instanceof ProcessExit;
       if (!(error instanceof ControlSignal) || error.kind !== 'return') throw error;
       result = error.value;
     } finally {
       try {
+        // The temporaries of the body's tail or `return` value go first (edition 2024), then the body's variables,
+        // then the parameters; `process::exit` drops nothing.
+        runtime.releaseGuards(frame, guards, result);
+        if (!exiting && runtime.dropper) dropFrameLocals(runtime.dropper, frame, compiled);
         onEnd?.(frame, result);
       } finally {
         runtime.popFrame();
@@ -260,7 +285,7 @@ export class Interpreter implements CallSupport {
   private callNative(def: FnDef, typeArgs: Type[], args: Value[], span: Span, frame: Frame): Value {
     const key = def.nativeKey ?? `${def.name}`;
     const native = NATIVES[key];
-    if (!native) throw new RustPanic(`${key} は、この採点環境では使えません。`, span);
+    if (!native) throw new UnsupportedAtRun(`${key} は、この採点環境では使えません。`, span);
     const context: NativeContext = { interp: this, runtime: this.runtime, frame, span, typeArgs };
     const before = receiverText(args[0]);
     const result = this.runtime.withRoots(args, () => {
@@ -269,6 +294,7 @@ export class Interpreter implements CallSupport {
       const borrowers = args.filter((arg, index) => this.runtime.borrowCandidate(arg, types[index]));
       return this.runtime.withActiveBorrows(borrowers, () => native(args, context));
     });
+    releaseConsumed(def, typeArgs, args, result);
     // Library functions build `String`s through these two ways out: a result, and a receiver they write to.
     if ((typeof result === 'string' || result instanceof StringValue) && shallow(def.ret).kind !== 'ref') {
       this.runtime.allocateString(textOf(result).length);
@@ -282,7 +308,7 @@ export class Interpreter implements CallSupport {
 
   callValue(callee: Value, args: Value[], callRow: number | undefined): Value {
     let fn = callee;
-    while (isPlace(fn)) fn = fn.get();
+    while (isPlace(fn) || fn instanceof SharedBox) fn = (fn instanceof SharedBox ? fn.value : fn.get()) as Value;
     if (fn instanceof DynValue) fn = fn.value;
     return (fn as FnValue).call(args, callRow);
   }
@@ -296,6 +322,22 @@ export class Interpreter implements CallSupport {
       '{closure}',
       roots
     );
+    fn.dropCaptures = () => {
+      for (const { place, owned, ownedFields } of captures) {
+        for (const { path, type } of ownedFields ?? []) {
+          let container = place.get();
+          for (const index of path.slice(0, -1)) container = fieldsOf(container)[index];
+          const items = fieldsOf(container);
+          const value = items[path.at(-1) as number];
+          items[path.at(-1) as number] = MOVED;
+          this.dropper.drop(value, type);
+        }
+        if (!owned) continue;
+        const value = place.get();
+        place.set(MOVED);
+        this.dropper.drop(value, owned);
+      }
+    };
     fn.duplicate = (copy) =>
       this.makeClosure(
         compiled,
@@ -305,14 +347,67 @@ export class Interpreter implements CallSupport {
     return fn;
   }
 
-  toIter(value: Value, from: Type): Value {
-    return toIterator(value, this.revealType(from));
+  private readonly statics = new Map<ConstDef, Place>();
+
+  staticPlace(def: ConstDef, frame: Frame): Place {
+    let place = this.statics.get(def);
+    if (!place) {
+      place = new CellPlace(this.constValue(def, frame, []));
+      this.statics.set(def, place);
+    }
+    return place;
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Constants and conversions
+  toIter(value: Value, from: Type, span: Span = NO_SPAN): Value {
+    const type = this.revealType(from);
+    if (!(value instanceof IterValue) && isUserIterator(type)) return this.userIterator(value, type);
+    const receiver = stripRefs(type);
+    if (receiver.kind === 'adt' && receiver.def.builtin === 'Receiver') {
+      const frame = this.runtime.frames.at(-1) as Frame;
+      const ctx = { interp: this, runtime: this.runtime, frame, span, typeArgs: [] };
+      return receiverIter(ctx, value, true);
+    }
+    return toIterator(value, type);
+  }
+
+  /** The program's own iterator (or a `&mut` of one) as an iterator whose `next` calls the impl's `next`. */
+  private userIterator(value: Value, type: Type): IterValue {
+    const t = normalize(shallow(type));
+    const self = t.kind === 'ref' ? t.target : t;
+    // A `&mut` receiver of an adapter (`(&mut c).take(2)`) arrives as the place it refers to, typed as the iterator,
+    // and one that the call borrows again (`(&mut c).nth(2)`) as a place holding that place.
+    const borrowed = t.kind === 'ref' || isPlace(value);
+    let place = borrowed && isPlace(value) ? value : new CellPlace(value);
+    while (isPlace(place.get())) place = place.get() as Place;
+    const next = this.program.traitDef('Iterator').methods.get('next') as FnDef;
+    const frame = this.runtime.frames.at(-1) as Frame;
+    const iter = new IterValue(
+      () => {
+        const result = this.callFn(next, [self], [place], undefined, { row: 0, col: 1 }, frame) as EnumValue;
+        return result.variant === 1 ? result.fields[0] : DONE;
+      },
+      undefined,
+      undefined,
+      [place]
+    );
+    // An iterator taken by value is the loop's, which drops it when the loop ends however it ends.
+    if (!borrowed) {
+      iter.releases = [
+        () => {
+          const owned = place.get();
+          place.set(MOVED);
+          this.dropper.drop(owned, self);
+        },
+      ];
+    }
+    return iter;
+  }
 
   constValue(def: ConstDef, frame: Frame, types: Type[]): Value {
+    if (def.trait) {
+      const implemented = this.traitConstImpl(def, types);
+      if (implemented) return this.constValue(implemented.def, frame, implemented.typeArgs);
+    }
     this.beforeConstant?.(def);
     const key = JSON.stringify(types.map(typeKey));
     let instances = this.constValues.get(def);
@@ -322,7 +417,7 @@ export class Interpreter implements CallSupport {
     }
     if (instances.has(key)) return instances.get(key);
     const value = this.evaluateConst(def, frame, types);
-    if (typeof value !== 'object') instances.set(key, value);
+    if (typeof value !== 'object' || def.ast.isStatic) instances.set(key, value);
     return value;
   }
 
@@ -376,6 +471,22 @@ export class Interpreter implements CallSupport {
     return { fn: dispatched.fn, typeArgs: [...dispatched.implArgs, ...typeArgs.slice(fn.parentParamCount)] };
   }
 
+  /** The constant an impl gives for a trait's constant on the concrete `Self` that `types` starts with. */
+  private traitConstImpl(def: ConstDef, types: Type[]): { def: ConstDef; typeArgs: Type[] } | undefined {
+    const self = this.revealType(types[0]);
+    const traitArgs = types.slice(1).map((type) => this.revealType(type));
+    for (const impl of this.program.impls) {
+      if (impl.trait?.trait !== def.trait) continue;
+      const subst = new Map<TypeParam, Type>();
+      const params = new Set(impl.params);
+      if (!matchConcrete(impl.selfType, self, params, subst)) continue;
+      if (!traitArgs.every((arg, index) => matchConcrete(impl.trait!.args[index], arg, params, subst))) continue;
+      const constant = impl.consts.get(def.name);
+      return constant && { def: constant, typeArgs: impl.params.map((param) => subst.get(param) as Type) };
+    }
+    return undefined;
+  }
+
   private evaluateConst(def: ConstDef, frame: Frame, types: Type[]): Value {
     const native = NATIVES[`const:${def.name}`];
     let value: Value;
@@ -397,7 +508,7 @@ export class Interpreter implements CallSupport {
         compiled = this.compiler.compileConst(def.ast.value, context);
         this.constFns.set(def, compiled);
       }
-      const params = def.impl?.params ?? [];
+      const params = def.impl?.params ?? (def.trait ? [def.trait.self, ...def.trait.params] : []);
       const typeArgs = new Map(params.map((param, index) => [param, types[index]]));
       value = this.invoke(compiled, typeArgs, [], undefined, []);
     }
@@ -432,7 +543,6 @@ export class Interpreter implements CallSupport {
     return this.convertFrom(value, from, to, frame);
   }
 
-  /** `From::from`: the program's impl, or the standard library's conversion. */
   convertFrom(value: Value, from: Type, to: Type, frame: Frame): Value {
     const dispatch = this.dispatch(this.program.traitDef('From'), normalize(shallow(to)), 'from', [from]);
     const span = { row: 0, col: 0 };
@@ -462,9 +572,6 @@ export class Interpreter implements CallSupport {
     void frame;
     return new TurtleValue(created);
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Formatting
 
   private userFmt(
     trait: 'Display' | 'Debug',
@@ -508,7 +615,6 @@ function opaqueProjection(declaration: Type, implementation: Type, id: number): 
   return undefined;
 }
 
-/** The types of a variant's fields with a generic type's parameters replaced by its arguments. */
 export function fieldTypes(def: AdtDef, args: Type[], variant: number): Type[] {
   const fields = def.variants[variant]?.fields ?? [];
   if (def.params.length === 0) return fields.map((field) => field.type);
@@ -516,7 +622,6 @@ export function fieldTypes(def: AdtDef, args: Type[], variant: number): Type[] {
   return fields.map((field) => substitute(field.type, subst));
 }
 
-/** The concrete type and receiver of a trait object's method call. */
 function unwrapDyn(receiver: Value, mutable: boolean): { type: Type; receiver: Value } {
   if (receiver instanceof DynValue) {
     return { type: receiver.type, receiver: mutable ? receiver.value : derefAll(receiver.value) };
@@ -589,4 +694,77 @@ function receiverText(receiver: Value | undefined): string | undefined {
   while (isPlace(value)) value = value.get();
   if (typeof value === 'string' || value instanceof StringValue) return isPlace(receiver) ? textOf(value) : undefined;
   return value instanceof FormatterValue ? value.text : undefined;
+}
+
+/**
+ * What a library function takes by value and does not keep goes when it returns: a closure's captured values
+ * (`Option::map(move |x| ..)`), and what an iterator it consumes holds (`collect`); an iterator adaptor that keeps them
+ * (`map`) lets them go when it goes.
+ */
+function releaseConsumed(def: FnDef, typeArgs: Type[], args: Value[], result: Value): void {
+  if (KEEPS_CLOSURE.has(def.nativeKey ?? '') || !args.some((arg) => releaseOf(arg))) return;
+  const types = nativeArgumentTypes(def, typeArgs);
+  for (const [index, arg] of args.entries()) {
+    const release = releaseOf(arg);
+    const type = types[index] as Type | undefined;
+    // A method's receiver is taken by value only for `self`.
+    const borrowed = (index === 0 && def.selfMode !== undefined && def.selfMode !== 'value') || !type;
+    if (!release || arg === result || borrowed || normalize(shallow(type)).kind === 'ref') continue;
+    if (result instanceof IterValue) (result.releases ??= []).push(release);
+    else if (!keepsParam(def, index)) release();
+  }
+}
+
+/** Natives that keep a closure to run later, which then drop its captured values themselves. */
+const KEEPS_CLOSURE = new Set(['std::thread::spawn', 'Scope::spawn']);
+
+function releaseOf(value: Value): (() => void) | undefined {
+  if (value instanceof FnValue && value.dropCaptures) return value.dropCaptures;
+  if (value instanceof IterValue && value.releases) return () => value.release();
+  return undefined;
+}
+
+/**
+ * Whether a function can keep its argument: in its result, or in what another argument lends it mutably (`Vec::push`,
+ * `mem::replace`), as their types name the argument's type parameter.
+ */
+function keepsParam(def: FnDef, index: number): boolean {
+  const params = def.selfMode ? [def.impl?.selfType, ...def.paramTypes] : def.paramTypes;
+  const param = params[index] && shallow(params[index]);
+  if (param?.kind !== 'param') return false;
+  if (mentions(def.ret, param.param)) return true;
+  return params.some((other, position) => {
+    if (position === index || !other) return false;
+    const t = shallow(other);
+    const lentMutably = position === 0 && def.selfMode ? def.selfMode === 'mutRef' : t.kind === 'ref' && t.mutable;
+    return lentMutably && mentions(t, param.param);
+  });
+}
+
+function mentions(type: Type, param: TypeParam): boolean {
+  const t = shallow(type);
+  if (t.kind === 'param') return t.param === param;
+  return childTypes(t).some((child) => mentions(child, param));
+}
+
+function fieldsOf(value: Value): Value[] {
+  return value instanceof StructValue ? value.fields : (value as Value[]);
+}
+
+/**
+ * Drops a returning frame's variables: the body's, the last declared first, then the parameters, the last declared
+ * first, a pattern parameter's leftover after the variables it binds.
+ */
+function dropFrameLocals(dropper: Dropper, frame: Frame, compiled: CompiledFn): void {
+  const bodySlots = compiled.bodySlots ?? [];
+  const paramSlots = compiled.paramSlots ?? [];
+  const params = new Set(paramSlots.flat());
+  const others = compiled.info.locals
+    .map((local) => local.slot)
+    .filter((slot) => !bodySlots.includes(slot) && !params.has(slot));
+  dropper.dropSlots(frame, [...others.toSorted((a, b) => a - b), ...bodySlots]);
+  for (let index = paramSlots.length - 1; index >= 0; index--) {
+    dropper.dropSlots(frame, paramSlots[index]);
+    frame.paramLeftovers.get(index)?.();
+  }
 }

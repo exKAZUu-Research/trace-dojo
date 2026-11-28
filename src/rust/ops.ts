@@ -6,7 +6,11 @@ import { normalize } from './infer';
 import { RustPanic } from './runtime';
 import { type AdtDef, intMax, intMin, type IntName, shallow, type Type } from './types';
 import {
+  BorrowGuard,
+  CellBox,
+  type ChannelEnd,
   DONE,
+  type DurationValue,
   EnumValue,
   FnValue,
   isPlace,
@@ -15,13 +19,14 @@ import {
   NaNValue,
   RangeValue,
   SetValue,
+  SharedBox,
   sliceItems,
   StructValue,
   textOf,
   type Value,
+  WeakRef,
 } from './values';
 
-/** Hooks into the program's own impls, which the type-directed operations call for user types, and into its run. */
 export interface UserImpls {
   /** Counts the elements a clone makes against the run's limit. */
   allocate(count: number): void;
@@ -32,7 +37,6 @@ export interface UserImpls {
   order?(method: OrderMethod, type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
   cmp?(type: Type, a: Value, b: Value, partial: boolean, rhs?: Type): { order: number | undefined } | undefined;
   clone?(type: Type, value: Value): { value: Value } | undefined;
-  /** Substitutes a generic type's parameters with its arguments in a field's type. */
   fieldTypes(def: AdtDef, args: Type[], variant: number): Type[];
 }
 
@@ -58,9 +62,6 @@ export function spendCollectionWork(count: number): void {
 function fieldTypes(def: AdtDef, args: Type[], variant: number): Type[] {
   return hooks?.fieldTypes(def, args, variant) ?? def.variants[variant].fields.map((field) => field.type);
 }
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Integers
 
 const OP_NAMES: Record<string, string> = {
   '+': 'add',
@@ -137,7 +138,6 @@ export function bitsOf(name: IntName): number {
   return Number(name.slice(1));
 }
 
-/** Wraps an integer to a type's width, as `as` and the wrapping methods do. */
 export function wrap(name: IntName, value: bigint): bigint {
   const bits = bitsOf(name);
   return name.startsWith('i') ? BigInt.asIntN(bits, value) : BigInt.asUintN(bits, value);
@@ -210,9 +210,6 @@ function saturatingFloatToInt(value: number, name: IntName): bigint {
   const truncated = BigInt(Math.trunc(value));
   return truncated < min ? min : truncated > max ? max : truncated;
 }
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Equality, ordering, hashing, cloning
 
 /** Strips references from a type, as comparisons of references compare what they refer to. */
 function derefType(type: Type): Type {
@@ -292,13 +289,16 @@ export function valuesUnequal(type: Type, a: Value, b: Value, rhs: Type = type):
   return !valuesEqual(t, leftValue, rightValue, right);
 }
 
-// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
 // code-gauge-allow functionNcss -- One case per kind of type.
 function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boolean {
   const { def } = t;
   switch (def.builtin) {
     case 'String': {
       return textOf(x) === textOf(y);
+    }
+    case 'Path':
+    case 'PathBuf': {
+      return comparePaths(textOf(x), textOf(y)) === 0;
     }
     case 'ParseIntError':
     case 'ParseFloatError':
@@ -310,6 +310,20 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
     case 'Vec':
     case 'VecDeque': {
       return compareSequence(t.args[0], x, y, rhs);
+    }
+    case 'Rc':
+    case 'Arc':
+    case 'RefCell':
+    case 'Cell': {
+      return valuesEqual(t.args[0], pointee(x), pointee(y));
+    }
+    case 'CStr': {
+      const a = x as bigint[];
+      const b = y as bigint[];
+      return a.length === b.length && a.every((byte, index) => byte === b[index]);
+    }
+    case 'Duration': {
+      return (x as DurationValue).nanos === (y as DurationValue).nanos;
     }
     case 'Box':
     case 'Reverse': {
@@ -337,25 +351,31 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
     case 'RangeTo':
     case 'RangeToInclusive':
     case 'RangeFull': {
-      const xr = x as RangeValue;
-      const yr = y as RangeValue;
-      const bound = (a: Value | undefined, b: Value | undefined): boolean =>
-        a === undefined || b === undefined ? a === b : valuesEqual(t.args[0], a, b);
-      return bound(xr.start, yr.start) && bound(xr.end, yr.end) && xr.exhausted === yr.exhausted;
+      return rangesEqual(t.args[0], x as RangeValue, y as RangeValue);
     }
     default: {
-      if (x instanceof StructValue && y instanceof StructValue) {
-        const types = fieldTypes(def, t.args, 0);
-        return types.every((type, index) => valuesEqual(type, x.fields[index], y.fields[index]));
-      }
-      if (x instanceof EnumValue && y instanceof EnumValue) {
-        if (x.variant !== y.variant) return false;
-        const types = fieldTypes(def, t.args, x.variant);
-        return types.every((type, index) => valuesEqual(type, x.fields[index], y.fields[index]));
-      }
-      return x === y;
+      return fieldsEqual(t, x, y);
     }
   }
+}
+
+function rangesEqual(elem: Type, x: RangeValue, y: RangeValue): boolean {
+  const bound = (a: Value | undefined, b: Value | undefined): boolean =>
+    a === undefined || b === undefined ? a === b : valuesEqual(elem, a, b);
+  return bound(x.start, y.start) && bound(x.end, y.end) && x.exhausted === y.exhausted;
+}
+
+function fieldsEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
+  if (x instanceof StructValue && y instanceof StructValue) {
+    const types = fieldTypes(t.def, t.args, 0);
+    return types.every((type, index) => valuesEqual(type, x.fields[index], y.fields[index]));
+  }
+  if (x instanceof EnumValue && y instanceof EnumValue) {
+    if (x.variant !== y.variant) return false;
+    const types = fieldTypes(t.def, t.args, x.variant);
+    return types.every((type, index) => valuesEqual(type, x.fields[index], y.fields[index]));
+  }
+  return x === y;
 }
 
 function compareSequence(elem: Type, left: Value, right: Value, rhs: Type, method: 'eq' | 'ne' = 'eq'): boolean {
@@ -477,7 +497,6 @@ export function comparePartialValues(type: Type, a: Value, b: Value, rhs = type)
   return compareValues(type, a, b, true, rhs);
 }
 
-// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
 // code-gauge-allow functionNcss -- One case per kind of type.
 function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: boolean): number | undefined {
   const { def } = t;
@@ -492,6 +511,24 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
     case 'Box': {
       return compareValues(t.args[0], x, y, partial);
     }
+    case 'Rc':
+    case 'Arc':
+    case 'RefCell':
+    case 'Cell': {
+      return compareValues(t.args[0], pointee(x), pointee(y), partial);
+    }
+    case 'CStr': {
+      return compareBytes(x as bigint[], y as bigint[]);
+    }
+    case 'Path':
+    case 'PathBuf': {
+      return comparePaths(textOf(x), textOf(y));
+    }
+    case 'Duration': {
+      const a = (x as DurationValue).nanos;
+      const b = (y as DurationValue).nanos;
+      return a < b ? -1 : a > b ? 1 : 0;
+    }
     case 'Reverse': {
       return compareValues(t.args[0], (y as StructValue).fields[0], (x as StructValue).fields[0], partial);
     }
@@ -505,30 +542,44 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
       return Math.sign((x as EnumValue).variant - (y as EnumValue).variant);
     }
     default: {
-      if (x instanceof StructValue && y instanceof StructValue) {
-        const types = fieldTypes(def, t.args, 0);
-        for (const [index, type] of types.entries()) {
-          const order = compareValues(type, x.fields[index], y.fields[index], partial);
-          if (order !== 0) return order;
-        }
-        return 0;
-      }
-      if (x instanceof EnumValue && y instanceof EnumValue) {
-        if (x.variant !== y.variant) {
-          const dx = def.variants[x.variant].discriminant;
-          const dy = def.variants[y.variant].discriminant;
-          return dx < dy ? -1 : 1;
-        }
-        const types = fieldTypes(def, t.args, x.variant);
-        for (const [index, type] of types.entries()) {
-          const order = compareValues(type, x.fields[index], y.fields[index], partial);
-          if (order !== 0) return order;
-        }
-        return 0;
-      }
-      return 0;
+      return compareFields(t, x, y, partial);
     }
   }
+}
+
+/** The order of two values of a struct or an enum, as `#[derive(PartialOrd)]` compares them: variant, then fields. */
+function compareFields(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: boolean): number | undefined {
+  const { def } = t;
+  if (x instanceof EnumValue && y instanceof EnumValue && x.variant !== y.variant) {
+    return def.variants[x.variant].discriminant < def.variants[y.variant].discriminant ? -1 : 1;
+  }
+  const bothStructs = x instanceof StructValue && y instanceof StructValue;
+  const bothEnums = x instanceof EnumValue && y instanceof EnumValue;
+  if (!bothStructs && !bothEnums) return 0;
+  const [xs, ys] = [x as StructValue | EnumValue, y as StructValue | EnumValue];
+  const types = fieldTypes(def, t.args, xs instanceof EnumValue ? xs.variant : 0);
+  for (const [index, type] of types.entries()) {
+    const order = compareValues(type, xs.fields[index], ys.fields[index], partial);
+    if (order !== 0) return order;
+  }
+  return 0;
+}
+
+/** Paths compare by their components, as std's do (`a/b` before `a/c`, and `a` before `a/b`). */
+function comparePaths(x: string, y: string): number {
+  const [a, b] = [pathComponents(x), pathComponents(y)];
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return Math.sign(a.length - b.length);
+}
+
+/**
+ * A path's components as std's `components` gives them: its parts between `/`, of which a leading empty one is the
+ * root and a `.` counts only at the start.
+ */
+function pathComponents(path: string): string[] {
+  return path.split('/').filter((part, index) => index === 0 || (part !== '' && part !== '.'));
 }
 
 function compareOrderedEntries(
@@ -647,7 +698,6 @@ export function cloneValue(type: Type, value: Value): Value {
   return cloneResults || !hooks ? clonePart(type, value) : withCloneResults(() => clonePart(type, value));
 }
 
-/** The program's own `clone` of a value, whose body builds values of its own. */
 function userClone(type: Type, value: Value): { value: Value } | undefined {
   const building = cloneResults;
   cloneResults = undefined;
@@ -660,7 +710,6 @@ function userClone(type: Type, value: Value): { value: Value } | undefined {
   }
 }
 
-// code-gauge-allow functionNcss -- One case per kind of value.
 function clonePart(type: Type, value: Value): Value {
   const t = normalize(shallow(type));
   if (t.kind === 'ref') return value;
@@ -683,62 +732,98 @@ function clonePart(type: Type, value: Value): Value {
       return cloneItems(items, (item) => clonePart(t.elem, item));
     }
     case 'adt': {
-      const { def } = t;
-      switch (def.builtin) {
-        case 'String': {
-          return textOf(value);
-        }
-        case 'Vec':
-        case 'VecDeque':
-        case 'BinaryHeap': {
-          return cloneItems(value as Value[], (item) => clonePart(t.args[0], item));
-        }
-        case 'Box': {
-          return clonePart(t.args[0], value);
-        }
-        case 'HashMap':
-        case 'BTreeMap':
-        case 'HashSet':
-        case 'BTreeSet': {
-          return cloneCollection(t.args, value as MapValue | SetValue);
-        }
-        case 'Range':
-        case 'RangeInclusive':
-        case 'RangeFrom':
-        case 'RangeTo':
-        case 'RangeToInclusive': {
-          const range = value as RangeValue;
-          return copyRange(range, (item) => clonePart(t.args[0], item));
-        }
-        case 'Iter': {
-          return cloneIterator(value as IterValue);
-        }
-        default: {
-          if (value instanceof StructValue) {
-            const types = fieldTypes(def, t.args, 0);
-            hooks?.allocate(types.length);
-            return new StructValue(
-              def,
-              types.map((type, index) => clonePart(type, value.fields[index]))
-            );
-          }
-          if (value instanceof EnumValue) {
-            const types = fieldTypes(def, t.args, value.variant);
-            hooks?.allocate(types.length);
-            return new EnumValue(
-              def,
-              value.variant,
-              types.map((type, index) => clonePart(type, value.fields[index]))
-            );
-          }
-          return value;
-        }
-      }
+      return cloneAdt(t, value);
     }
     default: {
       return value;
     }
   }
+}
+
+// code-gauge-allow functionNcss -- One case per kind of owning type.
+function cloneAdt(t: Type & { kind: 'adt' }, value: Value): Value {
+  const { def } = t;
+  switch (def.builtin) {
+    case 'String': {
+      return textOf(value);
+    }
+    case 'Vec':
+    case 'VecDeque':
+    case 'BinaryHeap': {
+      return cloneItems(value as Value[], (item) => clonePart(t.args[0], item));
+    }
+    case 'Box': {
+      return clonePart(t.args[0], value);
+    }
+    case 'Rc':
+    case 'Arc':
+    case 'Weak':
+    case 'RefCell':
+    case 'Cell': {
+      return cloneShared(t, derefAll(value));
+    }
+    case 'Sender': {
+      const channel = derefAll(value) as ChannelEnd;
+      channel.senders++;
+      return channel;
+    }
+    case 'HashMap':
+    case 'BTreeMap':
+    case 'HashSet':
+    case 'BTreeSet': {
+      return cloneCollection(t.args, value as MapValue | SetValue);
+    }
+    case 'Range':
+    case 'RangeInclusive':
+    case 'RangeFrom':
+    case 'RangeTo':
+    case 'RangeToInclusive': {
+      return copyRange(value as RangeValue, (item) => clonePart(t.args[0], item));
+    }
+    case 'Iter': {
+      return cloneIterator(value as IterValue);
+    }
+    default: {
+      return cloneFields(t, value);
+    }
+  }
+}
+
+/** A clone of an `Rc` or an `Arc` (one more count), of a `Weak` (one more weak count), or of a cell's value. */
+function cloneShared(t: Type & { kind: 'adt' }, target: Value): Value {
+  if (t.def.builtin === 'Rc' || t.def.builtin === 'Arc') {
+    const box = target as SharedBox;
+    box.strong++;
+    return box;
+  }
+  if (t.def.builtin === 'Weak') {
+    const { box } = target as WeakRef;
+    if (box) box.weak++;
+    return new WeakRef(box);
+  }
+  return new CellBox(clonePart(t.args[0], (target as CellBox).value));
+}
+
+function cloneFields(t: Type & { kind: 'adt' }, value: Value): Value {
+  const { def } = t;
+  if (value instanceof StructValue) {
+    const types = fieldTypes(def, t.args, 0);
+    hooks?.allocate(types.length);
+    return new StructValue(
+      def,
+      types.map((type, index) => clonePart(type, value.fields[index]))
+    );
+  }
+  if (value instanceof EnumValue) {
+    const types = fieldTypes(def, t.args, value.variant);
+    hooks?.allocate(types.length);
+    return new EnumValue(
+      def,
+      value.variant,
+      types.map((type, index) => clonePart(type, value.fields[index]))
+    );
+  }
+  return value;
 }
 
 /** A clone of an iterator, which goes on from where the iterator is, on its own. */
@@ -796,7 +881,6 @@ function cloneItems(items: Value[], clone: (value: Value) => Value): Value[] {
   return copy;
 }
 
-/** A clone of a map or a set, with its table's size, of keys (and values) of the types `args`. */
 function cloneCollection(args: Type[], source: MapValue | SetValue): MapValue | SetValue {
   if (source instanceof MapValue) {
     hooks?.allocate(source.entries.size * 2);
@@ -810,4 +894,24 @@ function cloneCollection(args: Type[], source: MapValue | SetValue): MapValue | 
   copy.entries.copyFrom(source.entries, (item) => clonePart(args[0], item));
   hooks?.copyScalarStorage(source, copy);
   return copy;
+}
+
+function pointee(value: Value): Value {
+  const target = derefAll(value);
+  if (target instanceof SharedBox || target instanceof CellBox) return target.value;
+  if (target instanceof BorrowGuard) return target.cell.value;
+  return target;
+}
+
+function derefAll(value: Value): Value {
+  let current = value;
+  while (isPlace(current)) current = current.get();
+  return current;
+}
+
+function compareBytes(a: bigint[], b: bigint[]): number {
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return Math.sign(a.length - b.length);
 }

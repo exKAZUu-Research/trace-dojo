@@ -1,16 +1,18 @@
 import type { ReceiverAdjust } from './annotations';
 import { normalize } from './infer';
 import type { Program } from './items';
-import { dynIteratorTarget, intoIterItem, intoIterShape, iterationBound } from './iterTypes';
+import { dynIteratorTarget, intoIterItem, intoIterShape, isUserIterator, iterationBound } from './iterTypes';
 import type { TraitSolver } from './traits';
 import {
+  adt,
   allSupertraits,
+  type DerefKind,
   type FnDef,
   freshVar,
   type ImplDef,
   isBuiltin,
   ref,
-  resolve,
+  type SelfWrapper,
   shallow,
   substitute,
   substituteTraitRef,
@@ -21,7 +23,7 @@ import {
 
 export interface DerefStep {
   type: Type;
-  derefs: ('ref' | 'mutRef' | 'own')[];
+  derefs: DerefKind[];
 }
 
 /** The types a value derefs to, as method calls and field accesses look through them. */
@@ -44,13 +46,19 @@ export function autoderefSteps(program: Program, type: Type): DerefStep[] {
 }
 
 /** One deref: through a reference, or from an owner to what it owns (`Box<T>` → `T`, `String` → `str`, `Vec<T>` → `[T]`). */
-export function derefOnce(program: Program, type: Type): { type: Type; kind: 'ref' | 'mutRef' | 'own' } | undefined {
+export function derefOnce(program: Program, type: Type): { type: Type; kind: DerefKind } | undefined {
   const t = shallow(type);
   if (t.kind === 'ref') return { type: t.target, kind: t.mutable ? 'mutRef' : 'ref' };
+  // A type parameter derefs through its `Deref` bound (`T: Deref<Target = String>`).
+  if (t.kind === 'param') return userDeref(program, t);
   if (t.kind !== 'adt') return undefined;
   switch (t.def.builtin) {
     case 'Box': {
       return { type: t.args[0], kind: 'own' };
+    }
+    case 'Pin': {
+      // `Pin<P>` derefs to what `P` points to, and holds `P` itself.
+      return derefOnce(program, t.args[0]);
     }
     case 'String': {
       return { type: { kind: 'str' }, kind: 'own' };
@@ -58,11 +66,27 @@ export function derefOnce(program: Program, type: Type): { type: Type; kind: 're
     case 'Vec': {
       return { type: { kind: 'slice', elem: t.args[0] }, kind: 'own' };
     }
+    case 'Rc':
+    case 'Ref':
+    case 'RefMut':
+    case 'Arc':
+    case 'MutexGuard':
+    case 'RwLockReadGuard':
+    case 'RwLockWriteGuard': {
+      return { type: t.args[0], kind: 'user' };
+    }
     default: {
-      void program;
-      return undefined;
+      return t.def.builtin ? undefined : userDeref(program, t);
     }
   }
+}
+
+/** The `Target` of the program's `Deref` impl for one of its types, which `*` and autoderef reach by calling `deref`. */
+function userDeref(program: Program, type: Type): { type: Type; kind: DerefKind } | undefined {
+  const projection = program.traitDef('Deref').assocTypes.get('Target')?.projection;
+  if (!projection) return undefined;
+  const target = normalize(adt(projection, [type]));
+  return target.kind === 'adt' && target.def === projection ? undefined : { type: target, kind: 'user' };
 }
 
 export interface MethodMatch {
@@ -106,6 +130,16 @@ export function lookupMethod(
     }
     if (stepType.kind === 'var') return 'ambiguous';
   }
+  return probeIteratorMethods(program, solver, steps, name);
+}
+
+/** The methods of `Iter` that an iterator the receiver derefs to has: a bounded parameter's, the program's, or a char iterator's. */
+function probeIteratorMethods(
+  program: Program,
+  solver: TraitSolver,
+  steps: DerefStep[],
+  name: string
+): MethodMatch | 'ambiguous' | undefined {
   // A type parameter or an opaque type bounded by `Iterator` has the methods of `Iter`, and by `IntoIterator`,
   // `into_iter`.
   const bounded = steps.find((step) => {
@@ -117,6 +151,12 @@ export function lookupMethod(
     if (bound.trait.builtin === 'Iterator' || name === 'into_iter') {
       return probeAsIter(program, solver, bounded, name, true);
     }
+  }
+  // The program's own iterator has the methods of `Iter` after its own.
+  const userIter = steps.find((step) => isUserIterator(step.type));
+  if (userIter) {
+    const found = probeAsIter(program, solver, userIter, name, true);
+    if (found) return found;
   }
   const characterIter = steps.find((step) => {
     const type = shallow(step.type);
@@ -162,7 +202,6 @@ function rangeAsIter(program: Program, range: Type): Type | undefined {
   return item && shape && program.iterType(item, shape);
 }
 
-/** Finds a method of iterators for a receiver that is an iterator of another type. */
 function probeAsIter(
   program: Program,
   solver: TraitSolver,
@@ -288,7 +327,7 @@ function traitCandidates(
     if (!trait.builtin || !inScope(trait)) continue;
     const fn = trait.methods.get(name);
     if (!fn?.selfMode) continue;
-    const selfType = selfForMode(fn.selfMode, receiverType);
+    const selfType = selfForMode(fn.selfMode, receiverType, fn.selfWrapper);
     if (!selfType) continue;
     candidates.push({
       trait,
@@ -315,9 +354,12 @@ function applies(solver: TraitSolver, attempt: () => unknown): boolean {
 }
 
 /** The type `Self` must be for a method with this receiver mode to take `receiverType`. */
-function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type): Type | undefined {
+function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type, wrapper?: SelfWrapper): Type | undefined {
   if (mode === 'value') {
     const t = normalize(shallow(receiverType));
+    // A `dyn Trait` in a `Box` is the `Self` of a method taking `self: Box<Self>`.
+    if (t.kind === 'dyn' && wrapper === 'Box') return receiverType;
+    if (wrapper) return wrappedSelf(t, wrapper);
     return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? undefined : receiverType;
   }
   const t = shallow(receiverType);
@@ -327,48 +369,16 @@ function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type): Type
   return t.target;
 }
 
+/** `Self` for a method taking `self: Box<Self>`, `Rc<Self>`, `Arc<Self>`, or `Pin<&mut Self>`, called on that pointer. */
+function wrappedSelf(t: Type, wrapper: SelfWrapper): Type | undefined {
+  if (t.kind !== 'adt' || t.def.builtin !== wrapper) return undefined;
+  if (wrapper !== 'Pin') return t.args[0];
+  const pointer = shallow(t.args[0]);
+  return pointer.kind === 'ref' && pointer.mutable ? pointer.target : undefined;
+}
+
 function ownParams(fn: FnDef): Type[] {
   return fn.params.slice(fn.parentParamCount).map(() => freshVar());
-}
-
-export function failedInherentBound(
-  program: Program,
-  solver: TraitSolver,
-  receiver: Type,
-  name: string
-): { type: Type; ref: TraitRef } | undefined {
-  for (const { type } of autoderefSteps(program, receiver)) {
-    for (const impl of program.impls) {
-      const fn = impl.methods.get(name);
-      if (impl.trait || !fn?.selfMode) continue;
-      const missing = failedImplBound(solver, impl, arrayAsSlice(fn, type));
-      if (missing) return missing;
-    }
-  }
-  return undefined;
-}
-
-function failedImplBound(
-  solver: TraitSolver,
-  impl: ImplDef,
-  receiver: Type
-): { type: Type; ref: TraitRef } | undefined {
-  const snapshot = solver.unifier.snapshot();
-  try {
-    const subst = solver.matchImplSelf(impl, receiver);
-    if (!subst) return undefined;
-    for (const param of impl.params) {
-      const type = subst.get(param)!;
-      for (const bound of param.bounds) {
-        const ref = substituteTraitRef(bound, subst);
-        if (solver.implements(type, ref) === 'no')
-          return { type: resolve(type), ref: { ...ref, args: ref.args.map((arg) => resolve(arg)) } };
-      }
-    }
-    return undefined;
-  } finally {
-    solver.unifier.rollback(snapshot);
-  }
 }
 
 function matchSelf(
@@ -377,7 +387,7 @@ function matchSelf(
   fn: FnDef,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType);
+  const selfType = selfForMode(fn.selfMode!, receiverType, fn.selfWrapper);
   if (!selfType) return undefined;
   const subst = solver.matchImpl(impl, arrayAsSlice(fn, selfType));
   if (!subst) return undefined;
@@ -386,7 +396,7 @@ function matchSelf(
 }
 
 /** Standard declarations use slice stand-ins for arrays without const length parameters. */
-function arrayAsSlice(fn: FnDef, selfType: Type): Type {
+export function arrayAsSlice(fn: FnDef, selfType: Type): Type {
   if (fn.selfMode !== 'value' || !(fn.module as { isStd?: boolean }).isStd) return selfType;
   const t = normalize(shallow(selfType));
   const declared = fn.impl && normalize(shallow(fn.impl.selfType));
@@ -399,14 +409,13 @@ function arrayAsSlice(fn: FnDef, selfType: Type): Type {
   return selfType;
 }
 
-/** A trait's default method, called on a type with an impl of the trait that does not override it. */
 function matchDefault(
   solver: TraitSolver,
   impl: ImplDef,
   fn: FnDef,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType);
+  const selfType = selfForMode(fn.selfMode!, receiverType, fn.selfWrapper);
   if (!selfType) return undefined;
   const subst = solver.matchImpl(impl, selfType);
   if (!subst) return undefined;
@@ -421,7 +430,7 @@ function matchTraitSelf(
   target: Type,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType);
+  const selfType = selfForMode(fn.selfMode!, receiverType, fn.selfWrapper);
   if (!selfType || !solver.unifier.tryUnify(selfType, target)) return undefined;
   return { fn, typeArgs: [target, ...bound.args, ...ownParams(fn)], selfType: target };
 }
@@ -440,7 +449,6 @@ interface Associated {
   ambiguousWith?: TraitDef;
 }
 
-/** Finds an associated function or method by a path such as `Type::name`, for calls like `String::from` or `Point::new`. */
 export function lookupAssociated(
   program: Program,
   solver: TraitSolver,

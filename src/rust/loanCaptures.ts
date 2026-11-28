@@ -2,6 +2,7 @@ import type { Annotations, LocalVar } from './annotations';
 import type { Expr, Pattern } from './ast';
 import { forEachDirect, patternBindingParts } from './astWalk';
 import { normalize } from './infer';
+import { derefProjection } from './loanPlaces';
 import { derefSteps, typeAfter } from './regions';
 import { shallow, substitute, type Type } from './types';
 
@@ -20,7 +21,7 @@ export interface ProjectedCapture extends Projection {
 export function captureStoragePlaces(captures: ProjectedCapture[], type: Type): ProjectedCapture[] {
   return mergeCaptures(
     captures.map((capture) => {
-      const boundary = capture.proj.findIndex((part) => part === '*' || part === '#' || part === '[]');
+      const boundary = capture.proj.findIndex((part) => ['*', '#', '&', '[]'].includes(part));
       if (boundary === -1) return capture;
       const proj = capture.proj.slice(0, boundary);
       return { ...capture, proj, type: projectionPrefixType(type, proj) };
@@ -38,7 +39,9 @@ export function captureProjections(
   const observations: ProjectedCapture[] = [];
   const ignored = forEachCapture(annotations, body, local, (place, { proj, type }, binding) => {
     const mode = modeOf(place, binding);
-    const boundary = proj.findIndex((part) => part === '[]' || (mode === 'value' && (part === '#' || part === '*')));
+    const boundary = proj.findIndex(
+      (part) => part === '[]' || part === '&' || (mode === 'value' && (part === '#' || part === '*'))
+    );
     const path = boundary === -1 ? proj : proj.slice(0, boundary);
     observations.push({ proj: path, type: boundary === -1 ? type : projectionPrefixType(local.type, path), mode });
   });
@@ -192,15 +195,11 @@ function fieldChain(annotations: Annotations, expr: Expr, local: LocalVar): stri
   }
   if (expr.kind === 'unary' && expr.op === '*') {
     const base = fieldChain(annotations, expr.operand, local);
-    return base && [...base, isReference(expr.operand.ty) ? '*' : '#'];
+    return base && [...base, derefProjection(expr.operand.ty)];
   }
   if (expr.kind !== 'field' && expr.kind !== 'index') return undefined;
   const base = fieldChain(annotations, expr.operand, local);
   if (!base) return undefined;
   if (expr.kind === 'index') return [...base, ...derefSteps(annotations.indexes.get(expr)?.derefs), '[]'];
   return [...base, ...derefSteps(annotations.fields.get(expr)?.derefs), expr.name];
-}
-
-function isReference(type: Type | undefined): boolean {
-  return type !== undefined && normalize(shallow(type)).kind === 'ref';
 }

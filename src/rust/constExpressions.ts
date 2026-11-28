@@ -29,6 +29,11 @@ import {
 import { utf8Length } from './utf8';
 
 export function constInteger(expr: Expr, scope: TypeScope, expected = USIZE): bigint | undefined {
+  const value = constScalarValue(expr, scope, expected);
+  return typeof value === 'bigint' ? value : undefined;
+}
+
+export function constScalarValue(expr: Expr, scope: TypeScope, expected: Type): bigint | boolean | string | undefined {
   const evaluatingLengths = scope.evaluatingLengths ?? new Set<Expr>();
   if (evaluatingLengths.has(expr) || evaluatingLengths.size >= 64) return;
   evaluatingLengths.add(expr);
@@ -39,7 +44,8 @@ export function constInteger(expr: Expr, scope: TypeScope, expected = USIZE): bi
       { visiting: new Set(), values: new Map(), hints: new WeakMap(), unifier: new Unifier(), projections: new Set() },
       expected
     );
-    return scalar && sameType(scalar.type, expected) && typeof scalar.value === 'bigint' ? scalar.value : undefined;
+    if (!scalar || !sameType(scalar.type, expected) || typeof scalar.value === 'number') return undefined;
+    return scalar.value;
   } catch (error) {
     if (error instanceof RustPanic) return undefined;
     throw error;

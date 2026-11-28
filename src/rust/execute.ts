@@ -33,7 +33,6 @@ export function executeRustProgram(source: string, input?: ProgramInput): Progra
 /** The commit of Rust 1.99.1, which the paths of its standard library's sources in panic messages name. */
 const RUSTC_COMMIT = '58cf8f9c35b355199727627d07ae34a4e2846d67';
 
-/** The text Rust prints when a panic ends the program. */
 export function describePanic(panic: RustPanic): string {
   const { row, col, displayCol } = panic.span;
   // A location in a dependency of the standard library is a full path (`/rust/deps/...`).

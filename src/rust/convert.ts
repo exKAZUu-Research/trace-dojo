@@ -3,9 +3,12 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
   Attributes,
+  Block,
   BoundAst,
+  ConstItem,
   Crate,
   EnumItem,
+  Expr,
   FieldAst,
   FnItem,
   Generics,
@@ -24,40 +27,46 @@ import type {
   Visibility,
 } from './ast';
 import { ExpressionConverter } from './convertExpressions';
-import { isComment, syntaxError, unavailable, withoutDocAttributes } from './convertSyntax';
+import { isComment, splitAttributes, syntaxError, unavailable } from './convertSyntax';
+import type { SelfWrapper } from './types';
 
 export { type Reparse, syntaxError, unavailable } from './convertSyntax';
-
-const DERIVABLE = new Set(['Debug', 'Clone', 'Copy', 'PartialEq', 'Eq', 'PartialOrd', 'Ord', 'Hash', 'Default']);
 
 /** Converts tree-sitter's concrete syntax tree to the AST, rejecting syntax this interpreter does not support. */
 export class Converter extends ExpressionConverter {
   convertCrate(root: Node): Crate {
     const items: Item[] = [];
+    // An inner `#![cfg(..)]` at the top that does not hold removes the whole program.
+    if (!this.innerCfgHolds(root)) return { items };
     for (const child of root.namedChildren) {
-      if (isComment(child)) continue;
-      if (child.type === 'expression_statement' || child.type === 'let_declaration') {
+      if (isComment(child) || child.type === 'inner_attribute_item') continue;
+      const isMacro =
+        child.type === 'expression_statement' &&
+        child.namedChildren.find((part) => !isComment(part))?.type === 'macro_invocation';
+      if ((child.type === 'expression_statement' && !isMacro) || child.type === 'let_declaration') {
         syntaxError(this.span(child), '文は、関数の中に書いてください。');
       }
-      const item = this.item(child);
-      if (item) items.push(item);
+      // rustc skips a `#!` line at the start of the file, as Unix runs scripts with it.
+      if (child.type === 'shebang') continue;
+      if (child.type === 'frontmatter')
+        syntaxError(this.span(child), 'フロントマター（---）は、不安定な機能なので使えません（E0658）。');
+      items.push(...this.itemsOf(child));
     }
     return { items };
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Items
-
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
   protected item(node: Node, attrs?: Attributes): Item | undefined {
     const span = this.span(node);
     switch (node.type) {
       case 'function_item': {
-        return this.fnItem(node);
+        return this.innerCfgHolds(node.childForFieldName('body')) ? this.fnItem(node, false) : undefined;
       }
       case 'struct_item': {
         return this.structItem(node, attrs ?? { derives: [] });
+      }
+      case 'union_item': {
+        return { ...this.structItem(node, attrs ?? { derives: [] }), isUnion: true };
       }
       case 'enum_item': {
         return this.enumItem(node, attrs ?? { derives: [] });
@@ -69,18 +78,21 @@ export class Converter extends ExpressionConverter {
         return this.implItem(node);
       }
       case 'const_item': {
-        const value = this.isStd ? node.childForFieldName('value') : this.field(node, 'value');
+        return this.constItem(node, this.isStd);
+      }
+      case 'static_item': {
         return {
           kind: 'const',
           name: this.identifier(this.field(node, 'name')),
           span,
           vis: this.visibility(node),
           type: this.type(this.field(node, 'type')),
-          value: value ? this.expr(value) : undefined,
+          value: this.expr(this.field(node, 'value')),
+          isStatic: true,
+          isMutable: node.namedChildren.some((child) => child.type === 'mutable_specifier'),
         };
       }
       case 'type_item': {
-        if (!this.isStd) return this.unsupportedItem(node);
         return {
           kind: 'typeAlias',
           name: this.identifier(this.field(node, 'name')),
@@ -94,14 +106,17 @@ export class Converter extends ExpressionConverter {
         const body = node.childForFieldName('body');
         if (!body) unavailable(span, '別のファイルのモジュール（mod 名前;）');
         const items: Item[] = [];
+        const name = this.identifier(this.field(node, 'name'));
+        if (!this.innerCfgHolds(body)) return undefined;
+        this.modulePath.push(name);
         for (const child of body.namedChildren) {
-          if (isComment(child)) continue;
-          const item = this.item(child);
-          if (item) items.push(item);
+          if (isComment(child) || child.type === 'inner_attribute_item') continue;
+          items.push(...this.itemsOf(child));
         }
+        this.modulePath.pop();
         return {
           kind: 'mod',
-          name: this.identifier(this.field(node, 'name')),
+          name,
           span,
           vis: this.visibility(node),
           items,
@@ -114,9 +129,17 @@ export class Converter extends ExpressionConverter {
         return this.attributed(node);
       }
       case 'attribute_item': {
-        return unavailable(span, `属性（${node.text}）`);
+        return syntaxError(span, '属性の後には、それを付ける項目を書いてください。');
+      }
+      case 'inner_attribute_item': {
+        this.attributes.readInner(node);
+        return undefined;
       }
       case 'empty_statement': {
+        return undefined;
+      }
+      case 'macro_definition': {
+        this.defineMacro(node);
         return undefined;
       }
       case 'function_signature_item': {
@@ -129,54 +152,59 @@ export class Converter extends ExpressionConverter {
     }
   }
 
+  /** A constant; `allowMissingValue` for one of a trait, whose impls give its value. */
+  private constItem(node: Node, allowMissingValue: boolean): ConstItem {
+    const value = allowMissingValue ? node.childForFieldName('value') : this.field(node, 'value');
+    return {
+      kind: 'const',
+      name: this.identifier(this.field(node, 'name')),
+      span: this.span(node),
+      vis: this.visibility(node),
+      type: this.type(this.field(node, 'type')),
+      value: value ? this.expr(value) : undefined,
+    };
+  }
+
   private unsupportedItem(node: Node): never {
     const span = this.span(node);
+    const unstable: Record<string, string> = {
+      decl_macro: 'macro によるマクロの定義',
+      trait_alias: 'トレイトの別名',
+    };
+    if (Object.hasOwn(unstable, node.type))
+      syntaxError(span, `${unstable[node.type]}は、不安定な機能なので使えません（E0658）。`);
     const names: Record<string, string> = {
-      static_item: 'static 変数',
-      type_item: '型の別名（type）',
-      union_item: '共用体（union）',
-      macro_definition: 'マクロの定義（macro_rules!）',
-      decl_macro: 'マクロの定義（macro）',
       extern_crate_declaration: '外部のクレート（extern crate）',
       foreign_mod_item: '外部の関数の宣言（extern ブロック）',
       inner_attribute_item: `属性（${node.text.split('\n')[0]}）`,
       function_signature_item: '本体のない関数',
-      trait_alias: 'トレイトの別名',
-      shebang: '#! で始まる行',
-      frontmatter: 'フロントマター（---）',
       macro_invocation: '関数の外のマクロの呼び出し',
     };
     return unavailable(span, names[node.type] ?? `この書き方（${node.type}）`);
   }
 
-  private attributed(node: Node): Item | undefined {
-    const attrs: Attributes = { derives: [] };
-    let declaration: Node | undefined;
-    for (const child of node.namedChildren) {
-      if (isComment(child)) continue;
-      if (child.type === 'attribute_item') this.attribute(child, attrs);
-      else declaration = child;
-    }
-    if (!declaration) return undefined;
-    if (attrs.derives.length > 0 && declaration.type !== 'struct_item' && declaration.type !== 'enum_item') {
-      syntaxError(this.span(node), '#[derive] は、構造体と列挙型にだけ付けられます。');
-    }
-    return this.item(declaration, attrs);
+  /** Whether the inner attributes of a module, a function's body or the file keep it (`#![cfg(test)]` removes it). */
+  private innerCfgHolds(body: Node | null): boolean {
+    const inner = body?.namedChildren.filter((child) => child.type === 'inner_attribute_item') ?? [];
+    return inner.every((child) => this.attributes.readInner(child));
   }
 
-  private attribute(node: Node, attrs: Attributes): void {
-    const attribute = node.namedChildren.find((child) => child.type === 'attribute');
-    const name = attribute?.namedChildren[0];
-    if (!attribute || name?.type !== 'identifier' || name.text !== 'derive') {
-      unavailable(this.span(node), `属性（${node.text}）`);
+  private attributed(node: Node): Item | undefined {
+    const { attributes, target } = splitAttributes(node);
+    const attrs = this.attributes.read(attributes, 'item');
+    if (!attrs || !target) return undefined;
+    const declaration = target;
+    const derivable = new Set(['struct_item', 'enum_item', 'union_item']);
+    if (attrs.derives.length > 0 && !derivable.has(declaration.type)) {
+      syntaxError(this.span(node), '#[derive] は、構造体と列挙型にだけ付けられます。');
     }
-    const args = attribute.childForFieldName('arguments');
-    if (!args) unavailable(this.span(node), `属性（${node.text}）`);
-    for (const token of args.namedChildren) {
-      if (token.type !== 'identifier') unavailable(this.span(token), `#[derive] の中の ${token.text}`);
-      if (!DERIVABLE.has(token.text)) unavailable(this.span(token), `#[derive(${token.text})]`);
-      attrs.derives.push({ name: token.text, span: this.span(token) });
+    if (attrs.repr && declaration.type !== 'enum_item') {
+      syntaxError(this.span(node), `#[repr(${attrs.repr})] は、列挙型にだけ付けられます。`);
     }
+    if (attrs.hasRepr && !derivable.has(declaration.type)) {
+      syntaxError(this.span(node), '#[repr] は、構造体と列挙型と共用体にだけ付けられます。');
+    }
+    return this.item(declaration, attrs);
   }
 
   private visibility(node: Node): Visibility {
@@ -187,11 +215,15 @@ export class Converter extends ExpressionConverter {
 
   private visibilityModifier(modifier: Node): Visibility {
     if (modifier.text === 'pub') return 'pub';
-    const scope = modifier.namedChildren.find((child) => !isComment(child))?.text;
+    const scopeNode = modifier.namedChildren.find((child) => !isComment(child));
+    const scope = scopeNode?.text;
     if (scope === 'self') return 'private';
     if (scope === 'super') return 'super';
     if (scope === 'crate') return 'pub';
-    return unavailable(this.span(modifier), `公開の範囲の指定（${modifier.text}）`);
+    if (scopeNode && /^pub\s*\(\s*in\b/.test(modifier.text)) {
+      return { in: scopeNode.text.split('::').map((part) => part.trim()) };
+    }
+    return syntaxError(this.span(modifier), `公開の範囲の指定（${modifier.text}）の書き方に誤りがあります。`);
   }
 
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
@@ -199,26 +231,29 @@ export class Converter extends ExpressionConverter {
   private fnItem(node: Node, allowMissingBody = false): FnItem {
     const span = this.span(node);
     const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
-    const isConst = this.isStd && modifiers?.text.trim() === 'const';
-    if (modifiers && !isConst) {
+    const words = modifiers?.text.split(/\s+/) ?? [];
+    const isConst = words.includes('const');
+    const isUnsafe = words.includes('unsafe');
+    const isAsync = words.includes('async');
+    if (modifiers) {
       const text = modifiers.text;
-      if (text.includes('async')) unavailable(span, 'async fn');
-      if (text.includes('unsafe')) unavailable(span, 'unsafe fn');
-      if (text.includes('extern')) unavailable(span, 'extern fn');
-      unavailable(span, `関数の修飾子（${text}）`);
+      if (words.includes('extern')) unavailable(span, '外部から呼べる関数（extern fn）');
+      if (words.some((word) => word && word !== 'const' && word !== 'unsafe' && word !== 'async')) {
+        unavailable(span, `関数の修飾子（${text}）`);
+      }
     }
     const parametersNode = this.field(node, 'parameters');
     let selfParam: SelfParam | undefined;
     const params: Param[] = [];
-    for (const child of parametersNode.namedChildren) {
-      if (isComment(child)) continue;
+    for (const { node: child } of this.withAttributes(parametersNode.namedChildren)) {
       if (child.type === 'self_parameter') {
         if (selfParam || params.length > 0) syntaxError(this.span(child), 'self は、最初の引数に一度だけ書けます。');
         selfParam = this.selfParam(child);
+      } else if (child.type === 'parameter' && this.field(child, 'pattern').type === 'self') {
+        if (selfParam || params.length > 0) syntaxError(this.span(child), 'self は、最初の引数に一度だけ書けます。');
+        selfParam = this.typedSelfParam(child);
       } else if (child.type === 'parameter') {
         params.push(this.param(child));
-      } else if (child.type === 'attribute_item') {
-        unavailable(this.span(child), `属性（${child.text}）`);
       } else if (child.type === 'variadic_parameter') {
         unavailable(this.span(child), '可変個の引数（...）');
       } else {
@@ -228,21 +263,28 @@ export class Converter extends ExpressionConverter {
     const bodyNode = node.childForFieldName('body');
     if (!bodyNode && !allowMissingBody) syntaxError(span, '関数の本体（{ ... }）が足りません。');
     const ret = node.childForFieldName('return_type');
-    const body = bodyNode ? this.block(bodyNode) : undefined;
+    const body = bodyNode ? this.inContext(isAsync, () => this.block(bodyNode)) : undefined;
+    const retType = ret ? this.returnType(ret) : undefined;
     return {
+      ...(isAsync ? asyncFunction(retType, body, span) : { ret: retType, body }),
+      isAsync,
       kind: 'fn',
       isConst,
+      isUnsafe,
       name: this.identifier(this.field(node, 'name')),
       span,
       vis: this.visibility(node),
       generics: this.generics(node),
       selfParam,
       params,
-      ret: ret ? this.type(ret) : undefined,
-      body,
       endRow: node.endPosition.row,
       headerEndRow: bodyNode ? bodyNode.startPosition.row : node.endPosition.row,
     };
+  }
+
+  /** A function's return type, which may be `!`, the one place stable Rust lets it be written. */
+  private returnType(node: Node): TypeAst {
+    return node.type === 'never_type' ? { kind: 'never', span: this.span(node) } : this.type(node);
   }
 
   private selfParam(node: Node): SelfParam {
@@ -254,6 +296,21 @@ export class Converter extends ExpressionConverter {
     const isMut = node.namedChildren.some((child) => child.type === 'mutable_specifier');
     if (isRef) return { mode: isMut ? 'mutRef' : 'ref', mutable: false, lifetime, span };
     return { mode: 'value', mutable: isMut, span };
+  }
+
+  private typedSelfParam(node: Node): SelfParam {
+    const span = this.span(node);
+    const written = this.field(node, 'type').text;
+    const type = written.replaceAll(/\s+/g, '');
+    const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
+    if (type === 'Self') return { mode: 'value', mutable, span };
+    const reference = /^&\s*('[\p{L}\p{N}_]+)?\s*(mut\s+)?Self$/u.exec(written.trim());
+    if (reference) return { mode: reference[2] ? 'mutRef' : 'ref', mutable: false, lifetime: reference[1], span };
+    // The wrappers may be written with their std paths (`std::rc::Rc<Self>`, `::std::pin::Pin<&mut Self>`).
+    const bare = type.replace(/^(?:::)?(?:std|core|alloc)::(?:boxed|rc|sync|pin)::/, '');
+    const wrapper = /^(Box|Rc|Arc)<Self>$/.exec(bare)?.[1] ?? (/^Pin<&('\w+)?mutSelf>$/.test(bare) ? 'Pin' : undefined);
+    if (wrapper) return { mode: 'value', wrapper: wrapper as SelfWrapper, mutable, span };
+    return unavailable(span, `型を書いた self（self: ${type}）`);
   }
 
   private param(node: Node): Param {
@@ -268,7 +325,6 @@ export class Converter extends ExpressionConverter {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Type and lifetime parameters and where clauses use distinct Rust syntax.
-  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   private generics(node: Node): Generics {
     const generics: Generics = { params: [], lifetimes: [], where: [] };
     const parameters = node.childForFieldName('type_parameters');
@@ -276,15 +332,27 @@ export class Converter extends ExpressionConverter {
       if (isComment(child)) continue;
       const span = this.span(child);
       if (child.type === 'lifetime_parameter') {
+        const name = this.field(child, 'name').text;
         const bounds = child.childForFieldName('bounds');
-        if (bounds) unavailable(span, "ライフタイムの境界（'a: 'b）");
-        generics.lifetimes.push(this.field(child, 'name').text);
+        const outlives =
+          bounds?.namedChildren.filter((part) => part.type === 'lifetime').map((part) => part.text) ?? [];
+        if (outlives.length > 0) (generics.lifetimeBounds ??= []).push({ name, outlives });
+        generics.lifetimes.push(name);
         continue;
       }
-      if (child.type === 'const_parameter') unavailable(span, '定数のジェネリクス（const N: usize）');
+      if (child.type === 'const_parameter') {
+        const value = child.childForFieldName('value');
+        generics.params.push({
+          name: this.identifier(this.field(child, 'name')),
+          span,
+          bounds: [],
+          constType: this.type(this.field(child, 'type')),
+          defaultType: value ? { kind: 'constArg', value: this.expr(value), span: this.span(value) } : undefined,
+        });
+        continue;
+      }
       if (child.type !== 'type_parameter') unavailable(span, `型引数の書き方（${child.text}）`);
       const defaultType = child.childForFieldName('default_type');
-      if (defaultType && !this.isStd) unavailable(span, '型引数の既定の型');
       const bounds = child.childForFieldName('bounds');
       generics.params.push({
         name: this.identifier(this.field(child, 'name')),
@@ -293,20 +361,30 @@ export class Converter extends ExpressionConverter {
         defaultType: defaultType ? this.type(defaultType) : undefined,
       });
     }
+    this.whereClause(node, generics);
+    return generics;
+  }
+
+  private whereClause(node: Node, generics: Generics): void {
     const where = node.namedChildren.find((child) => child.type === 'where_clause');
     for (const predicate of where?.namedChildren ?? []) {
       if (predicate.type !== 'where_predicate') continue;
       const left = this.field(predicate, 'left');
-      if (left.type === 'lifetime') unavailable(this.span(predicate), "ライフタイムの境界（'a: 'b）");
-      if (left.type === 'higher_ranked_trait_bound') unavailable(this.span(predicate), "for<'a> の境界");
       const bounds = predicate.childForFieldName('bounds');
+      if (left.type === 'lifetime') {
+        const outlives =
+          bounds?.namedChildren.filter((part) => part.type === 'lifetime').map((part) => part.text) ?? [];
+        (generics.lifetimeBounds ??= []).push({ name: left.text, outlives });
+        continue;
+      }
+      // `for<'a> F: Fn(&'a T)`: the bound holds for every lifetime, which the borrow checker's own rules give.
+      const type = left.type === 'higher_ranked_trait_bound' ? this.field(left, 'type') : left;
       generics.where.push({
-        type: this.type(left),
+        type: this.type(type),
         bounds: bounds ? this.bounds(bounds) : [],
         span: this.span(predicate),
       });
     }
-    return generics;
   }
 
   private bounds(node: Node): BoundAst[] {
@@ -318,12 +396,13 @@ export class Converter extends ExpressionConverter {
     return bounds;
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of bound syntax.
   private bound(node: Node): BoundAst {
     const span = this.span(node);
     switch (node.type) {
       case 'lifetime': {
         if (node.text === "'static") return { kind: 'static', span };
-        return unavailable(span, `型のライフタイム境界（${node.text}）`);
+        return { kind: 'lifetime', name: node.text, span };
       }
       case 'type_identifier':
       case 'scoped_type_identifier':
@@ -349,16 +428,20 @@ export class Converter extends ExpressionConverter {
         };
       }
       case 'modified_trait_bound': {
-        return unavailable(span, `境界の修飾（${node.text}）`);
+        return syntaxError(span, `境界 ${node.text} は、不安定な機能なので使えません（E0658）。`);
       }
       case 'removed_trait_bound': {
-        return unavailable(span, `境界の修飾（${node.text}）`);
+        const trait = node.namedChildren.find((child) => !isComment(child));
+        if (trait?.text !== 'Sized') syntaxError(span, `${node.text} の ? は、Sized にだけ付けられます。`);
+        return { kind: 'maybeSized', span };
       }
       case 'higher_ranked_trait_bound': {
-        return unavailable(span, "for<'a> の境界");
+        // `for<'a> F: Fn(&'a T)`: the bound holds for every lifetime, which the borrow checker's own rules give.
+        return this.bound(this.field(node, 'type'));
       }
       case 'use_bounds': {
-        return unavailable(span, 'use<...> の境界');
+        // `use<'a, T>` names what an `impl Trait` captures; edition 2024 captures everything in scope already.
+        return { kind: 'lifetime', name: "'_", span };
       }
       default: {
         return unavailable(span, `境界の書き方（${node.text}）`);
@@ -395,9 +478,7 @@ export class Converter extends ExpressionConverter {
 
   private namedFields(body: Node): FieldAst[] {
     const fields: FieldAst[] = [];
-    for (const child of body.namedChildren) {
-      if (isComment(child)) continue;
-      if (child.type === 'attribute_item') unavailable(this.span(child), `属性（${child.text}）`);
+    for (const { node: child } of this.withAttributes(body.namedChildren)) {
       if (child.type !== 'field_declaration') continue;
       fields.push({
         name: this.identifier(this.field(child, 'name')),
@@ -412,26 +493,32 @@ export class Converter extends ExpressionConverter {
   private orderedFields(body: Node): FieldAst[] {
     const fields: FieldAst[] = [];
     let vis: Visibility = 'private';
+    let pending: Node[] = [];
     for (const child of body.namedChildren) {
       if (isComment(child)) continue;
+      if (child.type === 'attribute_item') {
+        pending.push(child);
+        continue;
+      }
       if (child.type === 'visibility_modifier') {
         vis = this.visibilityModifier(child);
         continue;
       }
-      if (child.type === 'attribute_item') unavailable(this.span(child), `属性（${child.text}）`);
-      fields.push({ name: String(fields.length), type: this.type(child), vis, span: this.span(child) });
+      const kept = this.attributes.read(pending);
+      pending = [];
+      if (kept) fields.push({ name: String(fields.length), type: this.type(child), vis, span: this.span(child) });
       vis = 'private';
     }
     return fields;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   private enumItem(node: Node, attrs: Attributes): EnumItem {
     const span = this.span(node);
     const variants: VariantAst[] = [];
-    for (const child of this.field(node, 'body').namedChildren) {
-      if (isComment(child)) continue;
-      if (child.type === 'attribute_item') unavailable(this.span(child), `属性（${child.text}）`);
+    for (const { node: child, attrs: variantAttrs } of this.withAttributes(
+      this.field(node, 'body').namedChildren,
+      'variant'
+    )) {
       if (child.type !== 'enum_variant') continue;
       const body = child.childForFieldName('body');
       const value = child.childForFieldName('value');
@@ -441,6 +528,7 @@ export class Converter extends ExpressionConverter {
         shape: body?.type === 'field_declaration_list' ? 'named' : body ? 'tuple' : 'unit',
         fields: body?.type === 'field_declaration_list' ? this.namedFields(body) : body ? this.orderedFields(body) : [],
         discriminant: value ? this.expr(value) : undefined,
+        isDefault: variantAttrs.isDefault,
       });
     }
     return {
@@ -454,59 +542,114 @@ export class Converter extends ExpressionConverter {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of trait member, including macro expansions.
+  // code-gauge-allow functionNcss -- One case per kind of trait member, including macro expansions.
   private traitItem(node: Node): TraitItem {
     const span = this.span(node);
-    if (node.text.startsWith('unsafe')) unavailable(span, 'unsafe trait');
     const methods: FnItem[] = [];
-    for (const syntax of this.field(node, 'body').namedChildren) {
-      if (isComment(syntax)) continue;
-      const child = withoutDocAttributes(syntax);
-      if (child.type === 'function_item') methods.push(this.fnItem(child));
-      else if (child.type === 'function_signature_item') methods.push(this.fnItem(child, true));
-      else if (child.type === 'associated_type') unavailable(this.span(child), '関連型（type Item;）');
-      else if (child.type === 'const_item') unavailable(this.span(child), 'トレイトの関連定数');
-      else if (child.type === 'macro_invocation') unavailable(this.span(child), 'トレイトの中のマクロ');
-      else this.unsupportedAssociatedItem(child);
-    }
+    const assocTypes: TraitItem['assocTypes'] = [];
+    const consts: TraitItem['consts'] = [];
+    const members = (body: Node | null | undefined): void => {
+      for (const syntax of body?.namedChildren ?? []) {
+        // The `;` that ends a macro invocation (`getter!(x);`) is a statement of its own in the tree.
+        if (isComment(syntax) || syntax.type === 'empty_statement') continue;
+        const { attributes, target: child } = splitAttributes(syntax);
+        const attrs = this.attributes.read(attributes);
+        if (!attrs || !child || !this.innerCfgHolds(child.childForFieldName('body'))) continue;
+        if (child.type === 'function_item' || child.type === 'function_signature_item') {
+          const method = this.fnItem(child, child.type === 'function_signature_item');
+          if (method.isConst) syntaxError(method.span, 'トレイトの関数は const にできません（E0379）。');
+          methods.push(method);
+        } else if (child.type === 'associated_type') {
+          const typeBounds = child.childForFieldName('bounds');
+          assocTypes.push({
+            name: this.identifier(this.field(child, 'name')),
+            generics: this.generics(child),
+            bounds: typeBounds ? this.bounds(typeBounds) : [],
+            span: this.span(child),
+          });
+        } else if (child.type === 'type_item') {
+          syntaxError(this.span(child), '関連型の既定の型は、不安定な機能なので使えません（E0658）。');
+        } else if (child.type === 'const_item') consts.push(this.constItem(child, true));
+        else if (child.type === 'macro_invocation' && this.isUserMacro(child)) {
+          this.expandUserMacro(
+            child,
+            (code) => `trait MacroExpansion { ${code} }`,
+            (root) => {
+              members(root.namedChildren.find((item) => item.type === 'trait_item')?.childForFieldName('body'));
+            }
+          );
+        } else if (child.type === 'macro_invocation') unavailable(this.span(child), 'トレイトの中のマクロ');
+        else this.unsupportedAssociatedItem(child);
+      }
+    };
+    members(this.field(node, 'body'));
     const bounds = node.childForFieldName('bounds');
     return {
       kind: 'trait',
+      isUnsafe: node.children.some((child) => child.type === 'unsafe'),
       name: this.identifier(this.field(node, 'name')),
       span,
       vis: this.visibility(node),
       generics: this.generics(node),
       supertraits: bounds ? this.bounds(bounds) : [],
       methods,
+      assocTypes,
+      consts,
     };
   }
 
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of impl member, including macro expansions.
   private implItem(node: Node): ImplItem {
     const span = this.span(node);
-    if (node.text.startsWith('unsafe')) unavailable(span, 'unsafe impl');
-    if (/^impl\b[^{]*!/.test(node.text)) unavailable(span, '否定の実装（impl !Trait）');
+    if (/^impl\b[^{]*!/.test(node.text))
+      syntaxError(span, '否定の実装（impl !Trait）は、不安定な機能なので使えません（E0658）。');
     const trait = node.childForFieldName('trait');
     const methods: FnItem[] = [];
     const consts: ImplItem['consts'] = [];
-    for (const syntax of node.childForFieldName('body')?.namedChildren ?? []) {
-      if (isComment(syntax)) continue;
-      const child = withoutDocAttributes(syntax);
-      if (child.type === 'function_item') methods.push(this.fnItem(child));
-      else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true));
-      else if (child.type === 'const_item') consts.push(this.item(child) as ImplItem['consts'][number]);
-      else if (child.type === 'type_item') unavailable(this.span(child), '関連型（type Item = ...;）');
-      else if (child.type === 'function_signature_item') syntaxError(this.span(child), '関数の本体が足りません。');
-      else if (child.type === 'macro_invocation') unavailable(this.span(child), 'impl の中のマクロ');
-      else this.unsupportedAssociatedItem(child);
-    }
+    const assocTypes: ImplItem['assocTypes'] = [];
+    const members = (body: Node | null | undefined): void => {
+      for (const syntax of body?.namedChildren ?? []) {
+        // The `;` that ends a macro invocation (`getter!(x);`) is a statement of its own in the tree.
+        if (isComment(syntax) || syntax.type === 'empty_statement') continue;
+        const { attributes, target: child } = splitAttributes(syntax);
+        const attrs = this.attributes.read(attributes);
+        if (!attrs || !child || !this.innerCfgHolds(child.childForFieldName('body'))) continue;
+        if (child.type === 'function_item') methods.push(this.fnItem(child, false));
+        else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true));
+        else if (child.type === 'const_item') consts.push(this.item(child) as ImplItem['consts'][number]);
+        else if (child.type === 'type_item') {
+          assocTypes.push({
+            name: this.identifier(this.field(child, 'name')),
+            generics: this.generics(child),
+            type: this.type(this.field(child, 'type')),
+            span: this.span(child),
+          });
+        } else if (child.type === 'function_signature_item') syntaxError(this.span(child), '関数の本体が足りません。');
+        else if (child.type === 'macro_invocation' && this.isUserMacro(child)) {
+          this.expandUserMacro(
+            child,
+            (code) => `impl MacroExpansion { ${code} }`,
+            (root) => {
+              members(root.namedChildren.find((item) => item.type === 'impl_item')?.childForFieldName('body'));
+            }
+          );
+        } else if (child.type === 'macro_invocation') unavailable(this.span(child), 'impl の中のマクロ');
+        else this.unsupportedAssociatedItem(child);
+      }
+    };
+    members(node.childForFieldName('body'));
     return {
       kind: 'impl',
+      isUnsafe: node.children.some((child) => child.type === 'unsafe'),
       span,
       generics: this.generics(node),
       trait: trait ? this.typePath(trait) : undefined,
       selfType: this.type(this.field(node, 'type')),
       methods,
       consts,
+      assocTypes,
     };
   }
 
@@ -589,9 +732,6 @@ export class Converter extends ExpressionConverter {
     return unavailable(this.span(node), `パスの書き方（${node.text}）`);
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Types
-
   // code-gauge-allow functionCognitiveComplexity -- Each syntax form determines which child nodes constitute its type.
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
   type(node: Node): TypeAst {
@@ -633,35 +773,51 @@ export class Converter extends ExpressionConverter {
         );
       }
       case 'abstract_type': {
-        const trait = this.field(node, 'trait');
-        if (node.namedChildren.some((child) => child.type === 'type_parameters')) {
-          return unavailable(span, "for<'a> の境界");
-        }
-        return this.objectBoundType('impl', [trait], span);
+        // `impl for<'a> Fn(&'a str)`: the borrow checker reads the lifetimes from the types.
+        return this.objectBoundType('impl', [this.field(node, 'trait')], span);
       }
       case 'function_type': {
+        if (!node.childForFieldName('trait')) return this.fnPointerType(node, span);
         const bound = this.bound(node);
         if (bound.kind !== 'fn') unavailable(span, '関数ポインタの型（fn(i32) -> i32）');
         return { kind: 'fnBound', bound, span };
       }
       case 'never_type': {
         if (this.isStd) return { kind: 'never', span };
-        return unavailable(span, '型 !');
+        return syntaxError(span, '型 ! は、関数の戻り値の型にだけ書けます（ほかの場所では不安定な機能です。E0658）。');
       }
       case 'pointer_type': {
-        return unavailable(span, '生ポインタ（*const T・*mut T）');
+        const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
+        return { kind: 'pointer', mutable, target: this.type(this.field(node, 'type')), span };
       }
       case 'bounded_type': {
         return this.boundedType(node, span);
       }
+      case 'macro_invocation': {
+        if (this.isUserMacro(node)) return this.userMacroType(node);
+        return unavailable(span, `型の場所のマクロ ${node.text}`);
+      }
       case 'bracketed_type':
       case 'qualified_type': {
-        return unavailable(span, `<T as Trait> の形の型`);
+        return syntaxError(span, '<T as Trait> の後には、::Item のように関連型の名前を書いてください。');
       }
       default: {
         return unavailable(span, `型の書き方（${node.text}）`);
       }
     }
+  }
+
+  private fnPointerType(node: Node, span: Span): TypeAst {
+    const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
+    if (modifiers?.text.includes('extern')) unavailable(span, '外部の関数のポインタ（extern "C" fn）');
+    const params = this.field(node, 'parameters')
+      .namedChildren.filter((child) => !isComment(child))
+      .map((child) => this.type(child.type === 'parameter' ? this.field(child, 'type') : child));
+    const ret = node.childForFieldName('return_type');
+    const isUnsafe = modifiers?.text.includes('unsafe');
+    const forLifetimes = node.namedChildren.find((child) => child.type === 'for_lifetimes');
+    const bound = forLifetimes?.namedChildren.filter((child) => child.type === 'lifetime').map((child) => child.text);
+    return { kind: 'fnPointer', params, ret: ret ? this.returnType(ret) : undefined, isUnsafe, bound, span };
   }
 
   private boundedType(node: Node, span: Span): TypeAst {
@@ -724,6 +880,7 @@ export class Converter extends ExpressionConverter {
       const name = this.field(node, 'name');
       return { segments: [...prefix, { name: this.identifier(name), args: undefined, span: this.span(name) }], span };
     }
+    if (node.type === 'bracketed_type') return this.qualifiedPath(node);
     if (
       node.type === 'type_identifier' ||
       node.type === 'primitive_type' ||
@@ -738,6 +895,20 @@ export class Converter extends ExpressionConverter {
     return unavailable(span, `型の書き方（${node.text}）`);
   }
 
+  /** `<T as Trait>` or `<T>` at the start of a path, as a segment that the rest of the path is relative to. */
+  private qualifiedPath(node: Node): PathAst {
+    const span = this.span(node);
+    const inner = node.namedChildren.find((child) => !isComment(child));
+    if (!inner) return syntaxError(span, '書き方に誤りがあります。');
+    if (inner.type === 'qualified_type') {
+      const self = this.type(this.field(inner, 'type'));
+      const trait = this.typePath(this.field(inner, 'alias'));
+      return { segments: [{ name: '<qualified>', args: undefined, span, qualified: { self, trait } }], span };
+    }
+    const self = this.type(inner);
+    return { segments: [{ name: '<qualified>', args: undefined, span, qualified: { self, trait: undefined } }], span };
+  }
+
   /** The type arguments, without the lifetimes and the associated types (`Item = i32`) that the caller takes. */
   protected typeArgs(node: Node, allowBindings = false): TypeAst[] {
     const args: TypeAst[] = [];
@@ -747,8 +918,9 @@ export class Converter extends ExpressionConverter {
         if (allowBindings) continue;
         unavailable(this.span(child), `関連型の指定（${child.text}）`);
       }
-      if (child.type === 'block' || child.type.endsWith('_literal')) {
-        unavailable(this.span(child), '定数の型引数');
+      if (child.type === 'block' || child.type.endsWith('_literal') || child.type === 'negative_literal') {
+        args.push({ kind: 'constArg', value: this.expr(child), span: this.span(child) });
+        continue;
       }
       args.push(this.type(child));
     }
@@ -771,8 +943,11 @@ export class Converter extends ExpressionConverter {
       case 'scoped_type_identifier': {
         const path = node.childForFieldName('path');
         const prefix = path ? this.exprPath(path).segments : [];
-        if (!path && node.text.startsWith('::')) unavailable(span, '先頭が :: のパス');
         const name = this.field(node, 'name');
+        // `::std::mem::swap` names the crate of the standard library from the root.
+        if (!path && node.text.startsWith('::') && !['std', 'core', 'alloc'].includes(name.text)) {
+          unavailable(span, '外部のクレート');
+        }
         return { segments: [...prefix, { name: this.identifier(name), args: undefined, span: this.span(name) }], span };
       }
       case 'generic_type':
@@ -786,11 +961,25 @@ export class Converter extends ExpressionConverter {
         return { segments: [...base.segments.slice(0, -1), { ...last, args }], span };
       }
       case 'bracketed_type': {
-        return unavailable(span, '<T as Trait>:: の形のパス');
+        return this.qualifiedPath(node);
       }
       default: {
         return unavailable(span, `パスの書き方（${node.text}）`);
       }
     }
   }
+}
+
+/** `async fn f() -> T { body }` as `fn f() -> impl Future<Output = T> { async move { body } }`. */
+function asyncFunction(ret: TypeAst | undefined, body: Block | undefined, span: Span): Pick<FnItem, 'ret' | 'body'> {
+  const output: TypeAst = ret ?? { kind: 'tuple', elems: [], span };
+  const segments: PathSegment[] = ['std', 'future', 'Future'].map((name) => ({ name, args: undefined, span }));
+  segments[2] = { ...segments[2], args: [], bindings: [{ name: 'Output', type: output, span }] };
+  const future: TypeAst = { kind: 'impl', bounds: [{ kind: 'trait', path: { segments, span }, span }], span };
+  if (!body) return { ret: future, body };
+  const block: Expr = { kind: 'closure', isMove: true, params: [], ret: output, body, isAsync: 'fn', span: body.span };
+  return {
+    ret: future,
+    body: { kind: 'block', stmts: [], tail: block, span: body.span, endRow: body.endRow, items: [] },
+  };
 }

@@ -16,12 +16,24 @@ import {
 } from './regions';
 import { childTypes, type FnDef, shallow, type TraitRef, type Type, type TypeParam } from './types';
 
-/** How a relation makes regions and relates them. */
-interface Regions {
+export interface Regions {
   readonly fresh: () => RVar;
   readonly outlives: Outlives;
   readonly staticRegion: () => RVar;
 }
+
+/**
+ * Relates a call of a closure that a closure bound stands for: which of the arguments are references taken for every
+ * lifetime that the result cannot name, and which regions of the result are lifetimes taken for every lifetime
+ * (`for<'a> Fn(&'a str) -> &'a str`), which nothing the closure captures can outlive but `'static`.
+ */
+export type ClosureApplier = (
+  callee: Layout,
+  args: Layout[],
+  result: Layout,
+  higherRanked: boolean[],
+  higherRankedResult: ReadonlySet<RVar>
+) => void;
 
 /** What a call relates its inputs and its result by: a function's signature, or that of a closure bound. */
 type Signature = Pick<FnDef, 'params' | 'paramTypes' | 'ret' | 'selfMode' | 'trait' | 'impl' | 'ast' | 'extraBounds'>;
@@ -136,10 +148,17 @@ export class SignatureInstance {
         : this.inputNames.size === 1
           ? [...this.inputNames][0]
           : undefined;
-    this.bindOutputPart(fn.ret, result, false, elided, inputs.flatMap(regionsOf));
+    this.bindOutputPart(
+      fn.ret,
+      result,
+      false,
+      elided,
+      inputs.flatMap((input) => regionsOf(input))
+    );
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Applies the lifetime elision rules.
+  // code-gauge-allow functionNcss -- One case per kind of region layout.
   private bindOutputPart(
     declared: Type,
     actual: Layout,
@@ -148,7 +167,9 @@ export class SignatureInstance {
     inputRegions: RVar[]
   ): void {
     if (isNone(actual)) return;
-    const t = shallow(declared);
+    const t = this.indexedElement(shallow(declared));
+    // An associated type borrows nothing from the inputs: what it holds comes with the type it stands for.
+    if (t.kind === 'adt' && t.def.projection) return;
     const edge = (a: RVar, b: RVar, fixed = false): void => {
       this.outlives(a, b);
       if (invariant || fixed) this.outlives(b, a);
@@ -173,6 +194,15 @@ export class SignatureInstance {
     if ((t.kind === 'dyn' && t.lifetime) || forEachPart(t, actual, invariant, recurse)) return;
     // An `impl Trait` result: it may borrow from any input.
     for (const a of inputRegions) for (const b of regionsOf(actual)) edge(a, b);
+  }
+
+  /** What indexing a slice gives (`Indexed<I, T>`), as the type it stands for: `T`, or `[T]` for a range of indexes. */
+  private indexedElement(t: Type): Type {
+    if (t.kind !== 'adt' || t.def.builtin !== 'Indexed') return t;
+    const index = shallow(t.args[0]);
+    const known = index.kind === 'param' ? this.typeArgs[this.fn.params.indexOf(index.param)] : index;
+    const range = known !== undefined && normalize(shallow(known)).kind === 'adt';
+    return range ? { kind: 'slice', elem: t.args[1] } : shallow(t.args[1]);
   }
 
   /** `&'a dyn T` is `&'a (dyn T + 'a)`: the object's lifetime is the reference's. Returns whether `t` is one. */
@@ -217,20 +247,49 @@ export class SignatureInstance {
     sig: { params: Type[]; ret: Type },
     callee: Type | undefined,
     layout: Layout,
-    applyClosure: (callee: Layout, args: Layout[], result: Layout, higherRanked: boolean[]) => void
+    applyClosure: ClosureApplier
   ): void {
     const args = sig.params.map((type) => instantiate(type, this.subst, this.fresh));
-    const ret = instantiate(sig.ret, this.subst, this.fresh);
+    const higherRankedResult = new Set<RVar>();
+    const isHigherRanked = this.higherRankedLifetimes(sig);
+    const lifetime = (name: string | undefined): RVar => {
+      const region = this.subst.lifetime(name);
+      if (isHigherRanked(name)) higherRankedResult.add(region);
+      return region;
+    };
+    const ret = instantiate(sig.ret, { ...this.subst, lifetime }, this.fresh);
     const own = boundSignatureOf(callee);
     if (own) relateBoundCall(own, args, ret, this);
-    else applyClosure(layout, args, ret, higherRankedInputs(sig));
+    else applyClosure(layout, args, ret, higherRankedInputs(sig), higherRankedResult);
+  }
+
+  /**
+   * Which lifetimes of a closure bound's result it takes for every lifetime: one its `for<'a>` binds, which the
+   * function does not declare, and one elision ties to inputs that are all such lifetimes or left out.
+   */
+  private higherRankedLifetimes(sig: { params: Type[]; ret: Type }): (name: string | undefined) => boolean {
+    const declared = this.declaredLifetimes();
+    if (!declared) return () => false;
+    const bound = (name: string | undefined): boolean =>
+      name === undefined || name === "'_" || (name !== "'static" && !declared.has(name));
+    const elidedBound = sig.params.flatMap((type) => lifetimeNames(type)).every(bound);
+    return (name) => (name === undefined || name === "'_" ? elidedBound : bound(name));
+  }
+
+  /** The lifetimes the function and its impl declare, or undefined when they are not known here. */
+  private declaredLifetimes(): Set<string> | undefined {
+    const { ast, impl, trait } = this.fn;
+    if (!ast || trait) return undefined;
+    const implTypes = impl ? [impl.selfType, ...(impl.trait?.args ?? [])] : [];
+    const implLifetimes = implTypes.flatMap((type) => lifetimeNames(type)).filter((name) => name !== undefined);
+    return new Set([...ast.generics.lifetimes, ...implLifetimes]);
   }
 
   /**
    * Relates the type parameters as their bounds say: `B: FromIterator<T>` builds a `B` of `T`s, and a closure
    * parameter `F: FnMut(T) -> B` makes `B`s of `T`s as its summary says.
    */
-  relateBounds(applyClosure: (callee: Layout, args: Layout[], result: Layout, higherRanked: boolean[]) => void): void {
+  relateBounds(applyClosure: ClosureApplier): void {
     const { fn } = this;
     for (const param of fn.params) {
       const layout = this.params.get(param) as Layout;
@@ -258,7 +317,6 @@ function higherRankedInputs(sig: { params: Type[]; ret: Type }): boolean[] {
   return sig.params.map((type) => type.kind === 'ref' && type.lifetime === undefined && !namesLifetime(sig.ret));
 }
 
-/** Relates a call of a value of a type by the closure bound the type has, if it has one. */
 export function relateCallThroughBound(
   callee: Type | undefined,
   args: Layout[],
@@ -270,7 +328,6 @@ export function relateCallThroughBound(
   return sig !== undefined;
 }
 
-/** The signature of a callee that is called through a closure bound or a trait object (`F: Fn(&T) -> U`). */
 function boundSignatureOf(type: Type | undefined): { params: Type[]; ret: Type } | undefined {
   let t = type && normalize(shallow(type));
   while (t && (t.kind === 'ref' || (t.kind === 'adt' && t.def.builtin === 'Box'))) {
@@ -385,6 +442,14 @@ function forEachPart(
     return true;
   }
   return false;
+}
+
+/** The lifetimes a type names, with undefined for each it leaves out. */
+function lifetimeNames(type: Type): (string | undefined)[] {
+  const t = shallow(type);
+  const own = t.kind === 'ref' ? [t.lifetime] : t.kind === 'adt' ? (t.lifetimes ?? []) : [];
+  if (t.kind === 'dyn' && t.lifetime) own.push(t.lifetime);
+  return [...own, ...childTypes(t).flatMap((child) => lifetimeNames(child))];
 }
 
 /** Whether a declared type holds a reference or a type with lifetimes, which a closure's result may borrow through. */

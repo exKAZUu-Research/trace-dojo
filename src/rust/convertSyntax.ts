@@ -3,6 +3,7 @@ import { eastAsianWidth } from 'get-east-asian-width';
 
 import { CompileError } from '../interpreter/diagnostics';
 import type { Attributes, Block, Expr, Item, PathAst, Pattern, Span, TypeAst } from './ast';
+import { AttributeReader } from './convertAttributes';
 
 /** Reparses the tokens of a macro's arguments as Rust code, keeping their rows and columns. */
 export type Reparse = (text: string, convert: (root: Node) => unknown) => unknown;
@@ -15,9 +16,21 @@ export function syntaxError(span: Span, message: string): never {
   throw new CompileError([{ row: span.row, message }]);
 }
 
-/** The state and the node helpers that every part of the conversion from the syntax tree to the AST shares. */
 export abstract class SyntaxConverter {
   private readonly columns = new Map<number, SourceColumns>();
+  /** The names of the modules around the code being converted, which `module_path!` gives. */
+  protected readonly modulePath: string[] = [];
+  protected readonly attributes = new AttributeReader(
+    (node) => this.span(node),
+    (text) =>
+      this.reparse(`${text}\nstruct CfgAttr;`, (root) =>
+        root.namedChildren.flatMap((child) =>
+          child.type === 'attributed_declaration'
+            ? child.namedChildren.filter((part) => part.type === 'attribute_item')
+            : []
+        )
+      ) as Node[]
+  );
 
   constructor(
     source: string,
@@ -63,6 +76,26 @@ export abstract class SyntaxConverter {
       syntaxError(this.span(node), `${text} は名前に使えません。`);
     }
     return name;
+  }
+
+  /**
+   * The children of a list whose elements outer attributes may precede (fields, variants, parameters), each with its
+   * attributes, leaving out the elements that `#[cfg]` removes.
+   */
+  protected withAttributes(children: Node[], on: 'variant' | 'other' = 'other'): { node: Node; attrs: Attributes }[] {
+    const result: { node: Node; attrs: Attributes }[] = [];
+    let pending: Node[] = [];
+    for (const child of children) {
+      if (isComment(child)) continue;
+      if (child.type === 'attribute_item') {
+        pending.push(child);
+        continue;
+      }
+      const attrs = this.attributes.read(pending, on);
+      pending = [];
+      if (attrs) result.push({ node: child, attrs });
+    }
+    return result;
   }
 
   protected label(node: Node): string | undefined {
@@ -145,8 +178,17 @@ export function isComment(node: Node): boolean {
   return comment !== null && (comment.type === 'line_comment' || comment.type === 'block_comment');
 }
 
-export function withoutDocAttributes(node: Node): Node {
-  if (node.type !== 'attributed_declaration' && node.type !== 'attributed_expression') return node;
-  const [child, other] = node.namedChildren.filter((part) => !isComment(part));
-  return child && !other ? withoutDocAttributes(child) : node;
+/**
+ * Splits an `attributed_declaration` or `attributed_expression` into the attributes and what they are on, which is the
+ * node itself when it has none.
+ */
+export function splitAttributes(node: Node): { attributes: Node[]; target: Node | undefined } {
+  if (node.type !== 'attributed_declaration' && node.type !== 'attributed_expression') {
+    return { attributes: [], target: node };
+  }
+  const parts = node.namedChildren.filter((part) => !isComment(part));
+  const attributes = parts.filter((part) => part.type === 'attribute_item');
+  const target = parts.find((part) => part.type !== 'attribute_item');
+  const inner = target ? splitAttributes(target) : { attributes: [], target: undefined };
+  return { attributes: [...attributes, ...inner.attributes], target: inner.target };
 }

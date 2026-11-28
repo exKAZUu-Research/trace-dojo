@@ -1,31 +1,52 @@
 // code-gauge-allow-file fileNcss -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
+import { stringByteLength } from './capacity';
 import { type DebugPart, emit, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
 import { debugEscapesUnicode } from './debugUnicode';
 import { floatNumber } from './floatBits';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { iteratorDebug } from './iterDebug';
+import { ioErrorDebug, ioErrorDisplay, ioErrorKindDisplay, ioErrorPads } from './natives/io';
+import { durationDebug } from './natives/threads';
 import { wrap } from './ops';
 import { FmtFailure } from './runtime';
 import { ERROR_TYPES } from './traits';
 import { type AdtDef, type IntName, shallow, type Type } from './types';
 import {
+  type BorrowGuard,
+  type CellBox,
   type DynValue,
   type EntryValue,
   EnumValue,
+  type IoStream,
   isPlace,
   type IterValue,
   type MapValue,
   type RangeValue,
+  type RawPtr,
   type SetValue,
+  type SharedBox,
   sliceItems,
+  sliceLength,
   StructValue,
   textOf,
   type Value,
 } from './values';
 
-/** The options of a placeholder, with counts resolved to numbers. */
+/** std's I/O handles, whose `Debug` shows nothing they hold (`Stdin { .. }`) or what this environment does not keep. */
+const IO_HANDLES = new Set([
+  'Stdin',
+  'StdinLock',
+  'Stdout',
+  'StdoutLock',
+  'Stderr',
+  'StderrLock',
+  'BufReader',
+  'BufWriter',
+  'OpenOptions',
+]);
+
 export interface Spec {
   fill: string;
   align: '<' | '>' | '^' | undefined;
@@ -62,7 +83,6 @@ export interface FormatHooks {
 export class Formatter {
   constructor(private readonly hooks: FormatHooks) {}
 
-  /** Formats a format string's pieces with the values and types of its arguments. */
   format(pieces: FormatPiece[], values: Value[], types: Type[], write?: WriteChunk): string {
     return this.hooks.withActiveBorrows(values, () => this.formatArguments(pieces, values, types, write));
   }
@@ -155,11 +175,24 @@ export class Formatter {
         const user = this.hooks.userFmt('Display', t, v, spec, write);
         if (user !== undefined) return user;
         switch (t.def.builtin) {
-          case 'String': {
+          case 'String':
+          case 'PathDisplay': {
             return padString(textOf(v), spec, write);
           }
-          case 'Box': {
+          case 'Box':
+          case 'Pin': {
             return this.display(v, t.args[0], spec, write);
+          }
+          case 'Rc':
+          case 'Arc': {
+            return this.display((v as SharedBox).value, t.args[0], spec, write);
+          }
+          case 'Ref':
+          case 'RefMut':
+          case 'MutexGuard':
+          case 'RwLockReadGuard':
+          case 'RwLockWriteGuard': {
+            return this.display((v as BorrowGuard).cell.value, t.args[0], spec, write);
           }
           case 'CaseIter':
           case 'EscapeDefault':
@@ -170,9 +203,7 @@ export class Formatter {
             return text;
           }
           default: {
-            if (ERROR_TYPES.has(t.def.builtin as string))
-              return padString(errorDisplay(t.def.builtin as string, v), spec, write);
-            return '';
+            return stdErrorText(t.def.builtin as string, v, spec, write);
           }
         }
       }
@@ -253,6 +284,8 @@ export class Formatter {
         return list('[', ']', items, indent, write);
       }
       case 'dyn': {
+        // A thread's panic payload, `Box<dyn Any + Send>`, shows none of what it holds.
+        if (t.trait.trait.name === 'Any') return emit('Any { .. }', write);
         const dynValue = v as DynValue;
         return this.debug(dynValue.value, dynValue.type, spec, indent, write);
       }
@@ -288,7 +321,8 @@ export class Formatter {
         );
         return list('[', ']', items, indent, write);
       }
-      case 'Box': {
+      case 'Box':
+      case 'Pin': {
         return this.debug(v, t.args[0], spec, indent, write);
       }
       case 'HashMap':
@@ -333,6 +367,9 @@ export class Formatter {
       case 'Turtle': {
         return 'Turtle';
       }
+      case 'IoError': {
+        return emit(ioErrorDebug(v, indent), write);
+      }
       case 'Iter': {
         return this.iteratorText(v as IterValue, t, spec, indent, write);
       }
@@ -341,7 +378,123 @@ export class Formatter {
         return this.entryText(v as EntryValue, t, spec, indent, write);
       }
       default: {
-        return this.debugUserAdt(v, t, spec, indent, write);
+        return this.debugRuntimeAdt(v, t, spec, indent, write) ?? this.debugUserAdt(v, t, spec, indent, write);
+      }
+    }
+  }
+
+  /** The `Debug` of the types of paths, smart pointers, cells, threads, and C strings; undefined for the others. */
+  // code-gauge-allow functionNcss -- One case per runtime type of the standard library.
+  private debugRuntimeAdt(
+    v: Value,
+    t: Type & { kind: 'adt' },
+    spec: Spec,
+    indent: number | undefined,
+    write?: WriteChunk
+  ): string | undefined {
+    const { def } = t;
+    switch (def.builtin) {
+      case 'Path':
+      case 'PathBuf':
+      case 'PathDisplay': {
+        return quotedDebug(textOf(v), false, write);
+      }
+      case 'Rc':
+      case 'Arc': {
+        return this.debug((v as SharedBox).value, t.args[0], spec, indent, write);
+      }
+      case 'MutexGuard':
+      case 'RwLockReadGuard':
+      case 'RwLockWriteGuard': {
+        return this.debug((v as BorrowGuard).cell.value, t.args[0], spec, indent, write);
+      }
+      case 'Mutex':
+      case 'RwLock': {
+        const cell = v as CellBox;
+        const data: DebugPart =
+          lockedText(def.builtin, cell) ?? ((inner, sink) => this.debug(cell.value, t.args[0], spec, inner, sink));
+        return structText(
+          def.builtin,
+          [
+            ['data', data],
+            ['poisoned', (_inner, sink) => emit(String(cell.poisoned), sink)],
+          ],
+          indent,
+          true,
+          write
+        );
+      }
+      case 'ConstPtr':
+      case 'MutPtr': {
+        return pointerDebug(v as RawPtr, this.concrete(t.args[0]), spec, indent, write);
+      }
+      case 'Duration': {
+        // The precision is the number of fraction digits, which the text already has.
+        return padString(durationDebug(v, spec.precision), { ...spec, precision: undefined }, write);
+      }
+      case 'CStr': {
+        return padString(`"${(v as bigint[]).map((byte) => escapeAscii(Number(byte))).join('')}"`, spec, write);
+      }
+      case 'File': {
+        const stream = v as IoStream;
+        const { fd, path } = stream.file ?? { fd: 0, path: '' };
+        return structText(
+          'File',
+          [
+            ['fd', textPart(String(fd))],
+            ['path', textPart(JSON.stringify(path))],
+            ['read', textPart(String(stream.reader !== undefined))],
+            ['write', textPart(String(stream.writer !== undefined))],
+          ],
+          indent,
+          false,
+          write
+        );
+      }
+      case 'Thread': {
+        const id: DebugPart = (_inner, sink) => emit(`ThreadId(${String(v)})`, sink);
+        const name: DebugPart = (_inner, sink) => emit(v === 1 ? 'Some("main")' : 'None', sink);
+        return structText(
+          'Thread',
+          [
+            ['id', id],
+            ['name', name],
+          ],
+          indent,
+          true,
+          write
+        );
+      }
+      case 'TryLockError': {
+        return emit((v as EnumValue).variant === 0 ? 'Poisoned(..)' : 'WouldBlock', write);
+      }
+      case 'Sender':
+      case 'SendError':
+      case 'PoisonError':
+      case 'Receiver':
+      case 'JoinHandle': {
+        return emit(`${def.builtin} { .. }`, write);
+      }
+      case 'Ref':
+      case 'RefMut': {
+        return this.debug((v as BorrowGuard).cell.value, t.args[0], spec, indent, write);
+      }
+      case 'Weak': {
+        return emit('(Weak)', write);
+      }
+      case 'RefCell':
+      case 'Cell': {
+        const cell = v as CellBox;
+        // A `RefCell` borrowed mutably shows no value, as reading it would conflict.
+        const value: DebugPart =
+          def.builtin === 'RefCell' && cell.borrows < 0
+            ? (_inner, sink) => emit('<borrowed>', sink)
+            : (inner, sink) => this.debug(cell.value, t.args[0], spec, inner, sink);
+        return structText(def.builtin, [['value', value]], indent, false, write);
+      }
+      default: {
+        if (IO_HANDLES.has(t.def.builtin as string)) return ioHandleDebug(t.def.builtin as string, spec, write);
+        return undefined;
       }
     }
   }
@@ -489,7 +642,6 @@ function deref(value: Value): Value {
   return current;
 }
 
-/** The chars `ToUppercase` or `ToLowercase` has left, which it displays. */
 function caseIterText(value: Value): string {
   return ((value as IterValue).rest?.() ?? []).join('');
 }
@@ -531,6 +683,35 @@ function padString(text: string, spec: Spec, write?: WriteChunk): string {
 
 function integerText(value: bigint, spec: Spec): string {
   return (spec.sign === '+' && value >= 0n ? '+' : '') + value.toString();
+}
+
+/**
+ * std's `Pointer` formatting: the address in hex with `0x`, which `#` pads with zeros to 16 digits; a pointer to a
+ * slice or `str` is `Pointer { addr, metadata }` with its length.
+ */
+function pointerDebug(
+  pointer: RawPtr,
+  pointee: Type,
+  spec: Spec,
+  indent: number | undefined,
+  write?: WriteChunk
+): string {
+  const addressSpec = spec.alternate ? { ...spec, zero: true, width: spec.width ?? 18 } : spec;
+  const address = (sink?: WriteChunk): string =>
+    padNumber(`${spec.sign === '+' ? '+' : ''}0x${pointer.address.toString(16)}`, addressSpec, 2, sink);
+  if (pointee.kind !== 'slice' && pointee.kind !== 'str') return address(write);
+  const target = pointer.place?.get();
+  const metadata = target === undefined ? 0 : pointee.kind === 'str' ? stringByteLength(target) : sliceLength(target);
+  return structText(
+    'Pointer',
+    [
+      ['addr', (_inner, sink) => address(sink)],
+      ['metadata', (_inner, sink) => padNumber(String(metadata), spec, 0, sink)],
+    ],
+    indent,
+    false,
+    write
+  );
 }
 
 /** Pads a number, with `0` padding after its sign and radix prefix. */
@@ -592,6 +773,48 @@ function escapeChar(char: string, isChar: boolean): string {
     default: {
       const code = char.codePointAt(0)!;
       return debugEscapesUnicode(code) ? `\\u{${code.toString(16)}}` : char;
+    }
+  }
+}
+
+/** What a lock's `Debug` shows for its data while held where std cannot take it (quoted for `Mutex` alone). */
+function lockedText(builtin: string, cell: CellBox): DebugPart | undefined {
+  if (builtin === 'Mutex') return cell.borrows === 0 ? undefined : textPart('"<locked>"');
+  return cell.borrows < 0 ? textPart('<locked>') : undefined;
+}
+
+function textPart(text: string): DebugPart {
+  return (_inner, sink) => emit(text, sink);
+}
+
+function stdErrorDisplay(builtin: string, value: Value): string | undefined {
+  switch (builtin) {
+    case 'IoError': {
+      return ioErrorDisplay(value);
+    }
+    case 'IoErrorKind': {
+      const kind = value as EnumValue;
+      return ioErrorKindDisplay(kind.def.variants[kind.variant].name);
+    }
+    case 'SendError': {
+      return 'sending on a closed channel';
+    }
+    case 'RecvError': {
+      return 'receiving on a closed channel';
+    }
+    case 'TryRecvError': {
+      return (value as EnumValue).variant === 0 ? 'receiving on an empty channel' : 'receiving on a closed channel';
+    }
+    case 'PoisonError': {
+      return 'poisoned lock: another task failed inside';
+    }
+    case 'TryLockError': {
+      return (value as EnumValue).variant === 0
+        ? 'poisoned lock: another task failed inside'
+        : 'try_lock failed because the operation would block';
+    }
+    default: {
+      return ERROR_TYPES.has(builtin) ? errorDisplay(builtin, value) : undefined;
     }
   }
 }
@@ -685,4 +908,45 @@ function errorDebug(builtin: string, value: Value, indent: number | undefined): 
       return builtin;
     }
   }
+}
+
+/** A byte as `u8::escape_ascii` writes it, which `CStr`'s `Debug` shows. */
+function escapeAscii(byte: number): string {
+  const escapes: Record<number, string> = {
+    9: String.raw`\t`,
+    10: String.raw`\n`,
+    13: String.raw`\r`,
+    34: String.raw`\"`,
+    39: String.raw`\'`,
+    92: String.raw`\\`,
+  };
+  if (escapes[byte]) return escapes[byte];
+  if (byte >= 0x20 && byte < 0x7f) return String.fromCodePoint(byte);
+  return `\\x${byte.toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * The `Display` of an error type of std; `ErrorKind` and an `io::Error` std made write theirs with `write_str`, which
+ * ignores the width.
+ */
+function stdErrorText(builtin: string, v: Value, spec: Spec, write: WriteChunk | undefined): string {
+  const text = stdErrorDisplay(builtin, v);
+  if (text === undefined) return '';
+  const unpadded = builtin === 'IoErrorKind' || (builtin === 'IoError' && !ioErrorPads(v));
+  if (!unpadded) return padString(text, spec, write);
+  write?.(text);
+  return text;
+}
+
+/** The `Debug` of std's I/O handles: `Stdin { .. }`; the buffers and platform flags others show are not kept here. */
+function ioHandleDebug(builtin: string, spec: Spec, write: WriteChunk | undefined): string {
+  if (builtin === 'BufReader' || builtin === 'BufWriter' || builtin === 'OpenOptions') {
+    throw new UnsupportedFormat(`${builtin} の {:?} での表示`);
+  }
+  return padString(`${builtin} { .. }`, spec, write);
+}
+
+/** A value whose formatting this environment does not support, which the formatting macro reports where it is. */
+export class UnsupportedFormat {
+  constructor(readonly what: string) {}
 }

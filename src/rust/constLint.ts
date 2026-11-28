@@ -171,7 +171,6 @@ export class ConstLint {
     }
   }
 
-  /** Records the constants that a pattern binds. */
   // code-gauge-allow functionCognitiveComplexity -- Binding mode determines whether the analyzed value is propagated.
   private bind(pattern: Pattern, value: Known | undefined): void {
     if (pattern.kind === 'binding') {
@@ -207,7 +206,6 @@ export class ConstLint {
     return diverged;
   }
 
-  /** Checks an expression's operations, returning its value when it is a constant. */
   private expr(expr: Expr): Known | undefined {
     // What follows an operand that never finishes (a later argument, the other side of an operator) is unreachable.
     return this.diverged ? undefined : this.reachable(expr);
@@ -444,7 +442,7 @@ export class ConstLint {
     const index = this.expr(expr.index);
     const type = checkedType(expr.operand.ty);
     const array = type?.kind === 'ref' ? checkedType(type.target) : type;
-    if (array?.kind === 'array' && typeof index === 'bigint' && index >= BigInt(array.len)) {
+    if (array?.kind === 'array' && array.len >= 0 && typeof index === 'bigint' && index >= BigInt(array.len)) {
       compileError(
         expr.span,
         `この添字（${index}）は、長さ ${array.len} の配列の範囲外なので、実行すると必ず panic します。`
@@ -528,6 +526,15 @@ export class ConstLint {
     return this.bindMatched(cond.pattern, this.expr(cond.value));
   }
 
+  private guardHolds(conds: Condition[]): boolean | undefined {
+    for (const cond of conds) {
+      const holds = this.condition(cond);
+      if (typeof holds !== 'boolean') return undefined;
+      if (!holds) return false;
+    }
+    return true;
+  }
+
   private bindMatched(pattern: Pattern, value: Known | undefined): boolean | undefined {
     const matches = this.matchesPattern(pattern, value);
     this.bind(pattern, matches === true ? value : undefined);
@@ -549,6 +556,9 @@ export class ConstLint {
       if (matches === undefined) break;
       if (!matches) continue;
       this.bind(arm.pattern, scrutinee);
+      const guard = this.guardHolds(arm.guard ?? []);
+      if (guard === undefined) break;
+      if (!guard) continue;
       return this.expr(arm.body);
     }
     this.known.clear();
@@ -561,17 +571,41 @@ export class ConstLint {
     if (this.diverged) return;
     this.endBlock();
     let allDiverge = true;
+    let afterGuard = false;
     for (const arm of arms) {
       const matches = this.matchesPattern(arm.pattern, scrutinee);
       if (matches === false) continue;
-      this.bind(arm.pattern, matches === true ? scrutinee : undefined);
-      allDiverge = this.branch(() => this.expr(arm.body)) && allDiverge;
-      if (matches === true) break;
+      allDiverge = this.matchArm(arm, matches === true ? scrutinee : undefined, afterGuard) && allDiverge;
+      if (matches === true && !arm.guard) break;
+      afterGuard ||= arm.guard !== undefined;
     }
     this.diverged = allDiverge && arms.length > 0;
   }
 
-  /** An assignment to a variable gives it a value, which its propagation mode may keep. */
+  /**
+   * Checks one arm a match may reach, telling whether it diverges. An arm after a guard is reached both from the match
+   * and from the failed guard, where rustc forgets what it knew of the variables; it knows them again after the
+   * match, except those the arm assigns.
+   */
+  private matchArm(arm: MatchArm, value: Known | undefined, afterGuard: boolean): boolean {
+    const saved = afterGuard ? new Map(this.known) : undefined;
+    if (saved) this.known.clear();
+    this.bind(arm.pattern, value);
+    // A guard known to fail leaves the arm's body unreached, which rustc does not lint.
+    let fails = false;
+    for (const cond of arm.guard ?? []) fails ||= this.condition(cond) === false;
+    const diverges = fails || this.branch(() => this.expr(arm.body));
+    if (saved) this.restoreKnown(saved);
+    return diverges;
+  }
+
+  /** Takes back what was known before an arm, forgetting the variables the arm gave a value. */
+  private restoreKnown(saved: Map<LocalVar, Known>): void {
+    const assigned = new Set(this.known.keys());
+    this.known.clear();
+    for (const [local, value] of saved) if (!assigned.has(local)) this.known.set(local, value);
+  }
+
   private assign(target: Expr, value: Known | undefined): void {
     const res = target.kind === 'path' ? this.annotations.paths.get(target) : undefined;
     if (res?.kind === 'local') this.setKnown(res.local, value);
@@ -656,7 +690,6 @@ export class ConstLint {
     }
   }
 
-  /** `&&` and `||` evaluate their right operand only when the left one does not decide the result. */
   private logical(expr: Extract<Expr, { kind: 'binary' }>, left: Known | undefined): Known | undefined {
     const decided = expr.op === '||';
     if (left === decided) return decided;
@@ -833,7 +866,6 @@ function intTypeOf(type: Type | undefined): IntName | undefined {
   return checked?.kind === 'int' ? checked.name : undefined;
 }
 
-/** The arguments of an assertion's message. */
 function assertionMessage(macro: MacroCall): Expr[] {
   return (macro.kind === 'assert' || macro.kind === 'assertEq' ? macro.format?.args : undefined) ?? [];
 }
@@ -850,7 +882,6 @@ function bits(name: IntName): number {
   return name === 'isize' || name === 'usize' ? 64 : Number(name.slice(1));
 }
 
-/** The value of an integer type's associated constant (`i32::MAX`), which rustc's lints know. */
 function floatLimit(name: string): number | undefined {
   const [ty, key] = name.split('::');
   return ty === 'f32' || ty === 'f64' ? FLOAT_LIMITS[key]?.[ty] : undefined;
@@ -860,7 +891,6 @@ function aggregate(fields: Iterable<readonly [string, Known | undefined]>, ctor?
   return { fields: new Map(fields), ctor };
 }
 
-/** Whether a pattern matches a constant: surely, surely not, or unknown. */
 // code-gauge-allow functionNcss -- Each Rust pattern has distinct rules for deciding whether it can match.
 // code-gauge-allow functionCognitiveComplexity -- Each Rust pattern has distinct rules for deciding whether it can match.
 function patternMatches(
@@ -906,6 +936,12 @@ function patternMatches(
     case 'ref': {
       return patternMatches(pattern.pattern, value, annotations, constant);
     }
+    case 'rest': {
+      return true;
+    }
+    case 'range': {
+      return rangeMatches(pattern, value, annotations, constant);
+    }
     case 'or': {
       const results = pattern.alternatives.map((alternative) =>
         patternMatches(alternative, value, annotations, constant)
@@ -917,6 +953,30 @@ function patternMatches(
       return undefined;
     }
   }
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Compares a value with both ends of a range pattern.
+function rangeMatches(
+  pattern: Extract<Pattern, { kind: 'range' }>,
+  value: Known | undefined,
+  annotations: Annotations,
+  constant: ((def: ConstDef) => Known | undefined) | undefined
+): boolean | undefined {
+  if (typeof value !== 'bigint') return undefined;
+  const end = (bound: Pattern | undefined): bigint | 'open' | undefined => {
+    if (!bound) return 'open';
+    if (bound.kind === 'lit') return bound.expr.kind === 'int' ? bound.expr.value : undefined;
+    const res = annotations.paths.get(bound);
+    const known =
+      res?.kind === 'const' ? constant?.(res.def) : res?.kind === 'builtinConst' ? integerConst(res.name) : undefined;
+    return typeof known === 'bigint' ? known : undefined;
+  };
+  const start = end(pattern.start);
+  const stop = end(pattern.end);
+  if (start === undefined || stop === undefined) return undefined;
+  if (start !== 'open' && value < start) return false;
+  if (stop === 'open') return true;
+  return pattern.inclusive ? value <= stop : value < stop;
 }
 
 function allKnownMatches(results: (boolean | undefined)[]): boolean | undefined {

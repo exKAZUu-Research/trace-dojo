@@ -1856,10 +1856,10 @@ fn main() {
     stdout: '7\nPoint { row: 7 }\n',
     uncaughtException: undefined,
   });
-  const attribute = program.replace('/// Use the position as the marker.', '#[inline]');
+  const attribute = program.replace('/// Use the position as the marker.', '#[frobnicate]');
   expect(executeProgram('rust', attribute)).toMatchObject({
     kind: 'compileError',
-    diagnostics: [expect.objectContaining({ message: expect.stringContaining('#[inline]') })],
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('#[frobnicate]') })],
   });
 });
 
@@ -2889,24 +2889,13 @@ SkipWhile { iter: Cycle { orig: Iter([1, 2]), iter: Iter([]) }, flag: true }
 });
 
 test.each([
-  ['range patterns (stage C)', '    match 3 { 1..=5 => {}, _ => {} }'],
-  ['attributes on tuple elements (stage C)', '    let tuple = (#[cfg(any())] 1, 2);'],
   ['an unavailable string method', '    let escaped = "abc".escape_debug();'],
   [
     'an unavailable slice method reached through Vec',
     '    let mut values = vec![1, 1, 2]; let _ = values.select_nth_unstable(1);',
   ],
   ['available-in-Rust deque append', 'let mut a = std::collections::VecDeque::from([1]); a.append(&mut a.clone());'],
-  ['available-in-Rust integer Add method (stage C)', 'let n = 1i32; let _ = n.add(2);', 'use std::ops::Add;'],
-  ['threads (stage D)', '    std::thread::spawn(|| {});'],
-  ['standard input (stage D)', '    let mut s = String::new();\n    std::io::stdin().read_line(&mut s).unwrap();'],
-  [
-    'associated output types of operator bounds (stage C)',
-    '',
-    'use std::ops::Add; fn plus<T: Add<Output = T>>(a: T, b: T) -> T { a + b }',
-  ],
-  ['generic assignment operators (stage C)', '', 'fn inc<T: std::ops::AddAssign + Copy>(mut a: T, b: T) { a += b; }'],
-  ['operator overloading (stage C)', '', 'struct P;\nimpl std::ops::Add for P { fn add(self, o: P) -> P { o } }'],
+  ['atomics (stage D)', '    let n = std::sync::atomic::AtomicUsize::new(0);'],
 ])('%s are unavailable', (_name, body, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));
   expect(execution.kind).toBe('compileError');
@@ -7073,13 +7062,13 @@ test('casts a char to char, and gives a Vec made through a boxed slice no spare 
 });
 
 test.each([
-  ['an unsupported pattern', 'matches!(v, Some(ref x))', 3, 'ref パターン'],
+  ['an unstable pattern', 'matches!(v, Some(box x))', 3, 'box パターン'],
   ['a syntax error', 'matches!(v, Some(x y))', 3, '書き方に誤り'],
   [
     'a later row of the pattern',
-    'matches!(\n        v,\n        Some(1)\n            | Some(2..=5)\n    )',
+    'matches!(\n        v,\n        Some(1)\n            | Some(box 2)\n    )',
     6,
-    '範囲のパターン',
+    'box パターン',
   ],
 ])('reports %s in a matches! pattern on its row', (_name, call, row, message) => {
   const program = rustMain(`    let v: Option<i32> = Some(3);\n\n    let c = ${call};`);
@@ -7424,7 +7413,7 @@ fn main() {
   });
 });
 
-test('an iterator has {:?} when the iterators it writes do, and names of std::io are reported for what they are', () => {
+test('an iterator has {:?} when the iterators it writes do, and unavailable names of std::io are reported', () => {
   const shown = `#[derive(Debug)]
 struct Shown(i32);
 struct Hidden;
@@ -7456,8 +7445,8 @@ Peekable { iter: Map { iter: Iter([2]) }, peeked: Some(Some(2)) } Skip { iter: C
     });
   }
   for (const [use, message] of [
-    ['use std::io::BufWriter;', 'std::io::BufWriter は、この採点環境では使えません。'],
-    ['use std::io::BufRead;', '標準入力・ファイルの入出力は、この採点環境では使えません。'],
+    ['use std::io::Cursor;', 'std::io::Cursor は、この採点環境では使えません。'],
+    ['use std::io::Seek;', 'std::io::Seek は、この採点環境では使えません。'],
   ]) {
     expect(executeProgram('rust', `${use}\nfn main() {}`)).toMatchObject({
       kind: 'compileError',
@@ -8780,12 +8769,442 @@ test('the items a reborrowed iterator yields do not keep the iterator borrowed',
   });
 });
 
-test('an operator trait used as a bound is reported as unavailable', () => {
-  const program = rustMain('    println!("{}", same(1));', 'fn same<T: std::ops::Add>(a: T) -> T { a }');
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('operators call the impls of the operator traits, also through generic bounds', () => {
+  const program = `use std::ops::{Add, AddAssign, Index, IndexMut, Mul, Neg};
+#[derive(Debug, Clone, Copy)]
+struct P { x: i32, y: i32 }
+impl Add for P { type Output = P; fn add(self, o: P) -> P { P { x: self.x + o.x, y: self.y + o.y } } }
+impl Mul<P> for i32 { type Output = P; fn mul(self, p: P) -> P { P { x: self * p.x, y: self * p.y } } }
+impl Neg for P { type Output = P; fn neg(self) -> P { P { x: -self.x, y: -self.y } } }
+impl AddAssign for P { fn add_assign(&mut self, o: P) { self.x += o.x; self.y += o.y; } }
+struct Grid { cells: Vec<i32>, w: usize }
+impl Index<(usize, usize)> for Grid { type Output = i32; fn index(&self, (r, c): (usize, usize)) -> &i32 { &self.cells[r * self.w + c] } }
+impl IndexMut<(usize, usize)> for Grid { fn index_mut(&mut self, (r, c): (usize, usize)) -> &mut i32 { &mut self.cells[r * self.w + c] } }
+fn total<T: Add<Output = T> + Copy>(items: &[T], zero: T) -> T { let mut acc = zero; for &i in items { acc = acc + i; } acc }
+fn twice<T>(x: T) -> T::Output where T: Add + Copy { x + x }
+fn main() {
+    let mut a = P { x: 1, y: 2 };
+    a += P { x: 1, y: 1 };
+    let mut g = Grid { cells: vec![0; 4], w: 2 };
+    g[(1, 0)] = 7;
+    g[(1, 0)] += 1;
+    println!("{:?} {:?} {:?} {} {:?}", a + a, 2 * a, -a, g[(1, 0)], g.cells);
+    println!("{:?} {} {:?} {}", total(&[a, a], P { x: 0, y: 0 }), total(&[1, 2], 0), twice(a), twice(2.5));
+}`;
   expect(executeProgram('rust', program)).toMatchObject({
-    kind: 'compileError',
-    diagnostics: [{ message: '演算子のトレイト Add を使う境界は、この採点環境では使えません。' }],
+    kind: 'executed',
+    stdout:
+      'P { x: 4, y: 6 } P { x: 4, y: 6 } P { x: -2, y: -3 } 8 [0, 0, 8, 0]\nP { x: 4, y: 6 } 3 P { x: 4, y: 6 } 5\n',
   });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test("a program's own Iterator impl gets the adapters, for loops, and bounds of iterators", () => {
+  const program = `struct Counter { count: u32 }
+impl Iterator for Counter {
+    type Item = u32;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count < 5 { self.count += 1; Some(self.count) } else { None }
+    }
+}
+fn first_two<I: Iterator>(mut it: I) -> (Option<I::Item>, Option<I::Item>) { (it.next(), it.next()) }
+fn main() {
+    let sum: u32 = Counter { count: 0 }.zip(Counter { count: 0 }.skip(1)).map(|(a, b)| a * b).filter(|x| x % 3 == 0).sum();
+    let mut c = Counter { count: 0 };
+    let firsts: Vec<u32> = c.by_ref().take(2).collect();
+    for n in &mut c { print!("{n} "); }
+    println!("{sum} {:?} {:?}", firsts, first_two(Counter { count: 3 }));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3 4 5 18 [1, 2] (Some(4), Some(5))\n',
+  });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('macro_rules! macros expand to expressions, statements, and items, with repetitions and recursion', () => {
+  const program = `macro_rules! square { ($x:expr) => { $x * $x }; }
+macro_rules! my_vec { () => { Vec::new() }; ($($x:expr),+ $(,)?) => {{ let mut v = Vec::new(); $( v.push($x); )+ v }}; }
+macro_rules! point { ($name:ident, $x:expr, $y:expr) => { let $name = ($x, $y); }; }
+macro_rules! make_struct { ($name:ident { $($field:ident : $ty:ty),* }) => { #[derive(Debug)] struct $name { $($field: $ty),* } }; }
+make_struct!(Person { name: String, age: u32 });
+macro_rules! count { () => { 0usize }; ($head:tt $($tail:tt)*) => { 1usize + count!($($tail)*) }; }
+fn main() {
+    let v: Vec<i32> = my_vec![1, 2, 3,];
+    point!(p, 3, 4);
+    println!("{} {:?} {:?} {:?} {}", square!(1 + 2), v, p, Person { name: String::from("Ann"), age: 30 }, count!(a b c));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '9 [1, 2, 3] (3, 4) Person { name: "Ann", age: 30 } 3\n',
+  });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test("a rule's format message names the rule's variables past generic and closure commas, and panics at the invocation", () => {
+  const program = `use std::collections::HashMap;
+macro_rules! check {
+    ($s:expr) => {{
+        let n = $s;
+        let add = |a: usize, b: usize| a + b;
+        assert!(add(0, 0) == n || HashMap::<String, i32>::new().len() + 2 == n, "len {n}");
+        println!("{}", HashMap::<String, Vec<i32>>::new().len() + n);
+        assert_eq!(HashMap::<String, i32>::new().len(), n, "len {n}");
+    }};
+}
+fn main() {
+    let n = 7usize;
+    check!(0usize);
+    println!("{n}");
+    check!(2usize);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '0\n7\n2\n',
+    uncaughtException: expect.stringContaining(
+      'panicked at src/main.rs:15:5:\nassertion `left == right` failed: len 2\n  left: 0\n right: 2'
+    ),
+  });
+});
+
+test('Drop impls run when values go out of scope, are replaced, discarded, or dropped', () => {
+  const program = `struct D(i32);
+impl Drop for D { fn drop(&mut self) { println!("drop {}", self.0); } }
+fn take(d: D) { println!("took {}", d.0); }
+fn main() {
+    let _a = D(1);
+    { let _b = D(2); }
+    take(D(3));
+    D(4);
+    let mut r = D(5);
+    r = D(6);
+    let mut v = vec![D(7), D(8)];
+    v.pop();
+    drop(r);
+    println!("end {}", v.len());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'drop 2\ntook 3\ndrop 3\ndrop 4\ndrop 5\ndrop 8\ndrop 6\nend 1\ndrop 7\ndrop 1\n',
+  });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('Rc counts its owners and RefCell checks its borrows as std does', () => {
+  const program = `use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
+#[derive(Debug)]
+struct Node { value: i32, parent: RefCell<Weak<Node>>, children: RefCell<Vec<Rc<Node>>> }
+fn main() {
+    let a = Rc::new(5);
+    let b = Rc::clone(&a);
+    { let _c = a.clone(); println!("{}", Rc::strong_count(&a)); }
+    println!("{} {}", Rc::strong_count(&b), *a + 1);
+    let leaf = Rc::new(Node { value: 3, parent: RefCell::new(Weak::new()), children: RefCell::new(vec![]) });
+    let branch = Rc::new(Node { value: 5, parent: RefCell::new(Weak::new()), children: RefCell::new(vec![Rc::clone(&leaf)]) });
+    *leaf.parent.borrow_mut() = Rc::downgrade(&branch);
+    println!("{:?} {} {}", leaf.parent.borrow().upgrade().map(|p| p.value), Rc::strong_count(&leaf), Rc::weak_count(&branch));
+    let shared = RefCell::new(vec![1, 2]);
+    if shared.borrow().len() == 2 { shared.borrow_mut().push(3); }
+    let hits = Cell::new(1);
+    hits.set(hits.get() + 1);
+    println!("{:?} {:?}", shared, hits);
+    let _first = shared.borrow_mut();
+    let _second = shared.borrow_mut();
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3\n2 6\nSome(5) 2 1\nRefCell { value: [1, 2, 3] } Cell { value: 2 }\n',
+    uncaughtException: expect.stringContaining('RefCell already borrowed'),
+  });
+});
+
+// A pattern reads `*x` and `v[i]` through `Deref` and `Index`, and writes through `DerefMut` and `IndexMut` only for
+// `ref mut`; the wrong one panics on a `Ref` or loses the write.
+test('a scrutinee behind Deref or Index is read shared unless a pattern binds it by ref mut', () => {
+  const program = `use std::cell::RefCell;
+use std::ops::{Index, IndexMut};
+struct G(Vec<Option<i32>>);
+impl Index<usize> for G { type Output = Option<i32>; fn index(&self, i: usize) -> &Option<i32> { &self.0[i] } }
+impl IndexMut<usize> for G { fn index_mut(&mut self, i: usize) -> &mut Option<i32> { &mut self.0[i] } }
+fn main() {
+    let c = RefCell::new(Some(1));
+    if let Some(v) = *c.borrow() { println!("v {v}"); }
+    match *c.borrow_mut() { ref mut x => *x = Some(9) }
+    let mut g = G(vec![Some(1)]);
+    if let Some(ref mut x) = g[0] { *x += 4; }
+    println!("{:?} {:?}", c.borrow(), g.0);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'v 1\nSome(9) [Some(5)]\n' });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('unsafe code reaches raw pointers, mutable statics, unsafe functions, and unions', () => {
+  const program = `static mut COUNTER: u32 = 0;
+unsafe fn twice(x: i32) -> i32 { x * 2 }
+union IntOrFloat { i: u32, f: f32 }
+fn main() {
+    let mut num = 5;
+    let r1 = &raw const num;
+    let r2 = &raw mut num;
+    let mut values = [1, 2, 3];
+    let p = values.as_mut_ptr();
+    let u = IntOrFloat { f: 1.0 };
+    unsafe {
+        *r2 = 10;
+        COUNTER += 3;
+        *p.add(2) = 9;
+        println!("{} {} {} {:#x}", *r1, twice(COUNTER as i32), values[2], u.i);
+    }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '10 6 9 0x3f800000\n' });
+  const outside = program.replace('    unsafe {\n        *r2 = 10;', '    *r2 = 10;\n    unsafe {');
+  expect(executeProgram('rust', outside)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('E0133') })],
+  });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('generic parameters take const values, defaults, ?Sized, lifetime bounds, and self: Box<Self>', () => {
+  const program = `use std::fmt::Display;
+fn show<T: ?Sized + Display>(t: &T) -> String { format!("<{}>", t) }
+fn longest<'a, 'b: 'a>(x: &'a str, y: &'b str) -> &'a str { if x.len() > y.len() { x } else { y } }
+fn sum<const N: usize>(a: [i32; N]) -> i32 { let mut s = 0; for i in 0..N { s += a[i]; } s }
+struct Buf<const N: usize> { data: [u8; N] }
+impl<const N: usize> Buf<N> { fn new() -> Self { Buf { data: [0; N] } } }
+struct Pt<T = i32> { x: T }
+trait State { fn next(self: Box<Self>) -> Box<dyn State>; fn name(&self) -> &'static str; }
+struct A;
+struct B;
+impl State for A { fn next(self: Box<Self>) -> Box<dyn State> { Box::new(B) } fn name(&self) -> &'static str { "A" } }
+impl State for B { fn next(self: Box<Self>) -> Box<dyn State> { self } fn name(&self) -> &'static str { "B" } }
+fn main() {
+    let p: Pt = Pt { x: 3 };
+    let s: Box<dyn State> = Box::new(A);
+    println!("{} {} {} {} {} {}", show("str"), longest("ab", "abc"), sum([5; 4]), Buf::<8>::new().data.len(), p.x, s.next().name());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '<str> abc 20 8 3 B\n' });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program and input.
+test("programs read standard input and read and write files of the run's file system", () => {
+  const program = `use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufRead, BufReader, Write};
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut name = String::new();
+    io::stdin().read_line(&mut name)?;
+    let nums: Vec<i32> = io::stdin().lock().lines().map(|l| l.unwrap().trim().parse().unwrap()).collect();
+    println!("Hello, {}! {:?}", name.trim(), nums);
+    fs::write("poem.txt", "one\\n")?;
+    let mut f = OpenOptions::new().append(true).open("poem.txt")?;
+    writeln!(f, "two")?;
+    for line in BufReader::new(File::open("poem.txt")?).lines() { println!("{}", line?); }
+    if let Err(e) = File::open("missing.txt") { println!("{} {:?}", e, e.kind()); }
+    Ok(())
+}`;
+  expect(executeProgram('rust', program, { stdin: 'Ferris\n3\n4\n' })).toMatchObject({
+    kind: 'executed',
+    stdout: 'Hello, Ferris! [3, 4]\none\ntwo\nNo such file or directory (os error 2) NotFound\n',
+    finalFiles: { 'poem.txt': 'one\ntwo\n' },
+  });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program; threads run in a fixed order.
+test('threads run when joined, waited for on a channel, or let run by sleep, sharing data through Arc and Mutex', () => {
+  const program = `use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+fn main() {
+    let child = thread::spawn(|| println!("child"));
+    thread::sleep(Duration::from_millis(50));
+    println!("main");
+    child.join().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let tx1 = tx.clone();
+    thread::spawn(move || { for v in [1, 2] { tx1.send(v).unwrap(); thread::sleep(Duration::from_millis(1)); } });
+    thread::spawn(move || tx.send(3).unwrap());
+    let mut got: Vec<i32> = rx.iter().collect();
+    got.sort();
+    let counter = Arc::new(Mutex::new(0));
+    let handles: Vec<_> = (0..10).map(|_| { let c = Arc::clone(&counter); thread::spawn(move || *c.lock().unwrap() += 1) }).collect();
+    for h in handles { h.join().unwrap(); }
+    let total = thread::scope(|s| s.spawn(|| (1..=10).sum::<i32>()).join().unwrap());
+    println!("{:?} {} {} {} {:?}", got, *counter.lock().unwrap(), Arc::strong_count(&counter), total, Duration::from_millis(1500));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'child\nmain\n[1, 2, 3] 10 1 55 1.5s\n',
+  });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('closures kept in collections, fields a move closure owns, and loop-body temporaries go where rustc drops them', () => {
+  const program = `use std::cell::RefCell;
+use std::sync::mpsc;
+struct Noisy(i32);
+impl Drop for Noisy { fn drop(&mut self) { println!("drop {}", self.0); } }
+struct Holder { noisy: Noisy, n: i32, tx: mpsc::Sender<i32> }
+fn main() {
+    let mut fs = Vec::new();
+    let s = String::from("hello");
+    let f = move || s.len();
+    fs.push(f);
+    println!("{}", fs[0]());
+    let (tx, rx) = mpsc::channel();
+    let h = Holder { noisy: Noisy(1), n: 2, tx };
+    {
+        let c = move || { let _ = &h.noisy; h.tx.send(h.n).unwrap(); };
+        c();
+    }
+    println!("{:?}", rx.iter().collect::<Vec<_>>());
+    let cell = RefCell::new(Vec::new());
+    for i in 0..3 {
+        cell.borrow_mut().push(i);
+        match cell.borrow().len() { 1 => continue, _ => {} }
+        cell.borrow_mut().push(10)
+    }
+    for i in 2..4 { match Noisy(i) { Noisy(n) => println!("got {}", n) } }
+    println!("{:?}", cell.borrow());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '5\ndrop 1\n[2]\ngot 2\ndrop 2\ngot 3\ndrop 3\n[0, 1, 10, 2, 10]\n',
+  });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('range patterns, #[cfg] on a tuple element, and an operator trait method run', () => {
+  const program = `use std::ops::Add;
+fn main() {
+    match 3 { 1..=5 => println!("in"), _ => println!("out") }
+    match -1 { ..0 => println!("neg"), 0..5 => println!("small"), 5.. => println!("big") }
+    println!("{:?}", (#[cfg(any())] 1, 2));
+    let n = 1i32;
+    println!("{} {}", n.add(2), n.add(&3));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'in\nneg\n(2,)\n3 4\n' });
+});
+
+// Rust would wait forever on these; the interpreter stops them as deadlocks rather than ending them early.
+test('a receive that no thread can ever answer, or a lock taken twice, stops as a deadlock', () => {
+  const waiting = `use std::sync::mpsc;
+fn main() {
+    let (tx, rx) = mpsc::channel();
+    tx.send(1).unwrap();
+    for v in rx { println!("got {v}"); }
+}`;
+  expect(executeProgram('rust', waiting)).toMatchObject({
+    kind: 'executed',
+    stdout: 'got 1\n',
+    uncaughtException: expect.stringContaining('デッドロック'),
+  });
+  const relocked = `use std::sync::Mutex;
+fn main() { let m = Mutex::new(0); let _a = m.lock().unwrap(); let _b = m.lock().unwrap(); }`;
+  expect(executeProgram('rust', relocked)).toMatchObject({
+    uncaughtException: expect.stringContaining('デッドロック'),
+  });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('async functions and blocks run under an executor the program writes, with futures it implements', () => {
+  const program = String.raw`use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll, Waker};
+struct Countdown(u32);
+impl Future for Countdown {
+    type Output = &'static str;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<&'static str> {
+        if self.0 == 0 { return Poll::Ready("go"); }
+        self.0 -= 1;
+        cx.waker().wake_by_ref();
+        Poll::Pending
+    }
+}
+async fn half(n: u32) -> Result<u32, String> {
+    if n % 2 == 0 { Ok(n / 2) } else { Err(format!("{} is odd", n)) }
+}
+async fn quarter(n: u32) -> Result<u32, String> {
+    let h = half(n).await?;
+    half(h).await
+}
+fn block_on<F: Future>(fut: F) -> F::Output {
+    let mut fut = std::pin::pin!(fut);
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut polls = 0;
+    loop {
+        polls += 1;
+        if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) { println!("{} polls", polls); return v; }
+    }
+}
+fn main() {
+    println!("{:?} {:?}", block_on(quarter(12)), block_on(quarter(6)));
+    println!("{}", block_on(Countdown(2)));
+    let jobs: Vec<Pin<Box<dyn Future<Output = String>>>> = vec![Box::pin(async { String::from("a") }), Box::pin(async move { block_on(Countdown(0)).to_string() })];
+    for job in jobs { println!("{}", block_on(job)); }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 polls\n1 polls\nOk(3) Err("3 is odd")\n3 polls\ngo\n1 polls\na\n1 polls\n1 polls\ngo\n',
+  });
+});
+
+test.each([
+  ['a parameter without the lifetime the return type names', "fn f<'a>(x: &'a str, y: &str) -> &'a str { y }", 'E0621'],
+  ['a lifetime with no bound to the returned one', "fn f<'a, 'b>(x: &'a str, y: &'b str) -> &'a str { y }", "'b: 'a"],
+  [
+    'a method returning another parameter than self',
+    "struct S<'a> { t: &'a str }\nimpl<'a> S<'a> { fn f(&self, o: &str) -> &str { o } }",
+    'ライフタイムが足りません',
+  ],
+  ['a declared bound', "fn f<'a, 'b: 'a>(x: &'a str, y: &'b str) -> &'a str { y }", undefined],
+  [
+    'a field whose lifetime the type of self implies',
+    "struct S<'a> { t: &'a str }\nimpl<'a> S<'a> { fn f(&self, o: &str) -> &str { self.t } }",
+    undefined,
+  ],
+])('checks the lifetimes a function body relates against its signature: %s', (_name, items, error) => {
+  const execution = executeProgram('rust', rustMain('', items));
+  if (error === undefined) expect(execution.kind).toBe('executed');
+  else {
+    expect(execution).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining(error) })],
+    });
+  }
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('an iterator that owns its elements drops those it has not yielded when it goes', () => {
+  const program = rustMain(
+    `    let first = vec![D(1), D(2), D(3)].into_iter().next();
+    println!("after");
+    for d in vec![D(6), D(7)] { if d.0 == 6 { break; } }
+    println!("end {}", first.is_some());`,
+    'struct D(i32);\nimpl Drop for D { fn drop(&mut self) { println!("drop {}", self.0); } }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'drop 2\ndrop 3\nafter\ndrop 6\ndrop 7\nend true\ndrop 1\n',
+  });
+});
+
+// The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
+test('a generic associated type takes its own type arguments in signatures and paths', () => {
+  const program = rustMain(
+    `    let v: <VecMaker as Container>::Item<u8> = VecMaker.wrap(3u8);
+    println!("{:?} {:?} {:?}", make(&VecMaker), make(&OptMaker), v);`,
+    `use std::fmt::Debug;
+trait Container { type Item<T>: Debug where T: Debug; fn wrap<T: Debug>(&self, v: T) -> Self::Item<T>; }
+struct VecMaker;
+impl Container for VecMaker { type Item<T> = Vec<T> where T: Debug; fn wrap<T: Debug>(&self, v: T) -> Vec<T> { vec![v] } }
+struct OptMaker;
+impl Container for OptMaker { type Item<T> = Option<T> where T: Debug; fn wrap<T: Debug>(&self, v: T) -> Self::Item<T> { Some(v) } }
+fn make<C: Container>(c: &C) -> C::Item<i32> { c.wrap(5) }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[5] Some(5) [3]\n' });
 });
 
 test('an empty match covers the uninhabited Infallible', () => {

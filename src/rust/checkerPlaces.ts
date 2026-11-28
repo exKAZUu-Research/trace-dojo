@@ -1,17 +1,21 @@
 import type { LocalVar } from './annotations';
+import { projectionOf } from './assocTypes';
 import type { Expr, Span } from './ast';
 import type { Checker } from './checker';
 import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
 import { compileError, visibleFrom } from './items';
-import { autoderefSteps, lookupMethod } from './methods';
+import { autoderefSteps, derefOnce, lookupMethod } from './methods';
 import { RANGE_TYPES } from './traits';
 import {
   type AdtDef,
+  allSupertraits,
+  type DerefKind,
   type FieldDef,
   freshVar,
   ref,
   resolve,
+  sameType,
   shallow,
   STR,
   substitute,
@@ -22,12 +26,7 @@ import {
 } from './types';
 
 /** Requires a place to be mutable: rooted in a `mut` variable or behind a `&mut` reference. */
-export function requireMutablePlace(
-  c: Checker,
-  place: Expr,
-  purpose: string,
-  derefs: readonly ('ref' | 'mutRef' | 'own')[] = []
-): void {
+export function requireMutablePlace(c: Checker, place: Expr, purpose: string, derefs: readonly DerefKind[] = []): void {
   const root = throughDerefs(c, place, derefs);
   if (root.kind === 'temporary') return;
   if (root.kind === 'sharedRef') {
@@ -51,16 +50,21 @@ export function requireMutablePlace(
   );
 }
 
+type PlaceRoot =
+  | { kind: 'local'; local: LocalVar }
+  | { kind: 'mutRef' }
+  | { kind: 'sharedRef' }
+  | { kind: 'temporary' };
+
 /** What a place expression is rooted in, looking through fields, indexes, and derefs. */
 // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
-function placeRoot(
-  c: Checker,
-  place: Expr
-): { kind: 'local'; local: LocalVar } | { kind: 'mutRef' } | { kind: 'sharedRef' } | { kind: 'temporary' } {
+function placeRoot(c: Checker, place: Expr): PlaceRoot {
   switch (place.kind) {
     case 'path': {
       const res = c.annotations.paths.get(place);
       if (res?.kind === 'local' || res?.kind === 'capture') return { kind: 'local', local: res.local };
+      if (res?.kind === 'const' && res.def.ast.isStatic)
+        return res.def.ast.isMutable ? { kind: 'mutRef' } : { kind: 'sharedRef' };
       return { kind: 'temporary' };
     }
     case 'field': {
@@ -70,13 +74,14 @@ function placeRoot(
     case 'index': {
       const index = c.annotations.indexes.get(place);
       if (index?.container === 'map') return { kind: 'sharedRef' };
+      if (index?.implTypes) {
+        const [self, indexType] = index.implTypes;
+        c.require(self, { trait: c.program.traitDef('IndexMut'), args: [indexType] }, place.span);
+      }
       return throughDerefs(c, place.operand, index?.derefs ?? []);
     }
     case 'unary': {
-      if (place.op !== '*') return { kind: 'temporary' };
-      const type = normalize(shallow(place.operand.ty ?? UNIT));
-      const deref = type.kind === 'ref' ? (type.mutable ? 'mutRef' : 'ref') : 'own';
-      return throughDerefs(c, place.operand, [deref]);
+      return place.op === '*' ? derefRoot(c, place.operand) : { kind: 'temporary' };
     }
     case 'methodCall': {
       const type = normalize(shallow(place.ty ?? UNIT));
@@ -89,12 +94,25 @@ function placeRoot(
   }
 }
 
-function throughDerefs(
-  c: Checker,
-  operand: Expr,
-  derefs: readonly ('ref' | 'mutRef' | 'own')[]
-): ReturnType<typeof placeRoot> {
+/** The root of `*operand`: what a raw pointer points to, or what the reference or owner derefs to. */
+function derefRoot(c: Checker, operand: Expr): PlaceRoot {
+  const type = normalize(shallow(operand.ty ?? UNIT));
+  if (type.kind === 'adt' && type.def.builtin === 'MutPtr') return { kind: 'mutRef' };
+  if (type.kind === 'adt' && type.def.builtin === 'ConstPtr') return { kind: 'sharedRef' };
+  const deref = type.kind === 'ref' ? (type.mutable ? 'mutRef' : 'ref') : (derefOnce(c.program, type)?.kind ?? 'own');
+  return throughDerefs(c, operand, [deref]);
+}
+
+function throughDerefs(c: Checker, operand: Expr, derefs: readonly DerefKind[]): PlaceRoot {
   if (derefs.includes('ref')) return { kind: 'sharedRef' };
+  let type = operand.ty ?? UNIT;
+  for (const step of derefs) {
+    // The program's `Deref` gives a place to write to only through its `DerefMut`.
+    if (step === 'user' && c.solver.implements(type, { trait: c.program.traitDef('DerefMut'), args: [] }) === 'no') {
+      return { kind: 'sharedRef' };
+    }
+    type = derefOnce(c.program, type)?.type ?? type;
+  }
   const base = placeRoot(c, operand);
   return base.kind !== 'sharedRef' && derefs.includes('mutRef') ? { kind: 'mutRef' } : base;
 }
@@ -102,15 +120,24 @@ function throughDerefs(
 export function isPlaceExpr(c: Checker, expr: Expr): boolean {
   if (expr.kind === 'path') {
     const res = c.annotations.paths.get(expr);
+    if (res?.kind === 'const' && res.def.ast.isStatic) return true;
     return res?.kind === 'local' || res?.kind === 'capture' || res?.kind === 'discard';
   }
   if (expr.kind === 'field' || expr.kind === 'index') return true;
   return expr.kind === 'unary' && expr.op === '*';
 }
 
+/** Whether this field is the one an assignment writes, which only it is: the place the field is in is read. */
+function takeUnionWrite(c: Checker): boolean {
+  const writing = c.body.writingUnionField === true;
+  c.body.writingUnionField = false;
+  return writing;
+}
+
 // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
 export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): Type {
-  const operandType = c.settled(c.expr(expr.operand, undefined));
+  const writing = takeUnionWrite(c);
+  const operandType = fieldOperandType(c, expr, writing);
   for (const step of autoderefSteps(c.program, operandType)) {
     const t = normalize(shallow(step.type));
     if (t.kind === 'var')
@@ -127,6 +154,7 @@ export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): 
       if (index < 0) continue;
       const field = variant.fields[index];
       checkFieldVisible(c, t.def, field, expr.nameSpan);
+      if (t.def.isUnion && !writing) c.requireUnsafe(expr.span, '共用体のフィールドを読むこと');
       const subst = new Map(t.def.params.map((param, i) => [param, t.args[i]]));
       c.annotations.fields.set(expr, {
         derefs: step.derefs,
@@ -142,6 +170,16 @@ export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): 
     compileError(expr.nameSpan, `${expr.name} はメソッドなので、${expr.name}() と書いてください。`);
   }
   return compileError(expr.nameSpan, `${t} にフィールド ${expr.name} がありません。`);
+}
+
+/** The type of a field's operand; a write to a field of a union's field (`u.p.x = 3`) writes into it, unread. */
+function fieldOperandType(c: Checker, expr: Extract<Expr, { kind: 'field' }>, writing: boolean): Type {
+  c.body.writingUnionField = writing && expr.operand.kind === 'field';
+  try {
+    return c.settled(c.expr(expr.operand, undefined));
+  } finally {
+    c.body.writingUnionField = false;
+  }
 }
 
 export function checkFieldVisible(c: Checker, def: AdtDef, field: FieldDef, span: Span): void {
@@ -167,11 +205,38 @@ export function checkIndex(c: Checker, expr: Extract<Expr, { kind: 'index' }>): 
     if (t.kind === 'slice' || t.kind === 'array' || t.kind === 'str' || isDeque) {
       return indexSequence(c, expr, t, step, overloaded);
     }
+    const user = userIndex(c, expr, t, step);
+    if (user) return user;
   }
   return compileError(expr.span, `${typeToString(resolve(operandType))} は [ ] で要素を取り出せません。`);
 }
 
 type DerefStep = ReturnType<typeof autoderefSteps>[number];
+
+/** `x[i]` on a type with an `Index` impl of the program, or a type parameter bounded by `Index`. */
+function userIndex(c: Checker, expr: Extract<Expr, { kind: 'index' }>, t: Type, step: DerefStep): Type | undefined {
+  if (t.kind !== 'param' && !(t.kind === 'adt' && !t.def.builtin)) return undefined;
+  const trait = c.program.traitDef('Index');
+  const indexType = c.expr(expr.index, undefined);
+  // A parameter's bounds, with their supertraits (`IndexMut<usize>` brings `Index<usize>`), may name one index type.
+  if (t.kind === 'param') {
+    const indexes = allSupertraits(t.param.bounds, t).filter((bound) => bound.trait === trait);
+    const [first] = indexes;
+    if (first && indexes.every((bound) => sameType(bound.args[0], first.args[0])))
+      c.unifier.tryUnify(indexType, first.args[0]);
+  }
+  const ref = { trait, args: [indexType] };
+  if (c.solver.implements(t, ref) === 'no') return undefined;
+  c.require(t, ref, expr.span);
+  c.annotations.indexes.set(expr, {
+    container: 'user',
+    range: false,
+    derefs: step.derefs,
+    overloaded: true,
+    implTypes: [t, indexType],
+  });
+  return projectionOf(trait, 'Output', t, [indexType]);
+}
 
 function indexMap(
   c: Checker,

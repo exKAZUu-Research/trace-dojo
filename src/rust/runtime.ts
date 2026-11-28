@@ -4,11 +4,15 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { Span } from './ast';
+import type { Dropper } from './drops';
+import type { Scheduler } from './natives/threads';
 import { canReachTurtle, turtleCaptureRoots } from './turtleTypes';
 import { shallow, type Type, type TypeParam } from './types';
 import { utf8Reader } from './utf8';
 import {
   AccessorPlace,
+  BorrowGuard,
+  CellBox,
   CellPlace,
   DynValue,
   ElementPlace,
@@ -20,10 +24,12 @@ import {
   MapValue,
   type Place,
   SetValue,
+  SharedBox,
   SliceView,
   StructValue,
   TurtleValue,
   type Value,
+  WeakRef,
 } from './values';
 
 /** Marks a variable whose scope has not begun, has ended, or whose value moved out. */
@@ -31,7 +37,6 @@ export const UNASSIGNED: unique symbol = Symbol('unassigned');
 /** What a field or element holds after a pattern, a field read, or a struct update moved its value out. */
 export const MOVED = undefined as unknown as Value;
 
-/** A local variable as the trace shows it. */
 export interface LocalInfo {
   name: string;
   slot: number;
@@ -59,9 +64,23 @@ export class Frame implements TracedFrame {
    * behind. A reference coerced on borrowing (to `&str` or a trait object) shows the coercion (`view`) of that value.
    */
   readonly referents = new Map<number, { place: Place; root: number; view?: (value: Value) => Value }>();
+  /** The temporaries a `let` extends to the life of the variable in each slot (`let r = &make();`), in order made. */
+  readonly extendedTemporaries = new Map<number, (() => void)[]>();
+  /** What each pattern parameter does not bind, by the parameter's index, which goes after the variables it binds. */
+  readonly paramLeftovers = new Map<number, () => void>();
 
-  /** Ends the scope of variables, which leave the trace with the references to them. */
-  endScope(slots: readonly number[]): void {
+  holdUntilDropped(slot: number, release: () => void): void {
+    const held = this.extendedTemporaries.get(slot);
+    if (held) held.push(release);
+    else this.extendedTemporaries.set(slot, [release]);
+  }
+
+  /**
+   * Ends the scope of variables, which leave the trace with the references to them, dropping their values; with
+   * `drops` false, as when a match guard fails, the values stay with the value matched, which the bindings never took.
+   */
+  endScope(slots: readonly number[], drops = true): void {
+    if (drops) this.runtime.dropper?.dropSlots(this, slots);
     for (const slot of slots) {
       this.locals[slot] = UNASSIGNED;
       this.referents.delete(slot);
@@ -79,9 +98,7 @@ export class Frame implements TracedFrame {
     readonly runtime: Runtime,
     readonly info: FunctionInfo,
     readonly callRow: number | undefined,
-    /** The concrete types of the type parameters of a generic function, by parameter. */
     readonly typeArgs: ReadonlyMap<TypeParam, Type>,
-    /** The places a closure's captured variables live in. */
     readonly captures: readonly Place[] = []
   ) {
     this.locals = Array.from({ length: info.slotCount }, () => UNASSIGNED);
@@ -92,7 +109,6 @@ export class Frame implements TracedFrame {
   }
 }
 
-/** A panic, which unwinds the program to its end. */
 export class RustPanic {
   constructor(
     readonly message: string,
@@ -101,6 +117,12 @@ export class RustPanic {
     readonly libraryLocation?: string
   ) {}
 }
+
+/** A use of what the interpreter does not support, found while running, which ends the whole program, not a thread. */
+export class UnsupportedAtRun extends RustPanic {}
+
+/** A wait that nothing can end, which stops the whole program: a thread it happens in does not end alone. */
+export class Deadlock extends RustPanic {}
 
 /** A `Display` or `Debug` impl returned `Err`, after the formatting wrote `written`; each caller reacts as std does. */
 export class FmtFailure {
@@ -117,12 +139,10 @@ export function writtenText(format: () => string): string {
   }
 }
 
-/** `std::process::exit`, which ends the program at once. */
 export class ProcessExit {
   constructor(readonly code: number) {}
 }
 
-/** `break`, `continue`, and `return`, which unwind to the loop or function they leave. */
 export class ControlSignal {
   constructor(
     readonly kind: 'break' | 'continue' | 'return',
@@ -136,6 +156,8 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly frames: Frame[] = [];
   readonly steps = new StepTracker();
   readonly io: ProgramIO;
+  /** The descriptor the next `File` opened gets, after standard input, output and error. */
+  nextFileDescriptor = 3;
   private slots = 0;
   private readonly outputDecoders = {
     stdout: new TextDecoder('utf-8', { ignoreBOM: true }),
@@ -207,7 +229,6 @@ export class Runtime implements TracedRuntime<Frame> {
     return roots;
   }
 
-  /** Counts allocated elements against {@link LIMITS.maxSlots}. */
   allocate(count: number, bytes: number | bigint = count * SLOT_BYTES): void {
     this.slots += count;
     if (this.slots > LIMITS.maxSlots) throw new OutOfMemory(bytes);
@@ -234,6 +255,41 @@ export class Runtime implements TracedRuntime<Frame> {
   finishOutput(): void {
     this.write('stdout', '');
     this.write('stderr', '');
+  }
+
+  /** Drops the values of variables whose scope ends, for programs with `Drop` impls. */
+  dropper: Dropper | undefined;
+  /** The threads the program spawned, once it spawns one. */
+  scheduler: Scheduler | undefined;
+  /**
+   * The temporaries that go at the end of their statement: the guards of `RefCell` borrows, and values a method
+   * borrows as its receiver (`v.into_iter().next()`), which need dropping.
+   */
+  readonly liveGuards: { release(): void }[] = [];
+  unwinding = false;
+
+  /**
+   * Ends the borrows of the guards made since `mark` that no variable of the frame holds (and that `kept` is not),
+   * as Rust drops temporaries at the end of a statement or a condition.
+   */
+  releaseGuards(frame: Frame, mark: number, kept?: Value): void {
+    if (this.liveGuards.length <= mark) return;
+    // Rust drops a statement's temporaries in the reverse order of their making.
+    const returned: { release(): void }[] = [];
+    for (const guard of this.liveGuards.splice(mark).toReversed()) {
+      if (frame.locals.some((value) => holds(value, guard))) continue;
+      // A guard in the value given back (`fn guard(&self) -> RefMut<..>`) is a temporary of the caller's statement.
+      if (holds(kept, guard)) returned.unshift(guard);
+      else guard.release();
+    }
+    this.liveGuards.push(...returned);
+  }
+
+  /** Takes the guards `value` holds out of those that go at the end of the statement. */
+  keepGuardsOf(value: Value): void {
+    for (let index = this.liveGuards.length - 1; index >= 0; index--) {
+      if (holds(value, this.liveGuards[index])) this.liveGuards.splice(index, 1);
+    }
   }
 
   pushFrame(frame: Frame): void {
@@ -272,6 +328,24 @@ export class Runtime implements TracedRuntime<Frame> {
     }
     this.world.retain((turtle) => turtles.has(turtle));
   }
+}
+
+/**
+ * Whether a value is a guard or holds it, however deep: in a struct, an enum, a tuple, an array, a collection, a
+ * pointer, or the place a reference refers to (`v: &mut Vec<RefMut<..>>`), as the garbage collector reaches values.
+ */
+function holds(value: unknown, guard: { release(): void }): boolean {
+  const seen = new Set<unknown>();
+  const stack = [value];
+  while (stack.length > 0) {
+    const item = stack.pop();
+    if (item === guard) return true;
+    if (typeof item !== 'object' || item === null || seen.has(item)) continue;
+    seen.add(item);
+    if (isPlace(item as Value)) stack.push((item as Place).get());
+    else pushChildren(item, stack);
+  }
+  return false;
 }
 
 export class StackOverflow {}
@@ -320,8 +394,12 @@ function pushChildren(item: object, stack: unknown[]): void {
     pushAll(stack, item);
   } else if (item instanceof StructValue || item instanceof EnumValue) {
     pushAll(stack, item.fields);
-  } else if (item instanceof CellPlace) {
+  } else if (item instanceof CellPlace || item instanceof SharedBox || item instanceof CellBox) {
     stack.push(item.value);
+  } else if (item instanceof WeakRef) {
+    if (item.box && item.box.strong > 0) stack.push(item.box);
+  } else if (item instanceof BorrowGuard) {
+    stack.push(item.cell);
   } else if (item instanceof AccessorPlace) {
     stack.push(item.target);
   } else if (item instanceof ElementPlace) {

@@ -1,14 +1,163 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { Expr, FormatArgs, MacroCall, Pattern, Span } from './ast';
+import type { Block, Condition, Expr, FormatArgs, Item, MacroCall, MatchArm, Pattern, Span, TypeAst } from './ast';
 import { PatternConverter } from './convertPatterns';
 import { isComment, syntaxError, unavailable } from './convertSyntax';
 import { parseFormatString } from './formatString';
-import { parseStringLiteral } from './literals';
+import { parseRawStringLiteral, parseStringLiteral } from './literals';
+import { expand, MacroError, type MacroRule, parseParts, tokensOf, tokenText as macroTokenText } from './macroRules';
+import { fragmentLiteral, tokenText } from './macroText';
+
+const MAX_MACRO_DEPTH = 128;
 
 /** Converts macro invocations, whose arguments it reparses as Rust code. */
 export abstract class MacroConverter extends PatternConverter {
+  /** The `macro_rules!` macros defined so far, which later code may invoke, by name. */
+  private readonly userMacros = new Map<string, MacroRule[]>();
+  private macroDepth = 0;
+
+  protected defineMacro(node: Node): void {
+    const name = this.identifier(this.field(node, 'name'));
+    const rules = node.namedChildren
+      .filter((child) => child.type === 'macro_rule')
+      .map((rule) => {
+        try {
+          return {
+            matcher: parseParts(tokensOf(this.field(rule, 'left')), true),
+            transcriber: parseParts(tokensOf(this.field(rule, 'right')), false),
+          };
+        } catch (error) {
+          if (error instanceof MacroError) syntaxError(this.span(rule), error.message);
+          throw error;
+        }
+      });
+    this.userMacros.set(name, rules);
+  }
+
+  protected isUserMacro(node: Node): boolean {
+    const macroNode = node.childForFieldName('macro');
+    const name = macroNode?.text.replace(/^(?:crate|self)::/, '');
+    return name !== undefined && this.userMacros.has(name);
+  }
+
+  /**
+   * The outermost macro invocation whose expansion is being converted: `column!` gives its column, and a panic in the
+   * expansion reports its place, as rustc reports the place that caused the expansion.
+   */
+  private expansionSite: Span | undefined;
+
+  override span(node: Node): Span {
+    const span = super.span(node);
+    const site = this.expansionSite;
+    return site ? { ...span, displayCol: site.displayCol ?? site.col } : span;
+  }
+
+  /**
+   * Expands an invocation of a `macro_rules!` macro and converts the code it makes with `convert`, which gets the
+   * syntax tree of `wrap(code)`: the expansion stands on the invocation's row.
+   */
+  protected expandUserMacro<T>(node: Node, wrap: (code: string) => string, convert: (root: Node) => T): T {
+    const span = this.span(node);
+    const name = (node.childForFieldName('macro') as Node).text.replace(/^(?:crate|self)::/, '');
+    const tree = node.namedChildren.find((child) => child.type === 'token_tree');
+    if (this.macroDepth >= MAX_MACRO_DEPTH)
+      syntaxError(span, `マクロ ${name}! の展開が深すぎます（再帰の上限を超えました）。`);
+    let code: string;
+    try {
+      code = macroTokenText(expand(this.userMacros.get(name) as MacroRule[], tree ? tokensOf(tree) : [], name));
+    } catch (error) {
+      if (error instanceof MacroError) syntaxError(span, error.message);
+      throw error;
+    }
+    this.macroDepth++;
+    const enclosing = this.expansionSite;
+    this.expansionSite ??= span;
+    try {
+      return this.reparse(`${'\n'.repeat(span.row)}${wrap(code)}`, convert as (root: Node) => unknown) as T;
+    } finally {
+      this.macroDepth--;
+      this.expansionSite = enclosing;
+    }
+  }
+
+  /** A user macro in an expression's place, which must make one expression (`{ ... }` for statements). */
+  protected userMacroExpr(node: Node): Expr {
+    return this.expandUserMacro(
+      node,
+      (code) => `fn macro_expansion() { ${code} }`,
+      (root) => {
+        const block = this.macroBody(root, node);
+        if (block.stmts.length > 0 || block.items.length > 0 || !block.tail) {
+          syntaxError(this.span(node), 'このマクロは式になりません（式の場所のマクロは、1つの式に展開してください）。');
+        }
+        return block.tail;
+      }
+    );
+  }
+
+  /** A user macro in a statement's place, whose statements and items join the block around it. */
+  protected userMacroStatements(node: Node): Block {
+    return this.expandUserMacro(
+      node,
+      (code) => `fn macro_expansion() { ${code} }`,
+      (root) => this.macroBody(root, node)
+    );
+  }
+
+  private macroBody(root: Node, node: Node): Block {
+    const fn = root.namedChildren.find((child) => child.type === 'function_item');
+    const body = fn?.childForFieldName('body');
+    if (!body) syntaxError(this.span(node), 'マクロの展開の書き方に誤りがあります。');
+    return this.block(body);
+  }
+
+  /** A user macro in an item's place, whose items join the module around it. */
+  protected userMacroItems(node: Node): Item[] {
+    return this.expandUserMacro(
+      node,
+      (code) => code,
+      (root) =>
+        root.namedChildren.flatMap((child) => {
+          if (isComment(child)) return [];
+          if (
+            (child.type === 'expression_statement' && macroInvocationOf(child) === undefined) ||
+            child.type === 'let_declaration'
+          ) {
+            syntaxError(this.span(node), 'このマクロは項目になりません（関数の外では、項目に展開してください）。');
+          }
+          return this.itemsOf(child);
+        })
+    );
+  }
+
+  protected itemsOf(node: Node): Item[] {
+    const invocation = node.type === 'expression_statement' ? macroInvocationOf(node) : node;
+    if (invocation?.type === 'macro_invocation' && this.isUserMacro(invocation)) return this.userMacroItems(invocation);
+    const item = this.item(node);
+    return item ? [item] : [];
+  }
+
+  protected userMacroType(node: Node): TypeAst {
+    return this.expandUserMacro(
+      node,
+      (code) => `type MacroExpansion = ${code};`,
+      (root) => this.type(this.field(root.namedChildren.find((child) => child.type === 'type_item') as Node, 'type'))
+    );
+  }
+
+  protected userMacroPattern(node: Node): Pattern {
+    return this.expandUserMacro(
+      node,
+      (code) => `fn macro_expansion() { match x { ${code} => {} } }`,
+      (root) => {
+        const arm = root.descendantsOfType('match_arm')[0];
+        const pattern = arm && this.field(arm, 'pattern').namedChildren.find((child) => !isComment(child));
+        if (!pattern) syntaxError(this.span(node), 'このマクロはパターンになりません。');
+        return this.pattern(pattern);
+      }
+    );
+  }
   protected macro(node: Node): MacroCall {
     const span = this.span(node);
     const macroNode = this.field(node, 'macro');
@@ -20,6 +169,126 @@ export abstract class MacroConverter extends PatternConverter {
     const tree = node.namedChildren.find((child) => child.type === 'token_tree');
     if (!tree) syntaxError(span, `${name}! の引数が足りません。`);
     return this.macroCall(name, tree, span);
+  }
+
+  // code-gauge-allow functionNcss -- One case per macro.
+  protected literalMacro(node: Node): Expr | undefined {
+    const span = this.span(node);
+    const name = this.field(node, 'macro')
+      .text.replace(/^(?:r#)?(?:::)?(?:std|core|alloc)::/, '')
+      .replace(/^r#/, '');
+    const tree = node.namedChildren.find((child) => child.type === 'token_tree');
+    switch (name) {
+      case 'cfg': {
+        if (!tree) syntaxError(span, 'cfg! には条件を書いてください。');
+        return { kind: 'bool', value: this.attributes.cfgMacro(tree, span), span };
+      }
+      case 'pin':
+      case 'pin::pin': {
+        return this.pinMacro(tree, span);
+      }
+      case 'matches': {
+        return tree && this.guardedMatches(tree, span);
+      }
+      case 'line': {
+        return { kind: 'int', value: BigInt(span.row + 1), suffix: 'u32', span };
+      }
+      case 'column': {
+        // In a macro's expansion, rustc gives the column of the outermost invocation, as `line!` its row.
+        return { kind: 'int', value: BigInt(this.expansionSite?.col ?? span.col), suffix: 'u32', span };
+      }
+      case 'file': {
+        return { kind: 'str', value: 'src/main.rs', span };
+      }
+      case 'module_path': {
+        return { kind: 'str', value: ['main', ...this.modulePath].join('::'), span };
+      }
+      case 'stringify': {
+        const inner = tree ? tree.children.slice(1, -1).filter((child) => !isComment(child)) : [];
+        return { kind: 'str', value: tokenText(inner), span };
+      }
+      case 'concat': {
+        return { kind: 'str', value: this.concatMacro(tree), span };
+      }
+      case 'compile_error': {
+        const [message] = tree ? this.macroArgs(tree) : [];
+        const text = message?.type === 'string_literal' ? parseStringLiteral(message.text) : undefined;
+        return syntaxError(span, text ?? 'compile_error! には、文字列を書いてください。');
+      }
+      case 'include':
+      case 'include_str':
+      case 'include_bytes': {
+        return unavailable(span, `別のファイルを読み込むマクロ ${name}!`);
+      }
+      case 'env':
+      case 'option_env': {
+        return unavailable(span, `コンパイルするときの環境変数を読むマクロ ${name}!`);
+      }
+      case 'asm':
+      case 'global_asm':
+      case 'naked_asm': {
+        return unavailable(span, `CPU によって結果が変わるインラインアセンブリ（${name}!）`);
+      }
+      case 'concat_idents':
+      case 'log_syntax':
+      case 'trace_macros':
+      case 'format_args_nl':
+      case 'concat_bytes': {
+        return syntaxError(span, `${name}! は、不安定な機能なので使えません（E0658）。`);
+      }
+      case 'try': {
+        return syntaxError(span, 'try は予約語なので、try! は使えません（? 演算子を使ってください）。');
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  private concatMacro(tree: Node | undefined): string {
+    let text = '';
+    for (const arg of tree ? this.macroArgs(tree) : []) {
+      const expr = this.expr(arg);
+      switch (expr.kind) {
+        case 'str':
+        case 'char': {
+          text += expr.value;
+          break;
+        }
+        case 'bool': {
+          text += String(expr.value);
+          break;
+        }
+        case 'int': {
+          text += expr.value.toString();
+          break;
+        }
+        case 'float': {
+          text += arg.text.replaceAll('_', '').replace(/f(?:32|64)$/, '');
+          break;
+        }
+        case 'unary': {
+          if (expr.op === '-' && expr.operand.kind === 'int') {
+            text += `-${expr.operand.value.toString()}`;
+            break;
+          }
+          if (expr.op === '-' && expr.operand.kind === 'float') {
+            text += `-${arg.text
+              .slice(1)
+              .trim()
+              .replaceAll('_', '')
+              .replace(/(?:[iu]\d+|[iu]size|f32|f64)$/, '')}`;
+            break;
+          }
+          syntaxError(this.span(arg), 'concat! には、リテラルだけを書いてください。');
+          break;
+        }
+        default: {
+          syntaxError(this.span(arg), 'concat! には、リテラルだけを書いてください。');
+        }
+      }
+    }
+    return text;
   }
 
   // code-gauge-allow functionNcss -- One case per macro.
@@ -68,7 +337,7 @@ export abstract class MacroConverter extends PatternConverter {
         return {
           kind: 'dbg',
           args: args.map((arg) => this.expr(arg)),
-          texts: args.map(macroExpressionText),
+          texts: args.map((arg) => tokenText([arg])),
         };
       }
       default: {
@@ -108,7 +377,7 @@ export abstract class MacroConverter extends PatternConverter {
     return {
       kind: 'assert',
       cond: this.expr(cond),
-      text: macroExpressionText(cond),
+      text: tokenText([cond], true),
       format: this.optionalFormatArgs(rest, span, name),
     };
   }
@@ -127,7 +396,7 @@ export abstract class MacroConverter extends PatternConverter {
   }
 
   /** The comma-separated arguments of a macro, reparsed as expressions at their places in the source. */
-  private macroArgs(tree: Node): Node[] {
+  protected macroArgs(tree: Node): Node[] {
     const open = tree.text[0];
     if (open !== '(' && open !== '[' && open !== '{') syntaxError(this.span(tree), '書き方に誤りがあります。');
     const inner = tree.text.slice(1, -1);
@@ -163,7 +432,36 @@ export abstract class MacroConverter extends PatternConverter {
     }) as MacroCall;
   }
 
+  /** `pin!(value)`, which pins the value in a place of its own that lives as long as the reference to it. */
+  private pinMacro(tree: Node | undefined, span: Span): Expr {
+    const args = tree ? this.macroArgs(tree) : [];
+    if (args.length !== 1) syntaxError(span, 'pin! には値を1つ書いてください。');
+    const segments = ['std', 'pin', 'pin_value'].map((part) => ({
+      name: part,
+      args: undefined,
+      span,
+      internal: true as const,
+    }));
+    return { kind: 'call', callee: { kind: 'path', path: { segments, span }, span }, args: [this.expr(args[0])], span };
+  }
+
+  /** `matches!(v, p if g)` as the `match` it expands to; undefined without a guard, which the `matches` call takes. */
+  private guardedMatches(tree: Node, span: Span): Expr | undefined {
+    const { value, pattern, guard } = this.matchesParts(tree, span);
+    if (!guard) return undefined;
+    const arms: MatchArm[] = [
+      { pattern, guard, body: { kind: 'bool', value: true, span }, span },
+      { pattern: { kind: 'wild', span }, guard: undefined, body: { kind: 'bool', value: false, span }, span },
+    ];
+    return { kind: 'match', scrutinee: value, arms, endRow: span.row, span };
+  }
+
   private matchesMacro(tree: Node, span: Span): MacroCall {
+    const { value, pattern } = this.matchesParts(tree, span);
+    return { kind: 'matches', value, pattern };
+  }
+
+  private matchesParts(tree: Node, span: Span): { value: Expr; pattern: Pattern; guard: Condition[] | undefined } {
     const tokens = tree.children.slice(1, -1).filter((child) => !isComment(child));
     const last = tokens.at(-1);
     const end = last?.type === ',' ? last.startIndex - tree.startIndex : tree.text.length - 1;
@@ -174,11 +472,14 @@ export abstract class MacroConverter extends PatternConverter {
       const arm = root.descendantsOfType('match_arm')[0];
       if (!arm) syntaxError(span, 'matches! の書き方に誤りがあります。');
       const matchPattern = this.field(arm, 'pattern');
-      if (matchPattern.childForFieldName('condition')) unavailable(span, 'match の腕のガード（if）');
-      const patternNode = matchPattern.namedChildren.find((child) => !isComment(child));
-      return patternNode ? this.pattern(patternNode) : ({ kind: 'wild', span } as Pattern);
-    }) as Pattern;
-    return { kind: 'matches', value, pattern };
+      const condition = matchPattern.childForFieldName('condition');
+      const patternNode = matchPattern.namedChildren.find((child) => !isComment(child) && child.id !== condition?.id);
+      return {
+        pattern: patternNode ? this.pattern(patternNode) : ({ kind: 'wild', span } as Pattern),
+        guard: condition ? [{ kind: 'expr', expr: this.expr(condition) }] : undefined,
+      };
+    }) as { pattern: Pattern; guard: Condition[] | undefined };
+    return { value, ...pattern };
   }
 
   /**
@@ -217,7 +518,8 @@ export abstract class MacroConverter extends PatternConverter {
 
   /** The format string and arguments of a formatting macro, with implicit named arguments (`{x}`) captured. */
   private formatArgs(args: Node[], span: Span, macroName: string): FormatArgs {
-    const [formatNode, ...rest] = args;
+    const [written, ...rest] = args;
+    const formatNode = fragmentLiteral(written);
     const text = this.formatString(formatNode, args.length, span, macroName);
     const positional: Expr[] = [];
     const named = new Map<string, number>();
@@ -239,7 +541,15 @@ export abstract class MacroConverter extends PatternConverter {
   }
 
   private formatString(formatNode: Node, argCount: number, span: Span, macroName: string): string {
-    if (formatNode.type === 'raw_string_literal') unavailable(this.span(formatNode), '生の文字列（r"..."）');
+    if (formatNode.type === 'raw_string_literal') {
+      const raw = parseRawStringLiteral(formatNode.text);
+      if (raw && !raw.prefix) return raw.body;
+    }
+    // A macro that makes a string literal (`concat!("a", "{}")`, a program's own `wrap!("{}")`) gives the format string.
+    if (formatNode.type === 'macro_invocation') {
+      const made = this.expr(formatNode);
+      if (made.kind === 'str') return made.value;
+    }
     if (formatNode.type !== 'string_literal' || formatNode.text.startsWith('b')) {
       if (macroName === 'panic' && argCount === 1) {
         syntaxError(span, 'panic! の引数は、書式の文字列にしてください。');
@@ -259,19 +569,7 @@ function firstExpression(root: Node): Node | undefined {
     : statement;
 }
 
-function macroExpressionText(node: Node): string {
-  let text = '';
-  let end = node.startIndex;
-  const visit = (child: Node): void => {
-    if (isComment(child)) return;
-    if (child.childCount > 0 && !child.type.endsWith('_literal')) {
-      for (const token of child.children) visit(token);
-      return;
-    }
-    if (text && child.startIndex > end) text += ' ';
-    text += child.text;
-    end = child.endIndex;
-  };
-  visit(node);
-  return text;
+function macroInvocationOf(statement: Node): Node | undefined {
+  const inner = statement.namedChildren.find((child) => !isComment(child));
+  return inner?.type === 'macro_invocation' ? inner : undefined;
 }

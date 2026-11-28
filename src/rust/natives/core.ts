@@ -15,12 +15,15 @@ import { FmtFailure, ProcessExit, RustPanic } from '../runtime';
 import { intMax, type IntName, resolve, sameType, shallow, substitute as substituteType, type Type } from '../types';
 import { utf8Bytes, utf8Reader } from '../utf8';
 import {
+  CellBox,
+  DurationValue,
   DynValue,
   EnumValue,
   type FormatterValue,
   MapValue,
   type RangeValue,
   SetValue,
+  SharedBox,
   sliceItems,
   StringValue,
   StructValue,
@@ -47,10 +50,8 @@ import {
   panic,
   placeOf,
   some,
+  unsupportedAtRun,
 } from './support';
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Turtle
 
 function turtleOf(self: Value): TurtleState {
   return (deref(self) as TurtleValue).state;
@@ -121,9 +122,6 @@ export function turtleImplSource(): string {
   return `impl Turtle {\n    pub fn new() -> Turtle;\n    ${methods.join('\n    ')}\n}`;
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Traits implemented by the standard library for every type that has them
-
 /**
  * The capacity `to_string` gives an integer's text: room for the most digits of a signed type (and its sign), and
  * exactly the text for an unsigned one, but 3 for `u8` and 4 for `i8`.
@@ -140,13 +138,11 @@ function selfType(ctx: NativeContext): Type {
   return ctx.typeArgs[0];
 }
 
-/** The default value of a type, as `Default::default` gives it. */
 export function defaultValue(ctx: NativeContext, type: Type): Value {
   const method = ctx.interp.program.traitDef('Default').methods.get('default')!;
   return ctx.interp.callFn(method, [type], [], undefined, ctx.span, ctx.frame);
 }
 
-// code-gauge-allow functionNcss -- One branch per type with a built-in default value.
 function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
   ctx.runtime.spend();
   const t = normalize(shallow(type));
@@ -175,50 +171,87 @@ function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
       return normalize(shallow(t.target)).kind === 'slice' ? [] : '';
     }
     case 'adt': {
-      switch (t.def.builtin) {
-        case 'String': {
-          return '';
-        }
-        case 'Vec':
-        case 'VecDeque':
-        case 'BinaryHeap': {
-          return [];
-        }
-        case 'HashMap':
-        case 'BTreeMap': {
-          const map = new MapValue(t.def.builtin === 'BTreeMap');
-          sizeTable(map.entries.table, sizeOf({ kind: 'tuple', elems: t.args }));
-          return map;
-        }
-        case 'HashSet':
-        case 'BTreeSet': {
-          const set = new SetValue(t.def.builtin === 'BTreeSet');
-          sizeTable(set.entries.table, sizeOf(t.args[0]));
-          return set;
-        }
-        case 'Option': {
-          return none(ctx);
-        }
-        case 'Box': {
-          return defaultBoxValue(ctx, t.args[0]);
-        }
-        default: {
-          break;
-        }
-      }
-      const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
-      const defFields = t.def.variants[0].fields;
-      ctx.runtime.allocate(defFields.length);
-      const fields = callForEach(ctx, defFields, (field) => {
-        const fieldType = subst.size > 0 ? substituteType(field.type, subst) : field.type;
-        return defaultValue(ctx, fieldType);
-      });
-      return new StructValue(t.def, fields);
+      return adtDefaultValue(ctx, t);
     }
     default: {
       return undefined;
     }
   }
+}
+
+/** The default value of a struct or enum: std's own types', or one `#[derive(Default)]` gives. */
+// code-gauge-allow functionNcss -- One branch per type with a built-in default value.
+function adtDefaultValue(ctx: NativeContext, t: Type & { kind: 'adt' }): Value {
+  switch (t.def.builtin) {
+    case 'String': {
+      return '';
+    }
+    case 'Vec':
+    case 'VecDeque':
+    case 'BinaryHeap': {
+      return [];
+    }
+    case 'HashMap':
+    case 'BTreeMap': {
+      const map = new MapValue(t.def.builtin === 'BTreeMap');
+      sizeTable(map.entries.table, sizeOf({ kind: 'tuple', elems: t.args }));
+      return map;
+    }
+    case 'HashSet':
+    case 'BTreeSet': {
+      const set = new SetValue(t.def.builtin === 'BTreeSet');
+      sizeTable(set.entries.table, sizeOf(t.args[0]));
+      return set;
+    }
+    case 'Option': {
+      return none(ctx);
+    }
+    case 'Box': {
+      return defaultBoxValue(ctx, t.args[0]);
+    }
+    case 'Duration': {
+      return new DurationValue(0n);
+    }
+    // As `new` of the inner type's default makes them.
+    case 'Rc':
+    case 'Arc': {
+      const inner = defaultBoxValue(ctx, t.args[0]);
+      ctx.interp.dropper.activate();
+      return new SharedBox(inner);
+    }
+    case 'Cell':
+    case 'RefCell':
+    case 'Mutex':
+    case 'RwLock': {
+      const inner = defaultValue(ctx, t.args[0]);
+      ctx.interp.dropper.activate();
+      return new CellBox(inner);
+    }
+    default: {
+      break;
+    }
+  }
+  if (t.def.kind === 'enum') return new EnumValue(t.def, t.def.defaultVariant ?? 0, []);
+  const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+  const defFields = t.def.variants[0].fields;
+  ctx.runtime.allocate(defFields.length);
+  const fields = callForEach(ctx, defFields, (field) => {
+    const fieldType = subst.size > 0 ? substituteType(field.type, subst) : field.type;
+    return defaultValue(ctx, fieldType);
+  });
+  return new StructValue(t.def, fields);
+}
+
+function containsUnion(type: Type, seen = new Set<unknown>()): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'array') return containsUnion(t.elem, seen);
+  if (t.kind === 'tuple') return t.elems.some((elem) => containsUnion(elem, seen));
+  if (t.kind !== 'adt' || seen.has(t.def)) return false;
+  if (t.def.isUnion) return true;
+  seen.add(t.def);
+  const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+  const fields = t.def.variants.flatMap((variant) => variant.fields.map((field) => substituteType(field.type, subst)));
+  return [...t.args, ...fields].some((part) => containsUnion(part, seen));
 }
 
 function defaultBoxValue(ctx: NativeContext, type: Type): Value {
@@ -318,7 +351,11 @@ define({
     const isBytes = target.kind === 'slice' && (typeof value === 'string' || value instanceof StringValue);
     return isBytes ? utf8Reader.bytesView(textOf(value), ctx.runtime) : value;
   },
-  'std::mem::size_of': (_args, ctx) => BigInt(sizeOf(ctx.typeArgs[0])),
+  'std::mem::size_of': (_args, ctx) => {
+    // A union shares one storage among its fields, which this interpreter keeps apart, so it has no size here.
+    if (containsUnion(ctx.typeArgs[0])) unsupportedAtRun(ctx, 'union を含む型の大きさ（size_of）');
+    return BigInt(sizeOf(ctx.typeArgs[0]));
+  },
   'std::mem::swap': ([x, y]) => {
     const a = placeOf(x);
     const b = placeOf(y);
@@ -339,7 +376,10 @@ define({
     place.set(defaultValue(ctx, ctx.typeArgs[0]));
     return old;
   },
-  'std::mem::drop': () => UNIT_VALUE,
+  'std::mem::drop': ([value], ctx) => {
+    ctx.interp.dropper.drop(value, ctx.typeArgs[0]);
+    return UNIT_VALUE;
+  },
   'std::convert::identity': ([x]) => x,
   'std::process::exit': ([code]) => {
     throw new ProcessExit(Number(code as bigint));
@@ -434,8 +474,6 @@ function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): bool
   return range.end === undefined || testPartialOrder(range.inclusive ? 'le' : 'lt', type, value, range.end);
 }
 
-/** `T::from(value)` for the conversions of the standard library. */
-// code-gauge-allow functionCognitiveComplexity -- Rust conversions select different rules for each destination type.
 export function convert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
   const source = normalize(shallow(from));
   const target = normalize(shallow(to));
@@ -444,37 +482,41 @@ export function convert(ctx: NativeContext, value: Value, from: Type, to: Type):
   if (target.kind === 'float' && source.kind === 'bool') return deref(value) ? 1 : 0;
   if (target.kind === 'int' || target.kind === 'float' || target.kind === 'char')
     return castValue(deref(value), target);
-  if (target.kind === 'adt') {
-    switch (target.def.builtin) {
-      case 'String': {
-        return source.kind === 'adt' && source.def.builtin === 'String' ? value : textOf(value);
-      }
-      case 'Vec': {
-        return convertToVec(ctx, value, source, target.args[0]);
-      }
-      case 'Option': {
-        return some(ctx, value);
-      }
-      case 'Box': {
-        return boxValue(ctx, value, source, normalize(shallow(target.args[0])));
-      }
-      case 'HashMap':
-      case 'BTreeMap':
-      case 'HashSet':
-      case 'BTreeSet':
-      case 'VecDeque':
-      case 'BinaryHeap': {
-        const elem = target.def.builtin.endsWith('Map')
-          ? ({ kind: 'tuple', elems: target.args } as Type)
-          : target.args[0];
-        return collectInto(ctx, [...(deref(value) as Value[])], target, elem);
-      }
-      default: {
-        break;
-      }
+  if (target.kind === 'adt') return convertToAdt(ctx, value, source, target);
+  return value;
+}
+
+/** A value converted into a std type by `From` (`String::from("a")`, `Vec::from([1])`, `Box::new` of a slice). */
+function convertToAdt(ctx: NativeContext, value: Value, source: Type, target: Type & { kind: 'adt' }): Value {
+  switch (target.def.builtin) {
+    case 'String':
+    case 'PathBuf': {
+      return source.kind === 'adt' && source.def.builtin === target.def.builtin ? value : textOf(value);
+    }
+    case 'Vec': {
+      return convertToVec(ctx, value, source, target.args[0]);
+    }
+    case 'Option': {
+      return some(ctx, value);
+    }
+    case 'Box': {
+      return boxValue(ctx, value, source, normalize(shallow(target.args[0])));
+    }
+    case 'HashMap':
+    case 'BTreeMap':
+    case 'HashSet':
+    case 'BTreeSet':
+    case 'VecDeque':
+    case 'BinaryHeap': {
+      const elem = target.def.builtin.endsWith('Map')
+        ? ({ kind: 'tuple', elems: target.args } as Type)
+        : target.args[0];
+      return collectInto(ctx, [...(deref(value) as Value[])], target, elem);
+    }
+    default: {
+      break;
     }
   }
-  return value;
 }
 
 function convertToVec(ctx: NativeContext, value: Value, source: Type, elem: Type): Value {
