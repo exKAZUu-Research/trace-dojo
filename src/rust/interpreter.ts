@@ -383,9 +383,11 @@ export class Interpreter implements CallSupport {
   private userIterator(value: Value, type: Type): IterValue {
     const t = normalize(shallow(type));
     const self = t.kind === 'ref' ? t.target : t;
-    // A `&mut` receiver of an adapter (`(&mut c).take(2)`) arrives as the place it refers to, typed as the iterator.
+    // A `&mut` receiver of an adapter (`(&mut c).take(2)`) arrives as the place it refers to, typed as the iterator,
+    // and one that the call borrows again (`(&mut c).nth(2)`) as a place holding that place.
     const borrowed = t.kind === 'ref' || isPlace(value);
-    const place = borrowed && isPlace(value) ? value : new CellPlace(value);
+    let place = borrowed && isPlace(value) ? value : new CellPlace(value);
+    while (isPlace(place.get())) place = place.get() as Place;
     const next = this.program.traitDef('Iterator').methods.get('next') as FnDef;
     const frame = this.runtime.frames.at(-1) as Frame;
     const iter = new IterValue(
