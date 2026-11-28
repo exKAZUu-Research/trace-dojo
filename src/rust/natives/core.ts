@@ -483,7 +483,6 @@ function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): bool
 }
 
 /** `T::from(value)` for the conversions of the standard library. */
-// code-gauge-allow functionCognitiveComplexity -- Rust conversions select different rules for each destination type.
 export function convert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
   const source = normalize(shallow(from));
   const target = normalize(shallow(to));
@@ -492,37 +491,41 @@ export function convert(ctx: NativeContext, value: Value, from: Type, to: Type):
   if (target.kind === 'float' && source.kind === 'bool') return deref(value) ? 1 : 0;
   if (target.kind === 'int' || target.kind === 'float' || target.kind === 'char')
     return castValue(deref(value), target);
-  if (target.kind === 'adt') {
-    switch (target.def.builtin) {
-      case 'String': {
-        return source.kind === 'adt' && source.def.builtin === 'String' ? value : textOf(value);
-      }
-      case 'Vec': {
-        return convertToVec(ctx, value, source, target.args[0]);
-      }
-      case 'Option': {
-        return some(ctx, value);
-      }
-      case 'Box': {
-        return boxValue(ctx, value, source, normalize(shallow(target.args[0])));
-      }
-      case 'HashMap':
-      case 'BTreeMap':
-      case 'HashSet':
-      case 'BTreeSet':
-      case 'VecDeque':
-      case 'BinaryHeap': {
-        const elem = target.def.builtin.endsWith('Map')
-          ? ({ kind: 'tuple', elems: target.args } as Type)
-          : target.args[0];
-        return collectInto(ctx, [...(deref(value) as Value[])], target, elem);
-      }
-      default: {
-        break;
-      }
+  if (target.kind === 'adt') return convertToAdt(ctx, value, source, target);
+  return value;
+}
+
+/** A value converted into a std type by `From` (`String::from("a")`, `Vec::from([1])`, `Box::new` of a slice). */
+function convertToAdt(ctx: NativeContext, value: Value, source: Type, target: Type & { kind: 'adt' }): Value {
+  switch (target.def.builtin) {
+    case 'String':
+    case 'PathBuf': {
+      return source.kind === 'adt' && source.def.builtin === target.def.builtin ? value : textOf(value);
+    }
+    case 'Vec': {
+      return convertToVec(ctx, value, source, target.args[0]);
+    }
+    case 'Option': {
+      return some(ctx, value);
+    }
+    case 'Box': {
+      return boxValue(ctx, value, source, normalize(shallow(target.args[0])));
+    }
+    case 'HashMap':
+    case 'BTreeMap':
+    case 'HashSet':
+    case 'BTreeSet':
+    case 'VecDeque':
+    case 'BinaryHeap': {
+      const elem = target.def.builtin.endsWith('Map')
+        ? ({ kind: 'tuple', elems: target.args } as Type)
+        : target.args[0];
+      return collectInto(ctx, [...(deref(value) as Value[])], target, elem);
+    }
+    default: {
+      break;
     }
   }
-  return value;
 }
 
 function convertToVec(ctx: NativeContext, value: Value, source: Type, elem: Type): Value {
