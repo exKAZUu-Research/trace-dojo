@@ -473,7 +473,8 @@ function checkMoveOutOfRef(
   if (adjust.asIter && !isBuiltin(shallow(selfType), 'Box')) return;
   if (reborrowsIterator(adjust.derefs, selfType)) return;
   c.requireTrait(selfType, 'Sized', expr.receiver.span);
-  const throughRef = adjust.derefs.some((step) => step === 'ref' || step === 'mutRef');
+  // A `Deref` impl (`Rc`, a guard, the program's) lends its target as a reference does; a `Box` owns it.
+  const throughRef = adjust.derefs.some((step) => step === 'ref' || step === 'mutRef' || step === 'user');
   if (!throughRef) return;
   c.deferredChecks.push(() => {
     if (!c.solver.isCopy(resolve(selfType, true))) {

@@ -610,14 +610,15 @@ export class Compiler {
         const calls = derefs.map((step) => {
           const self = stepType;
           stepType = derefOnce(this.program, stepType)?.type ?? stepType;
-          return step === 'user' ? userDerefCall(this, self, false, expr.span) : undefined;
+          // Into a `&mut` (`set(&mut w)`), the program's `DerefMut` gives the place written through.
+          return step === 'user' ? userDerefCall(this, self, keepsPlace, expr.span) : undefined;
         });
         return (frame) => {
           let value = read(frame);
           if (fromMut) value = (value as Place).get();
           for (const [index, step] of derefs.entries()) {
             if (step === 'mutRef') value = (value as Place).get();
-            else if (step === 'user') value = calls[index]!(frame, derefAll(value));
+            else if (step === 'user') value = calls[index]!(frame, keepsPlace ? value : derefAll(value));
           }
           return toStr && !keepsPlace ? textOf(value) : value;
         };

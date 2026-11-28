@@ -1166,15 +1166,15 @@ export class Checker {
     if (a.def.builtin !== 'Box' && !shared) return false;
     let target = shallow(t.args[0]);
     let array = normalize(shallow(a.args[0]));
-    if (target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem))
-      return true;
-    // A `RefCell` or `Mutex` in between unsizes too (`Rc<RefCell<dyn Trait>>`).
+    // A `RefCell` or `Mutex` in between unsizes too (`Rc<RefCell<dyn Trait>>`, `Rc<RefCell<[T]>>`).
     const cell =
       target.kind === 'adt' && array.kind === 'adt' && target.def === array.def && CELLS.has(target.def.builtin ?? '');
     if (cell) {
       target = shallow((target as Type & { kind: 'adt' }).args[0]);
       array = normalize(shallow((array as Type & { kind: 'adt' }).args[0]));
     }
+    if (target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem))
+      return true;
     if (target.kind !== 'dyn') return false;
     this.requireDyn(array, target, expr.span);
     if (array.kind !== 'dyn') {
