@@ -223,7 +223,9 @@ function slicePattern(
     }
     // `rest @ ..` binds the elements `..` stands for: an array of them, or a slice.
     const restType: Type = t.kind === 'array' ? { kind: 'array', elem: t.elem, len: t.len - fixed } : t;
-    if (t.kind === 'slice' && bindingMode === 'move') {
+    // An unsized slice is bound only by reference: through a reference, or with `ref rest @ ..`.
+    const byRef = elem.kind === 'binding' && elem.byRef !== undefined;
+    if (t.kind === 'slice' && bindingMode === 'move' && !byRef) {
       compileError(
         elem.span,
         `${(elem as { name: string }).name} @ .. は、スライスの参照に合わせたときにだけ書けます。`

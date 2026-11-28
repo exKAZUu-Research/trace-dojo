@@ -71,6 +71,8 @@ function letBindings(tokens: Token[], index: number): Binding[] {
 /** A `for`'s names: in its pattern and its body, not in what it iterates. */
 function forBindings(tokens: Token[], index: number): Binding[] {
   const inIndex = patternEnd(tokens, index + 1, ['in']);
+  // A `for` with no `in` is no loop: `impl Trait for Type`, or `for<'a>` of a bound.
+  if (leafText(tokens[inIndex]) !== 'in') return [];
   const names = patternNames(tokens.slice(index + 1, inIndex));
   const body = nextBrace(tokens, inIndex);
   const pattern = { names, from: index + 1, to: inIndex };
