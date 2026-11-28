@@ -29,6 +29,7 @@ import type {
 } from './ast';
 import { checkVariantNames, defaultVariant, discriminants } from './enumItems';
 import { argumentFor, lowerArrayType, lowerConstArg, withDefaultArgs } from './genericArgs';
+import { checkImplMethods, checkImplSafety } from './implChecks';
 import { Unifier } from './infer';
 import { checkFnSugarElision } from './lifetimeElision';
 import {
@@ -106,16 +107,6 @@ export function declareTypeParams(generics: Generics, enclosing: readonly TypePa
     if (param.bounds.some((bound) => bound.kind === 'maybeSized')) declared.maybeUnsized = true;
     return declared;
   });
-}
-
-/** An `unsafe trait` needs an `unsafe impl` (E0200), and only it may have one (E0199). */
-function checkImplSafety(item: ImplItem, trait: TraitDef): void {
-  if (trait.isUnsafe && !item.isUnsafe) {
-    compileError(item.span, `トレイト ${trait.name} は unsafe なので、unsafe impl と書いてください（E0200）。`);
-  }
-  if (!trait.isUnsafe && item.isUnsafe) {
-    compileError(item.span, `トレイト ${trait.name} は unsafe ではないので、unsafe impl にはできません（E0199）。`);
-  }
 }
 
 export function compileError(span: Span, message: string): never {
@@ -646,11 +637,7 @@ export class ItemCollector {
 
   // code-gauge-allow functionCognitiveComplexity -- Follows Rust's name resolution case by case.
   private checkTraitImpl(item: ImplItem, impl: ImplDef, trait: TraitDef): void {
-    for (const method of item.methods) {
-      if (!trait.methods.has(method.name)) {
-        compileError(method.span, `メソッド ${method.name} は、トレイト ${trait.name} にありません。`);
-      }
-    }
+    checkImplMethods(this.program, item, trait);
     for (const constant of item.consts) {
       if (!trait.consts.has(constant.name)) {
         compileError(constant.span, `定数 ${constant.name} は、トレイト ${trait.name} にありません（E0438）。`);

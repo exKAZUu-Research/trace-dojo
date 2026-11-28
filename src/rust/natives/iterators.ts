@@ -3,7 +3,7 @@ import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, 
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
-import { intoIterItem, intoIterShape } from '../iterTypes';
+import { intoIterItem, intoIterShape, isUserIterator } from '../iterTypes';
 import {
   allocateCollectionSnapshot,
   castValue,
@@ -579,16 +579,17 @@ function innerIter(ctx: NativeContext, value: Value, type: Type): IterValue {
 }
 
 define({
-  // `Iterator::next` of an iterator of std, which a type parameter or an opaque type bounded by `Iterator` reaches.
   // The provided `size_hint`: std's `(0, None)` for the program's iterator that does not override it, the exact count
-  // of a std iterator that knows how many it has left; other std iterators' bounds are not reproduced.
+  // of a std iterator (a range included) that knows how many it has left; other std iterators' bounds are not
+  // reproduced.
   'Iterator::size_hint': ([self], ctx) => {
-    const iter = deref(self);
-    if (!(iter instanceof IterValue)) return [0n, none(ctx)];
+    if (isUserIterator(ctx.typeArgs[0])) return [0n, none(ctx)];
+    const iter = iterOf(ctx.interp.toIter(deref(self), ctx.typeArgs[0]));
     if (!iter.remaining) unsupportedAtRun(ctx, 'この反復子の size_hint');
     const left = lengthOf(iter);
     return [left, some(ctx, left)];
   },
+  // `Iterator::next` of an iterator of std, which a type parameter or an opaque type bounded by `Iterator` reaches.
   'Iterator::next': ([self], ctx) => {
     const item = nextOf(iterOf(ctx.interp.toIter(deref(self), ctx.typeArgs[0])));
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
@@ -1518,7 +1519,11 @@ function consumeOutcomes(
   const values = new IterValue(next, undefined, undefined, [iter]);
   values.stateRoots = () => [failure];
   const value = ctx.runtime.withRoots([values], () => consume(values));
-  return failure ?? new EnumValue(target.def, success, [value]);
+  if (!failure) return new EnumValue(target.def, success, [value]);
+  // What it gathered before the `None` or `Err` goes after the iterator it stopped in, as std drops them.
+  ctx.interp.dropper.dropRest(iter);
+  ctx.interp.dropper.drop(value, target.args[0]);
+  return failure;
 }
 
 /**
