@@ -60,9 +60,10 @@ function letBindings(tokens: Token[], index: number): Binding[] {
   if (!['if', 'while', '&&'].includes(leafText(tokens[index - 1]) ?? '')) {
     return [pattern, { names, from: patternEnd(tokens, index + 1, [';']), to: tokens.length }];
   }
-  const scrutineeEnd = tokens.findIndex(
-    (token, at) => at > patternStop && (leafText(token) === '&&' || isBrace(token))
-  );
+  // A scrutinee that is a `match`, `unsafe` or `loop` expression has a `{ }` of its own before the body's.
+  const ownBrace = ['match', 'unsafe', 'loop'].includes(leafText(tokens[patternStop + 1]) ?? '');
+  const firstBrace = ownBrace ? tokens.findIndex((token, at) => at > patternStop && isBrace(token)) : patternStop;
+  const scrutineeEnd = tokens.findIndex((token, at) => at > firstBrace && (leafText(token) === '&&' || isBrace(token)));
   if (scrutineeEnd === -1) return [pattern];
   const body = nextBrace(tokens, scrutineeEnd) ?? tokens.length - 1;
   return [pattern, { names, from: scrutineeEnd, to: body + 1 }];
@@ -143,6 +144,9 @@ function addParamBinders(params: Token[], binders: Set<string>): void {
  * The variables a pattern of a rule's own code binds: its lowercase names, but not the paths, functions, and
  * constructors they are parts of (`Some(x)`, `S::A`), nor the field names of a struct pattern (`S { a: x }`).
  */
+/** The lowercase words of a pattern that bind nothing: keywords and the literals `true` and `false`. */
+const PATTERN_WORDS = new Set(['_', 'mut', 'ref', 'in', 'if', 'true', 'false', 'self']);
+
 function addPatternBinders(tokens: Token[], binders: Set<string>): void {
   for (const [index, token] of tokens.entries()) {
     if (token.kind === 'group') {
@@ -154,7 +158,7 @@ function addPatternBinders(tokens: Token[], binders: Set<string>): void {
     if (after === '(' || after === '::' || after === '{' || after === '!' || after === ':' || before === '::') continue;
     if (tokens[index + 1]?.kind === 'group' && (tokens[index + 1] as { open: string }).open !== '[') continue;
     const isName = /^[\p{Ll}_][\p{L}\p{N}_]*$/u.test(token.text);
-    if (isName && token.fromRule && !['_', 'mut', 'ref', 'in', 'if'].includes(token.text)) binders.add(token.text);
+    if (isName && token.fromRule && !PATTERN_WORDS.has(token.text)) binders.add(token.text);
   }
 }
 
@@ -287,9 +291,28 @@ function groupContext(tokens: Token[], index: number): GroupContext | undefined 
   const group = tokens[index] as Token & { kind: 'group' };
   const before = leafText(tokens[index - 1]);
   const name = leafText(tokens[before === '>' ? turbofishStart(tokens, index - 1) - 1 : index - 1]);
-  if (group.open === '{' && name !== undefined && /^[\p{Lu}]/u.test(name)) return 'struct';
+  if (group.open === '{' && name !== undefined && /^[\p{Lu}]/u.test(name) && !endsCondition(tokens, index)) {
+    return 'struct';
+  }
   if (before === '!') return FORMAT_MACROS.get(leafText(tokens[index - 2]) ?? '');
   return undefined;
+}
+
+/**
+ * Whether a `{ }` group after an uppercase name is the body of an `if`, `while`, `match` or `for` whose header ends with
+ * that name (`if s == State::Done { n }`), which Rust reads as a block, not a struct; a `let` pattern before any `=`
+ * (`if let State::A { x } = s`) is a struct pattern.
+ */
+function endsCondition(tokens: Token[], index: number): boolean {
+  let scrutinee = false;
+  for (let at = index - 1; at >= 0; at--) {
+    const text = leafText(tokens[at]);
+    if (text === undefined || text === ';' || text === '=>') return false;
+    if (text === '=') scrutinee = true;
+    if (text === 'let' && !scrutinee) return false;
+    if (['if', 'while', 'match', 'for', 'in'].includes(text)) return true;
+  }
+  return false;
 }
 
 /** Where the `::<` of the generic arguments that the `>` at `close` ends begins (`W::<i32>`), or `close` itself. */
