@@ -1399,7 +1399,7 @@ export class Checker {
   }
 
   requireIrrefutable(pattern: Pattern, type: Type, where: 'let' | 'fn' | 'for'): void {
-    if (pattern.kind === 'binding' && !this.annotations.paths.has(pattern)) return;
+    if (pattern.kind === 'binding' && !pattern.sub && !this.annotations.paths.has(pattern)) return;
     if (pattern.kind === 'wild') return;
     this.deferCoverage(() => {
       const lowered = lowerPattern(pattern, this.annotations);

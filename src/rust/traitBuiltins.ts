@@ -1065,7 +1065,9 @@ function derived({ t, name, all }: Goal): Answer | undefined {
   if (t.kind !== 'adt') return undefined;
   // A derived `Default` of an enum gives a variant without fields, which needs nothing of the type's parameters.
   if (name === 'Default' && t.def.kind === 'enum' && t.def.derives.has(name)) return 'yes';
-  return t.def.derives.has(name) ? all(t.args) : undefined;
+  // A const parameter (`const N: usize`) is a value, which the derive bounds by nothing.
+  const types = t.args.filter((_, index) => !t.def.params[index]?.constType);
+  return t.def.derives.has(name) ? all(types) : undefined;
 }
 
 function isPrimitive(t: Type): boolean {

@@ -32,7 +32,11 @@ export abstract class PatternConverter extends SyntaxConverter {
 
   /** `name @ pattern`, which binds the whole value while the pattern matches it. */
   private capturedPattern(node: Node, span: Span): Pattern {
-    const [nameNode, subNode] = node.namedChildren.filter((child) => !isComment(child));
+    const nameNode = node.namedChildren.find((child) => !isComment(child)) as Node;
+    // The pattern after `@` may be an unnamed token (`x @ _`).
+    const at = node.children.findIndex((child) => child.type === '@');
+    const subNode = node.children.slice(at + 1).find((child) => !isComment(child));
+    if (!subNode) syntaxError(span, '@ の後にはパターンを書いてください。');
     const name = this.pattern(nameNode);
     if (name.kind !== 'binding' || name.sub) syntaxError(span, '@ の前には名前を書いてください。');
     return { ...name, sub: this.pattern(subNode), span };
