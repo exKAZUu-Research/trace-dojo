@@ -72,14 +72,20 @@ export function compareByKey(
  * Keeps an element unless `sameBucket(it, the last element kept)` says it repeats that one, as `Vec::dedup_by` does;
  * both reach the elements by `&mut`.
  */
-export function dedupBy(items: Value[], sameBucket: (current: ElementPlace, kept: ElementPlace) => boolean): Value {
+export function dedupBy(
+  items: Value[],
+  sameBucket: (current: ElementPlace, kept: ElementPlace) => boolean,
+  drop: (item: Value) => void
+): Value {
   if (items.length < 2) return UNIT_VALUE;
   let read = 1;
   let write = 1;
   try {
     for (; read < items.length; read++) {
       if (sameBucket(new ElementPlace(items, read), new ElementPlace(items, write - 1))) {
+        const removed = items[read];
         items[read] = MOVED;
+        drop(removed);
       } else {
         if (write < read) {
           items[write] = items[read];

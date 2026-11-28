@@ -190,7 +190,13 @@ function mapIterNatives(): Record<string, Native> {
     },
     retain: ([self, f], ctx) => {
       const m = map(self);
-      m.entries.retain((entry) => deref(call(ctx, f, [entry[0], new ElementPlace(entry, 1)])) as boolean);
+      const entryType: Type = { kind: 'tuple', elems: ctx.typeArgs };
+      m.entries.retain((entry) => {
+        if (deref(call(ctx, f, [entry[0], new ElementPlace(entry, 1)]))) return true;
+        // An entry `retain` removes goes at once, as std's does.
+        ctx.interp.dropper.drop(entry, entryType);
+        return false;
+      });
       return UNIT_VALUE;
     },
     extend: ([self, iter], ctx) => extendMap(ctx, map(self), deref(iter) as IterValue),
@@ -331,7 +337,11 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       sorted ? btree(ctx, 'intersection', self, other).next() === DONE : disjointHashSets(ctx, set(self), set(other)),
     retain: ([self, f], ctx) => {
       const s = set(self);
-      s.entries.retain((value) => deref(call(ctx, f, [value])) as boolean);
+      s.entries.retain((value) => {
+        if (deref(call(ctx, f, [value]))) return true;
+        ctx.interp.dropper.drop(value, ctx.typeArgs[0]);
+        return false;
+      });
       return UNIT_VALUE;
     },
     extend: ([self, iter], ctx) => extendSet(ctx, set(self), deref(iter) as IterValue),

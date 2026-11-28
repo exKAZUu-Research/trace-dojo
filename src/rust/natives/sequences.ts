@@ -81,14 +81,19 @@ function elemType(ctx: NativeContext): Type {
   return ctx.typeArgs[0];
 }
 
-function retainElements(items: Value[], keep: (item: ElementPlace) => boolean): Value {
+/** Keeps the elements `keep` takes, dropping each it rejects at once (`drop`), as std's `retain` does. */
+function retainElements(items: Value[], keep: (item: ElementPlace) => boolean, drop: (item: Value) => void): Value {
   keepVecCapacity(items, items.length);
   let write = 0;
   let read = 0;
   try {
     for (; read < items.length; read++) {
       if (keep(new ElementPlace(items, read))) swapOwnedElements(items, write++, read);
-      else items[read] = MOVED;
+      else {
+        const removed = items[read];
+        items[read] = MOVED;
+        drop(removed);
+      }
     }
   } finally {
     if (write < read) {
@@ -494,6 +499,11 @@ function joinStrings(ctx: NativeContext, self: Value, sep: Value): string {
   return parts.join(separator);
 }
 
+/** Drops one element a collection removes, of its element type. */
+function dropOne(ctx: NativeContext): (item: Value) => void {
+  return (item) => dropRemoved(ctx, [item]);
+}
+
 /** Drops the elements a collection removes, as their owner does. */
 function dropRemoved(ctx: NativeContext, removed: Value[]): void {
   const { dropper } = ctx.interp;
@@ -587,11 +597,15 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     const [start, end] = checkedRangeBounds(ctx, range, items.length);
     return ownedIter(items.splice(start, end - start), elemType(ctx));
   },
-  retain: ([self, f], ctx) => retainElements(vec(self), (item) => deref(call(ctx, f, [item.get()])) as boolean),
-  retain_mut: ([self, f], ctx) => retainElements(vec(self), (item) => deref(call(ctx, f, [item])) as boolean),
-  dedup: ([self], ctx) => dedupBy(vec(self), (current, kept) => valuesEqual(elemType(ctx), current.get(), kept.get())),
-  dedup_by: ([self, f], ctx) => dedupBy(vec(self), (current, kept) => call(ctx, f, [current, kept]) as boolean),
-  dedup_by_key: ([self, f], ctx) => dedupBy(vec(self), compareByKey(ctx, f, valuesEqual)),
+  retain: ([self, f], ctx) =>
+    retainElements(vec(self), (item) => deref(call(ctx, f, [item.get()])) as boolean, dropOne(ctx)),
+  retain_mut: ([self, f], ctx) =>
+    retainElements(vec(self), (item) => deref(call(ctx, f, [item])) as boolean, dropOne(ctx)),
+  dedup: ([self], ctx) =>
+    dedupBy(vec(self), (current, kept) => valuesEqual(elemType(ctx), current.get(), kept.get()), dropOne(ctx)),
+  dedup_by: ([self, f], ctx) =>
+    dedupBy(vec(self), (current, kept) => call(ctx, f, [current, kept]) as boolean, dropOne(ctx)),
+  dedup_by_key: ([self, f], ctx) => dedupBy(vec(self), compareByKey(ctx, f, valuesEqual), dropOne(ctx)),
   resize: ([self, newLen, value], ctx) =>
     resizeVec(ctx, vec(self), newLen as bigint, (last) => (last ? value : cloneValue(elemType(ctx), value))),
   resize_with: ([self, newLen, f], ctx) => resizeVec(ctx, vec(self), newLen as bigint, () => call(ctx, f, [])),
@@ -700,8 +714,10 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return some(ctx, items.splice(position, 1)[0]);
   },
   extend: ([self, iter], ctx) => vecNatives.extend([self, iter], ctx),
-  retain: ([self, f], ctx) => retainDeque(vec(self), (item) => deref(call(ctx, f, [item.get()])) as boolean),
-  retain_mut: ([self, f], ctx) => retainDeque(vec(self), (item) => deref(call(ctx, f, [item])) as boolean),
+  retain: ([self, f], ctx) =>
+    retainDeque(vec(self), (item) => deref(call(ctx, f, [item.get()])) as boolean, dropOne(ctx)),
+  retain_mut: ([self, f], ctx) =>
+    retainDeque(vec(self), (item) => deref(call(ctx, f, [item])) as boolean, dropOne(ctx)),
   truncate: ([self, len], ctx) => vecNatives.truncate([self, len], ctx),
   swap: ([self, a, b], ctx) => {
     const items = vec(self);
@@ -724,10 +740,11 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   into_iter: ([self], ctx) => dequeIterator(vec(self), elemType(ctx), 'value'),
 };
 
-function retainDeque(items: Value[], keep: (item: ElementPlace) => boolean): Value {
+function retainDeque(items: Value[], keep: (item: ElementPlace) => boolean, drop: (item: Value) => void): Value {
   let retained = 0;
   for (let read = 0; read < items.length; read++) {
     if (keep(new ElementPlace(items, read))) swapOwnedElements(items, retained++, read);
+    else drop(items[read]);
   }
   items.length = retained;
   return UNIT_VALUE;
