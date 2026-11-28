@@ -49,7 +49,7 @@ import { extreme, extremeByKey } from './extremes';
 import { layoutOf, sizeOf } from './layout';
 import { outcomeIter } from './options';
 import { rangeIterator } from './rangeIterator';
-import { hidesCount, sizeHintShape, UNBOUNDED_SHAPES } from './sizeHint';
+import { countsWhatIsLeft, hidesCount, sizeHintShape, UNBOUNDED_SHAPES } from './sizeHint';
 import { lessByPartialOrd, sortSlice } from './sorting';
 import { collectString } from './stringBuilder';
 import { sumOrProduct } from './sums';
@@ -588,7 +588,7 @@ define({
     if (!shape || hidesCount(shape))
       unsupportedAtRun(ctx, '終わりのない反復子や dyn Iterator を元にした反復子の size_hint');
     const iter = iterOf(ctx.interp.toIter(deref(self), ctx.typeArgs[0]));
-    if (!iter.remaining) unsupportedAtRun(ctx, 'この反復子の size_hint');
+    if (!countsWhatIsLeft(iter)) unsupportedAtRun(ctx, 'この反復子の size_hint');
     const left = lengthOf(iter);
     return [left, some(ctx, left)];
   },

@@ -1,7 +1,7 @@
 import { normalize } from '../infer';
 import { intoIterShape } from '../iterTypes';
 import { shallow, type Type } from '../types';
-import { DynValue, isPlace, type Value } from '../values';
+import { DynValue, isPlace, IterValue, type Value } from '../values';
 import { deref, type NativeContext } from './support';
 
 export const UNBOUNDED_SHAPES = new Set(['RangeFromShape', 'RepeatShape', 'RepeatWithShape']);
@@ -32,3 +32,10 @@ export function hidesCount(shape: Type): boolean {
 }
 
 const COUNT_HIDING_SHAPES = new Set([...UNBOUNDED_SHAPES, 'CycleShape', 'DynIteratorShape', 'IntoShape']);
+
+/** Whether an iterator and every iterator it draws from know how many they have left, which an adapter's count adds up. */
+export function countsWhatIsLeft(iter: IterValue): boolean {
+  if (!iter.remaining) return false;
+  const drawnFrom = [...iter.roots, ...Object.values(iter.adapterState ?? {})];
+  return drawnFrom.every((root) => !(root instanceof IterValue) || countsWhatIsLeft(root));
+}
