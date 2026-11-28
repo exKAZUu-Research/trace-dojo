@@ -2,7 +2,7 @@ import { FileSystemError, type FileSystemErrorCode, type TextReader } from '../.
 import type { Span } from '../ast';
 import { DEFAULT_SPEC } from '../fmt';
 import { normalize } from '../infer';
-import { RustPanic } from '../runtime';
+import { UnsupportedAtRun } from '../runtime';
 import { outputStream, shallow } from '../types';
 import { decodeUtf8 } from '../utf8';
 import {
@@ -22,7 +22,7 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { define, deref, err, type NativeContext, ok, panic, placeOf } from './support';
+import { define, deref, err, type NativeContext, ok, placeOf, unsupportedAtRun } from './support';
 
 class OpenOptionsValue {
   read = false;
@@ -205,7 +205,7 @@ function reading(ctx: NativeContext, source: Value, read: (reader: TextReader) =
 /** What a stream reads from; a file opened only for writing is read only by programs that fail, which stop here. */
 function readerOf(ctx: NativeContext, source: Value): TextReader {
   const { reader } = stream(source);
-  return reader ?? panic(ctx, '書き込み用に開いたファイルからの読み込みは、この採点環境では使えません。');
+  return reader ?? unsupportedAtRun(ctx, '書き込み用に開いたファイルからの読み込み');
 }
 
 /**
@@ -241,7 +241,7 @@ function readInto(reader: TextReader, buf: Value): number {
 function textReaderOf(ctx: NativeContext, source: Value): TextReader {
   const reader = readerOf(ctx, source);
   if (splitBytes.get(reader)?.length) {
-    panic(ctx, '文字の途中まで read した後の、文字列としての読み込みは、この採点環境では使えません。');
+    unsupportedAtRun(ctx, '文字の途中まで read した後の、文字列としての読み込み');
   }
   return reader;
 }
@@ -260,10 +260,7 @@ function openFile(ctx: NativeContext, path: string, options: OpenOptionsValue): 
   const invalid = invalidOptions(options);
   if (invalid) return err(ctx, ioError(ctx, { kind: 'InvalidInput', message: invalid }));
   if (options.read && writes) {
-    panic(
-      ctx,
-      '読み込みと書き込みの両方ができるファイル（OpenOptions の read と write・append）は、この採点環境では使えません。'
-    );
+    unsupportedAtRun(ctx, '読み込みと書き込みの両方ができるファイル（OpenOptions の read と write・append）');
   }
   return attempt(ctx, () => {
     if (!writes) return new IoStream(ctx.runtime.io.openReader(path), undefined, fileInfo(ctx, path));
@@ -446,7 +443,8 @@ function invalidOptions(options: OpenOptionsValue): string | undefined {
 
 export function writeToStream(target: Value, text: string, span: Span): undefined {
   const { writer } = stream(target);
-  if (!writer) throw new RustPanic('読み込み用に開いたファイルへの書き込みは、この採点環境では使えません。', span);
+  if (!writer)
+    throw new UnsupportedAtRun('読み込み用に開いたファイルへの書き込みは、この採点環境では使えません。', span);
   writer.write(text);
   return undefined;
 }
@@ -457,7 +455,7 @@ export function writtenText(bytes: readonly Value[], span: Span): string {
   try {
     return decodeUtf8(array, true);
   } catch {
-    throw new RustPanic('UTF-8 でないバイト列をファイルに書くことは、この採点環境では使えません。', span);
+    throw new UnsupportedAtRun('UTF-8 でないバイト列をファイルに書くことは、この採点環境では使えません。', span);
   }
 }
 

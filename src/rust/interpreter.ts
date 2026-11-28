@@ -24,6 +24,7 @@ import {
   type Runtime,
   RustPanic,
   StackOverflow,
+  UnsupportedAtRun,
 } from './runtime';
 import { concreteType, matchConcrete, typeIdentity, typeKey } from './runtimeTypes';
 import { nativeArgumentTypes, turtleCaptureRoots } from './turtleTypes';
@@ -284,7 +285,7 @@ export class Interpreter implements CallSupport {
   private callNative(def: FnDef, typeArgs: Type[], args: Value[], span: Span, frame: Frame): Value {
     const key = def.nativeKey ?? `${def.name}`;
     const native = NATIVES[key];
-    if (!native) throw new RustPanic(`${key} は、この採点環境では使えません。`, span);
+    if (!native) throw new UnsupportedAtRun(`${key} は、この採点環境では使えません。`, span);
     const context: NativeContext = { interp: this, runtime: this.runtime, frame, span, typeArgs };
     const before = receiverText(args[0]);
     const result = this.runtime.withRoots(args, () => {

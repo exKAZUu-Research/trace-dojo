@@ -7,7 +7,7 @@ import { dropsBorrowedTemporary } from './compilerTemporaries';
 import { floatBits, floatFromBits } from './floatBits';
 import { normalize } from './infer';
 import { derefOnce } from './methods';
-import { type Frame, MOVED, RustPanic } from './runtime';
+import { type Frame, MOVED, RustPanic, UnsupportedAtRun } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type DerefKind, intBits, resolve, shallow, substitute, type Type } from './types';
 import { decodeUtf8 } from './utf8';
@@ -331,7 +331,7 @@ function readUnionField(fields: Value[], types: Type[], index: number, span: Spa
   const bits = scalarBits(fields[written], types[written]);
   const value = bits && fromBits(bits.bits, bits.width, types[index]);
   if (value === undefined) {
-    throw new RustPanic('共用体の別のフィールドとして読むことは、この採点環境では使えません。', span);
+    throw new UnsupportedAtRun('共用体の別のフィールドとして読むことは、この採点環境では使えません。', span);
   }
   return value;
 }
