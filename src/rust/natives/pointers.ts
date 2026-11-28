@@ -153,6 +153,8 @@ define({
     const b = cell(other);
     requireUnborrowed(ctx, a);
     requireUnborrowed(ctx, b);
+    // std borrows both cells mutably, the second of which a cell swapped with itself already is.
+    if (a === b) panic(ctx, 'RefCell already borrowed');
     [a.value, b.value] = [b.value, a.value];
     return UNIT_VALUE;
   },
