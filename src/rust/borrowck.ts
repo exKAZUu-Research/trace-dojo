@@ -498,7 +498,8 @@ export class BorrowChecker {
     const { selfMode } = method.fn;
     if (autoref === 'mut' || (selfMode === 'mutRef' && isMutReference(receiver.ty))) return 'mut';
     if (receiverReborrow(method, receiver.ty)) return 'mut';
-    const throughRef = derefs.some((step) => step === 'ref' || step === 'mutRef');
+    // A `Deref` impl lends its target, which a by-value `self` copies, so the receiver stays.
+    const throughRef = derefs.some((step) => step === 'ref' || step === 'mutRef' || step === 'user');
     const moves =
       autoref === 'none' && selfMode === 'value' && !throughRef && !this.isCopy(typeAfter(receiver.ty, derefs));
     return moves ? 'move' : 'read';

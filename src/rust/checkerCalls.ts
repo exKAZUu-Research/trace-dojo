@@ -18,12 +18,13 @@ import { normalize } from './infer';
 import type { Module, Program } from './items';
 import { compileError } from './items';
 import { failedInherentBound } from './methodBounds';
-import { autoderefSteps, boundsOf, lookupMethod } from './methods';
+import { autoderefSteps, boundsOf, derefOnce, lookupMethod } from './methods';
 import { reborrowsIterator } from './receiverReborrow';
 import { typeAfter } from './regions';
 import {
   adt,
   type ClosureType,
+  type DerefKind,
   type FnDef,
   hasVars,
   intType,
@@ -460,7 +461,15 @@ function checkSelfMove(
 ): void {
   const derefs = fn.selfWrapper === 'Box' ? found.adjust.derefs.slice(0, -1) : found.adjust.derefs;
   const adjust = { ...found.adjust, derefs };
-  checkMoveOutOfRef(c, expr, adjust, typeAfter(receiverType, derefs) ?? found.selfType);
+  checkMoveOutOfRef(c, expr, adjust, typeThrough(c, receiverType, derefs) ?? found.selfType);
+}
+
+/** The type a receiver derefs to through its steps, a `Deref` impl's (`W` to its `Target`) included. */
+function typeThrough(c: Checker, receiverType: Type, derefs: DerefKind[]): Type | undefined {
+  if (!derefs.includes('user')) return typeAfter(receiverType, derefs);
+  let type = receiverType;
+  for (let index = 0; index < derefs.length; index++) type = derefOnce(c.program, type)?.type ?? type;
+  return type;
 }
 
 function checkMoveOutOfRef(
@@ -494,7 +503,10 @@ function checkReceiverAdjust(
   mode: FnDef['selfMode']
 ): void {
   if (mode !== 'mutRef') return;
-  const derefs = adjust.autoref === 'none' ? [...adjust.derefs, 'mutRef' as const] : adjust.derefs;
+  // An iterator a `&mut` holds (`r.nth(2)` of `r: &mut C`) is reborrowed through it, which needs no `mut` binding.
+  const receiver = normalize(shallow(expr.receiver.ty ?? UNIT));
+  const throughMut = adjust.asIter && adjust.derefs.length === 0 && receiver.kind === 'ref' && receiver.mutable;
+  const derefs = adjust.autoref === 'none' || throughMut ? [...adjust.derefs, 'mutRef' as const] : adjust.derefs;
   if (derefs.includes('ref')) {
     compileError(
       expr.receiver.span,
