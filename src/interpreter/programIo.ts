@@ -208,7 +208,6 @@ class FileNode {
   rawBytes?: Uint8Array;
   rawByteLength = 0;
   syncedByteLength = 0;
-  syncedCharLength = 0;
   /** Whether a path names the file, whose contents then count as stored; a deleted file counts only what is written. */
   isLinked = true;
 }
@@ -242,7 +241,7 @@ export class FileHandle {
     if (this.position !== undefined) this.position += text.length;
   }
 
-  /** Writes UTF-8 bytes, preserving split multi-byte sequences across successive update and append writes. */
+  /** Writes UTF-8 bytes at the handle's byte offset or the end of the file. */
   writeBytes(bytes: Uint8Array): void {
     const start = this.bytePosition ?? this.files.ensureByteLength(this.node);
     this.files.writeBytesAt(this.node, start, bytes);
@@ -435,15 +434,13 @@ export class VirtualFileSystem {
     if (position > oldLength) buffer.fill(0, oldLength, position);
     buffer.set(bytes, position);
     node.rawByteLength = newLength;
-    if (position < oldLength) {
-      node.syncedByteLength = 0;
-      node.syncedCharLength = 0;
-    }
-    const { updated, syncedBytes, syncedChars } = decodeUpdatedBytes(node, buffer, newLength);
+    const updated =
+      position < oldLength
+        ? UTF8_DECODER.decode(buffer.subarray(0, newLength))
+        : node.content + UTF8_DECODER.decode(buffer.subarray(node.syncedByteLength, newLength));
     this.storedLength += node.isLinked ? updated.length - node.content.length : bytes.length + gap;
     if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
-    node.syncedByteLength = syncedBytes;
-    node.syncedCharLength = syncedChars;
+    node.syncedByteLength = newLength;
     node.content = updated;
   }
 
@@ -453,7 +450,6 @@ export class VirtualFileSystem {
       node.rawBytes = new Uint8Array(64);
       node.rawByteLength = 0;
       node.syncedByteLength = 0;
-      node.syncedCharLength = 0;
       return node.rawBytes;
     }
     this.budget.spend(Math.ceil((node.content.length + 1) / 64));
@@ -461,7 +457,6 @@ export class VirtualFileSystem {
     node.rawBytes = encoded;
     node.rawByteLength = encoded.length;
     node.syncedByteLength = encoded.length;
-    node.syncedCharLength = node.content.length;
     return encoded;
   }
 
@@ -676,7 +671,6 @@ function resetByteBuffer(node: FileNode): void {
   node.rawBytes = undefined;
   node.rawByteLength = 0;
   node.syncedByteLength = 0;
-  node.syncedCharLength = 0;
 }
 
 function growByteBuffer(node: FileNode, buffer: Uint8Array, oldLength: number, newLength: number): Uint8Array {
@@ -687,42 +681,4 @@ function growByteBuffer(node: FileNode, buffer: Uint8Array, oldLength: number, n
   grown.set(buffer.subarray(0, oldLength));
   node.rawBytes = grown;
   return grown;
-}
-
-function decodeUpdatedBytes(
-  node: FileNode,
-  buffer: Uint8Array,
-  newLength: number
-): { updated: string; syncedBytes: number; syncedChars: number } {
-  const incomplete = trailingIncompleteUtf8Bytes(buffer, newLength);
-  const safeEnd = newLength - incomplete;
-  const safePart =
-    safeEnd > node.syncedByteLength ? UTF8_DECODER.decode(buffer.subarray(node.syncedByteLength, safeEnd)) : '';
-  const pendingPart = incomplete > 0 ? UTF8_DECODER.decode(buffer.subarray(safeEnd, newLength)) : '';
-  const base =
-    node.syncedCharLength === node.content.length ? node.content : node.content.slice(0, node.syncedCharLength);
-  const prefix = base + safePart;
-  return {
-    updated: pendingPart ? prefix + pendingPart : prefix,
-    syncedBytes: safeEnd,
-    syncedChars: prefix.length,
-  };
-}
-
-function trailingIncompleteUtf8Bytes(buffer: Uint8Array, end: number): number {
-  const maxScan = Math.min(3, end);
-  for (let offset = 1; offset <= maxScan; offset++) {
-    const byte = buffer[end - offset];
-    if ((byte & 0xc0) === 0x80) continue;
-    const expected = utf8LeadSequenceLength(byte);
-    return offset < expected ? offset : 0;
-  }
-  return 0;
-}
-
-function utf8LeadSequenceLength(byte: number): number {
-  if (byte >= 0xc2 && byte <= 0xdf) return 2;
-  if (byte >= 0xe0 && byte <= 0xef) return 3;
-  if (byte >= 0xf0 && byte <= 0xf4) return 4;
-  return 0;
 }
