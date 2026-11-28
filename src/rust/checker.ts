@@ -21,7 +21,7 @@ import { deepNormalize, isPseudo, normalize, Unifier } from './infer';
 import { checkInherentItems } from './inherentItems';
 import { compileError, ItemCollector, lowerType, Module, type Program, resolveImports, type TypeScope } from './items';
 import { dynIteratorTarget, intoIterItem, intoIterShape } from './iterTypes';
-import { checkElidedReturnLifetime, checkFieldLifetimes } from './lifetimeElision';
+import { checkElidedReturnLifetime, checkFieldLifetimes, checkFnTypeElision } from './lifetimeElision';
 import { autoderefSteps, derefOnce } from './methods';
 import { orderHint } from './orderingDiagnostics';
 import { pointerCoercion } from './pointerCoercions';
@@ -1248,6 +1248,7 @@ export class Checker {
    */
   private checkWrittenType(type: Type, span: Span): void {
     const t = shallow(type);
+    checkFnTypeElision(t, span);
     if (t.kind === 'dyn') {
       checkDynCompatible(t.trait.trait, span);
       if (dynIteratorTarget(t) && !intoIterItem(t)) compileError(span, 'dyn Iterator には Item の型を書いてください。');

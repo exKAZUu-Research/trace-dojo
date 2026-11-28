@@ -75,6 +75,16 @@ function checkFnSugarElision(type: Type, span: Span): void {
   for (const part of parts) checkFnSugarElision(part, span);
 }
 
+/**
+ * Requires a written `fn(..) -> ..` pointer, `dyn Fn(..) -> ..` or `impl Fn(..) -> ..` to elide its output's lifetimes
+ * from its own inputs, wherever the type is written (a `let`, a cast, a `static`, a field).
+ */
+export function checkFnTypeElision(type: Type, span: Span): void {
+  const t = shallow(type);
+  if (t.kind === 'fn') checkOwnElision(t, span, 'fn');
+  if (t.kind === 'dyn' || t.kind === 'opaque') checkFnSugarBounds(t.kind === 'dyn' ? [t.trait] : t.opaque.bounds, span);
+}
+
 function checkFnSugarBounds(bounds: readonly TraitRef[], span: Span): void {
   for (const { fnSig } of bounds) if (fnSig) checkOwnElision(fnSig, span, 'Fn');
 }
@@ -103,6 +113,8 @@ export function checkFieldLifetimes(type: Type, span: Span, declared: string[]):
     }
     for (const lifetime of lifetimes) checkFieldLifetime(lifetime, span, declared);
   }
+  // A function pointer's references are its own parameters' and result's, which it elides by its own rules.
+  if (t.kind === 'fn') return;
   const stored = t.kind === 'dyn' ? t.trait.args : childTypes(t);
   for (const child of stored) checkFieldLifetimes(child, span, declared);
 }
