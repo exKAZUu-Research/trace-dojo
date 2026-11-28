@@ -27,6 +27,11 @@ export function holdTemporary(frame: Frame, value: Value, type: Type, slot?: num
   const { dropper } = frame.runtime;
   if (!dropper?.needsDrop(type)) return;
   const release = (): void => dropper.drop(isPlace(value) ? value.get() : value, type);
-  if (slot === undefined) frame.runtime.liveGuards.push({ release });
-  else frame.holdUntilDropped(slot, release);
+  if (slot === undefined) {
+    frame.runtime.liveGuards.push({ release });
+    return;
+  }
+  // The guards the temporary holds (`&*cell.borrow()`) stay until it goes, unlike the statement's others.
+  frame.runtime.keepGuardsOf(value);
+  frame.holdUntilDropped(slot, release);
 }

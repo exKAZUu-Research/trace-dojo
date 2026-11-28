@@ -134,7 +134,9 @@ function derefPlace(c: Compiler, expr: ExprOf<'unary'>): PlaceEval {
     return (frame) => pointee(derefAll(operand(frame)) as RawPtr, expr.span);
   }
   if (derefOnce(c.program, operandType)?.kind === 'user') {
-    const base = compilePlace(c, expr.operand);
+    // A smart pointer a call gives (`*c.borrow()`) goes when the statement ends, or with the variable a `let` extends
+    // it to.
+    const base = dropsBorrowedTemporary(c, expr.operand, compilePlace(c, expr.operand)) as PlaceEval;
     const call = userDerefCall(c, operandType, true, expr.span);
     return (frame) => call(frame, base(frame)) as Place;
   }

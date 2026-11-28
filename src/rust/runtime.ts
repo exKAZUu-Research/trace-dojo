@@ -285,6 +285,13 @@ export class Runtime implements TracedRuntime<Frame> {
     this.liveGuards.push(...returned);
   }
 
+  /** Takes the guards `value` holds out of those that go at the end of the statement. */
+  keepGuardsOf(value: Value): void {
+    for (let index = this.liveGuards.length - 1; index >= 0; index--) {
+      if (holds(value, this.liveGuards[index])) this.liveGuards.splice(index, 1);
+    }
+  }
+
   pushFrame(frame: Frame): void {
     if (this.frames.length >= LIMITS.maxCallDepth) throw new StackOverflow();
     // A body of calls alone charges nothing else, so each call spends.

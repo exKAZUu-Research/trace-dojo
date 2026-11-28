@@ -4,6 +4,7 @@ import type { Compiler, Eval } from './compiler';
 import { fnCall } from './compilerCalls';
 import { derefAll, evaluateValues, isStringType, stringish, stripRefs, withEvaluatedValues } from './compilerCommon';
 import { pointee, userDerefCall, withoutPin } from './compilerPlaces';
+import { dropsBorrowedTemporary } from './compilerTemporaries';
 import { floatNumber, negateFloat } from './floatBits';
 import { derefOnce } from './methods';
 import { btreeSetOp, hashSetMembers, type SetOp } from './natives/setOps';
@@ -46,7 +47,8 @@ export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
     }
     if (derefOnce(c.program, operandType)?.kind === 'user') {
       const call = userDerefCall(c, operandType, false, expr.span);
-      return (frame) => call(frame, derefAll(operand(frame)));
+      const held = dropsBorrowedTemporary(c, expr.operand, operand);
+      return (frame) => call(frame, derefAll(held(frame)));
     }
     if (operandType.kind === 'ref' && operandType.mutable) return (frame) => (operand(frame) as Place).get();
     return operand;
