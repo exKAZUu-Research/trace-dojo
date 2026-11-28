@@ -314,6 +314,9 @@ function matchFragment(fragment: string, tokens: Token[], start: number, followi
   return begins ? matchUntilStop(fragment, tokens, start, following) : -1;
 }
 
+/** The words before an item's keyword: its visibility and qualifiers (`pub unsafe fn`, `const fn`, `async fn`). */
+const QUALIFIERS = new Set(['pub', 'const', 'unsafe', 'async', 'extern', 'default', 'safe']);
+
 /** The keywords of items whose `{ ... }` body ends them; the others end at their `;`. */
 const BODY_ITEMS = new Set(['fn', 'impl', 'trait', 'mod', 'enum', 'macro_rules']);
 
@@ -327,7 +330,7 @@ function itemEnd(tokens: Token[], start: number): number {
     const token = tokens[index];
     const text = leafText(token);
     if (text === ';') return index + 1;
-    if (keyword === undefined && text !== undefined && /^[a-z_]+$/.test(text) && text !== 'pub') keyword = text;
+    if (keyword === undefined && text !== undefined && /^[a-z_]+$/.test(text) && !QUALIFIERS.has(text)) keyword = text;
     const isBody = token.kind === 'group' && token.open === '{';
     if (!isBody) continue;
     const braced = keyword !== undefined && (BODY_ITEMS.has(keyword) || keyword === 'struct' || keyword === 'union');
@@ -382,6 +385,7 @@ function isPathStart(text: string | undefined): boolean {
  * only outside generic arguments (`Vec<i32>`, `HashMap<K, V>`, `f::<T>`) and a closure's parameters (`|a, b|`).
  */
 function matchUntilStop(fragment: string, tokens: Token[], start: number, following: Part | undefined): number {
+  if (fragment === 'vis') return visEnd(tokens, start);
   const stops = new Set<string>(STOPS[fragment]);
   if (following?.kind === 'token') stops.add(following.token.text);
   if (following?.kind === 'rep' && following.separator) stops.add(following.separator);
@@ -396,8 +400,14 @@ function matchUntilStop(fragment: string, tokens: Token[], start: number, follow
     depth = Math.max(0, depth + angleChange(leafText(tokens[end]), types || leafText(tokens[end - 1]) === '::', depth));
     end++;
   }
-  if (fragment === 'vis') return end;
   return end > start ? end : -1;
+}
+
+/** A visibility: `pub`, `pub(..)`, or nothing, which a `vis` fragment may also match. */
+function visEnd(tokens: Token[], start: number): number {
+  if (leafText(tokens[start]) !== 'pub') return start;
+  const next = tokens[start + 1];
+  return next?.kind === 'group' && next.open === '(' ? start + 2 : start + 1;
 }
 
 const EXPRESSIONS = new Set(['expr', 'expr_2021', 'stmt']);
