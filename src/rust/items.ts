@@ -628,7 +628,7 @@ export class ItemCollector {
 
   // code-gauge-allow functionCognitiveComplexity -- Follows Rust's name resolution case by case.
   private checkTraitImpl(item: ImplItem, impl: ImplDef, trait: TraitDef): void {
-    checkImplMethods(this.program, item, trait);
+    checkImplMethods(item, trait);
     for (const constant of item.consts) {
       if (!trait.consts.has(constant.name)) {
         compileError(constant.span, `定数 ${constant.name} は、トレイト ${trait.name} にありません（E0438）。`);
