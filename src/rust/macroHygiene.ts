@@ -60,14 +60,36 @@ function letBindings(tokens: Token[], index: number): Binding[] {
   if (!['if', 'while', '&&'].includes(leafText(tokens[index - 1]) ?? '')) {
     return [pattern, { names, from: patternEnd(tokens, index + 1, [';']), to: tokens.length }];
   }
-  // A scrutinee that is a `match`, `unsafe` or `loop` expression has a `{ }` of its own before the body's.
-  const ownBrace = ['match', 'unsafe', 'loop'].includes(leafText(tokens[patternStop + 1]) ?? '');
-  const firstBrace = ownBrace ? tokens.findIndex((token, at) => at > patternStop && isBrace(token)) : patternStop;
-  const scrutineeEnd = tokens.findIndex((token, at) => at > firstBrace && (leafText(token) === '&&' || isBrace(token)));
-  if (scrutineeEnd === -1) return [pattern];
+  const scrutineeEnd = conditionScrutineeEnd(tokens, patternStop);
+  if (scrutineeEnd === undefined) return [pattern];
   const body = nextBrace(tokens, scrutineeEnd) ?? tokens.length - 1;
   return [pattern, { names, from: scrutineeEnd, to: body + 1 }];
 }
+
+/**
+ * Where the scrutinee after a condition's `=` ends: at a `&&` of the chain or the body's `{`. A `{ }` right after the
+ * `=` or an `else` is a block of the scrutinee, and one after `if`, `match`, `while`, `for`, `loop` or `unsafe` closes
+ * that expression, so neither is the body's.
+ */
+function conditionScrutineeEnd(tokens: Token[], equals: number): number | undefined {
+  let open = 0;
+  for (let at = equals + 1; at < tokens.length; at++) {
+    const text = leafText(tokens[at]);
+    if (isBrace(tokens[at])) {
+      const previous = leafText(tokens[at - 1]);
+      if (at === equals + 1 || previous === 'else') continue;
+      if (open === 0) return at;
+      open--;
+    } else if (text && SCRUTINEE_BLOCK_WORDS.has(text)) {
+      open++;
+    } else if (text === '&&' && open === 0) {
+      return at;
+    }
+  }
+  return undefined;
+}
+
+const SCRUTINEE_BLOCK_WORDS = new Set(['if', 'match', 'while', 'for', 'loop', 'unsafe']);
 
 /** A `for`'s names: in its pattern and its body, not in what it iterates. */
 function forBindings(tokens: Token[], index: number): Binding[] {
