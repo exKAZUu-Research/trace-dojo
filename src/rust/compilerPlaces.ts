@@ -83,7 +83,10 @@ function fieldPlace(c: Compiler, expr: ExprOf<'field'>): PlaceEval | undefined {
   const field = c.annotations.fields.get(expr);
   if (!field) return undefined;
   const through = placeThrough(c, expr.operand, field.derefs);
-  const base = field.derefs.length === 0 ? (dropsBorrowedTemporary(c, expr.operand, through) as PlaceEval) : through;
+  // A temporary the field is taken from (`make().0`, or `boxed().0` through its `Box`, which is its value) goes when the
+  // statement ends, with what is left of it.
+  const owned = field.derefs.every((step) => step === 'own');
+  const base = owned ? (dropsBorrowedTemporary(c, expr.operand, through) as PlaceEval) : through;
   const { index } = field;
   if (field.range) return rangeFieldPlace(base, rangeEndpoint(expr.name));
   const union = unionFields(expr);
