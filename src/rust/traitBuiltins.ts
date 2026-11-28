@@ -13,11 +13,11 @@ import {
   isSigned,
   ref,
   resolve,
+  sameType,
   shallow,
   substitute,
   type TraitRef,
   type Type,
-  typeToString,
   USIZE,
 } from './types';
 
@@ -441,36 +441,30 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
   if (t.kind === 'adt' && name === 'Sync' && t.def.builtin === 'Receiver') return 'no';
   if (t.kind === 'adt' && name === 'Sync' && ['Cell', 'RefCell', 'Ref', 'RefMut'].includes(t.def.builtin ?? ''))
     return 'no';
-  if (t.kind === 'adt' && !t.def.builtin) return programAdtAutoTrait(t, all);
+  if (t.kind === 'adt' && !t.def.builtin) return programAdtAutoTrait(t, name, all);
   if (t.kind === 'adt') return all(t.args);
   return 'yes';
 }
 
 /**
- * The instances of the program's types whose auto traits are being decided, which a recursive type assumes of itself,
- * as rustc does; an instance with other arguments (`W<Rc<i32>>` inside `W<i32>`) is decided on its own.
+ * The goals of the program's types whose auto traits are being decided, which a recursive type assumes of itself, as
+ * rustc does; a goal of another trait, definition or arguments (`W<Rc<i32>>` inside `W<i32>`) is decided on its own.
  */
-const autoTraitGoals = new Set<string>();
-
-/** How many instances of each definition are being decided, nested in one another. */
-const autoTraitNesting = new Map<AdtType['def'], number>();
+const autoTraitGoals: { trait: string; t: AdtType }[] = [];
 
 /** How deep one definition may nest in its own fields with ever new arguments (`W<T>` holding a `W<Vec<T>>`). */
 const MAX_AUTO_TRAIT_NESTING = 8;
 
 /** A program's struct or enum is `Send` or `Sync` when every field of every variant is. */
-function programAdtAutoTrait(t: AdtType, all: (types: Type[]) => Answer): Answer {
-  const key = typeToString(resolve(t));
-  const nesting = autoTraitNesting.get(t.def) ?? 0;
-  if (autoTraitGoals.has(key) || nesting >= MAX_AUTO_TRAIT_NESTING) return 'yes';
-  autoTraitGoals.add(key);
-  autoTraitNesting.set(t.def, nesting + 1);
+function programAdtAutoTrait(t: AdtType, trait: string, all: (types: Type[]) => Answer): Answer {
+  const same = autoTraitGoals.filter((goal) => goal.trait === trait && goal.t.def === t.def);
+  if (same.length >= MAX_AUTO_TRAIT_NESTING || same.some((goal) => sameType(resolve(goal.t), resolve(t)))) return 'yes';
+  autoTraitGoals.push({ trait, t });
   try {
     const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
     return all(t.def.variants.flatMap((variant) => variant.fields.map((field) => substitute(field.type, subst))));
   } finally {
-    autoTraitGoals.delete(key);
-    autoTraitNesting.set(t.def, nesting);
+    autoTraitGoals.pop();
   }
 }
 

@@ -86,7 +86,8 @@ export function intoIterItem(type: Type): Type | undefined {
 
 function borrowedIterItem(type: Extract<Type, { kind: 'ref' }>): Type | undefined {
   const target = normalize(shallow(type.target));
-  if (target.kind === 'adt' && target.def.builtin === 'Receiver') return target.args[0];
+  // Only `&Receiver` iterates (`for x in &rx`); a `&mut` of one is no iterator.
+  if (target.kind === 'adt' && target.def.builtin === 'Receiver' && !type.mutable) return target.args[0];
   // `impl Iterator for &mut I` of std makes a `&mut` of the program's iterator one too.
   if (type.mutable && target.kind === 'adt' && !target.def.builtin) return userIteratorItem(target);
   if (target.kind === 'array' || target.kind === 'slice') return ref(target.elem, type.mutable);

@@ -15,6 +15,7 @@ import { FmtFailure, ProcessExit, RustPanic } from '../runtime';
 import { intMax, type IntName, resolve, sameType, shallow, substitute as substituteType, type Type } from '../types';
 import { utf8Bytes, utf8Reader } from '../utf8';
 import {
+  CellBox,
   DurationValue,
   DynValue,
   EnumValue,
@@ -22,6 +23,7 @@ import {
   MapValue,
   type RangeValue,
   SetValue,
+  SharedBox,
   sliceItems,
   StringValue,
   StructValue,
@@ -147,7 +149,6 @@ export function defaultValue(ctx: NativeContext, type: Type): Value {
   return ctx.interp.callFn(method, [type], [], undefined, ctx.span, ctx.frame);
 }
 
-// code-gauge-allow functionNcss -- One branch per type with a built-in default value.
 function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
   ctx.runtime.spend();
   const t = normalize(shallow(type));
@@ -176,54 +177,75 @@ function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
       return normalize(shallow(t.target)).kind === 'slice' ? [] : '';
     }
     case 'adt': {
-      switch (t.def.builtin) {
-        case 'String': {
-          return '';
-        }
-        case 'Vec':
-        case 'VecDeque':
-        case 'BinaryHeap': {
-          return [];
-        }
-        case 'HashMap':
-        case 'BTreeMap': {
-          const map = new MapValue(t.def.builtin === 'BTreeMap');
-          sizeTable(map.entries.table, sizeOf({ kind: 'tuple', elems: t.args }));
-          return map;
-        }
-        case 'HashSet':
-        case 'BTreeSet': {
-          const set = new SetValue(t.def.builtin === 'BTreeSet');
-          sizeTable(set.entries.table, sizeOf(t.args[0]));
-          return set;
-        }
-        case 'Option': {
-          return none(ctx);
-        }
-        case 'Box': {
-          return defaultBoxValue(ctx, t.args[0]);
-        }
-        case 'Duration': {
-          return new DurationValue(0n);
-        }
-        default: {
-          break;
-        }
-      }
-      if (t.def.kind === 'enum') return new EnumValue(t.def, t.def.defaultVariant ?? 0, []);
-      const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
-      const defFields = t.def.variants[0].fields;
-      ctx.runtime.allocate(defFields.length);
-      const fields = callForEach(ctx, defFields, (field) => {
-        const fieldType = subst.size > 0 ? substituteType(field.type, subst) : field.type;
-        return defaultValue(ctx, fieldType);
-      });
-      return new StructValue(t.def, fields);
+      return adtDefaultValue(ctx, t);
     }
     default: {
       return undefined;
     }
   }
+}
+
+/** The default value of a struct or enum: std's own types', or one `#[derive(Default)]` gives. */
+// code-gauge-allow functionNcss -- One branch per type with a built-in default value.
+function adtDefaultValue(ctx: NativeContext, t: Type & { kind: 'adt' }): Value {
+  switch (t.def.builtin) {
+    case 'String': {
+      return '';
+    }
+    case 'Vec':
+    case 'VecDeque':
+    case 'BinaryHeap': {
+      return [];
+    }
+    case 'HashMap':
+    case 'BTreeMap': {
+      const map = new MapValue(t.def.builtin === 'BTreeMap');
+      sizeTable(map.entries.table, sizeOf({ kind: 'tuple', elems: t.args }));
+      return map;
+    }
+    case 'HashSet':
+    case 'BTreeSet': {
+      const set = new SetValue(t.def.builtin === 'BTreeSet');
+      sizeTable(set.entries.table, sizeOf(t.args[0]));
+      return set;
+    }
+    case 'Option': {
+      return none(ctx);
+    }
+    case 'Box': {
+      return defaultBoxValue(ctx, t.args[0]);
+    }
+    case 'Duration': {
+      return new DurationValue(0n);
+    }
+    // As `new` of the inner type's default makes them.
+    case 'Rc':
+    case 'Arc': {
+      const inner = defaultValue(ctx, t.args[0]);
+      ctx.interp.dropper.activate();
+      return new SharedBox(inner);
+    }
+    case 'Cell':
+    case 'RefCell':
+    case 'Mutex':
+    case 'RwLock': {
+      const inner = defaultValue(ctx, t.args[0]);
+      ctx.interp.dropper.activate();
+      return new CellBox(inner);
+    }
+    default: {
+      break;
+    }
+  }
+  if (t.def.kind === 'enum') return new EnumValue(t.def, t.def.defaultVariant ?? 0, []);
+  const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+  const defFields = t.def.variants[0].fields;
+  ctx.runtime.allocate(defFields.length);
+  const fields = callForEach(ctx, defFields, (field) => {
+    const fieldType = subst.size > 0 ? substituteType(field.type, subst) : field.type;
+    return defaultValue(ctx, fieldType);
+  });
+  return new StructValue(t.def, fields);
 }
 
 function defaultBoxValue(ctx: NativeContext, type: Type): Value {

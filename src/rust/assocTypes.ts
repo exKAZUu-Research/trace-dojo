@@ -69,7 +69,7 @@ export function assocTypeOf(
   if (set) return set;
   const assoc = bound.trait.assocTypes.get(name);
   if (!assoc) {
-    if (name === 'Item' && iteration) return intoIterItem(self) ?? freshVar();
+    if (name === 'Item' && iteration) return iterationItem(self, bound.trait.name, span);
     return compileError(span, `トレイト ${bound.trait.name} に関連型 ${name} がありません。`);
   }
   if (assoc.params.length !== args.length) {
@@ -122,6 +122,16 @@ function sameSelf(a: Type, b: Type | undefined): boolean {
 }
 
 /** The pseudo-type that stands for an associated type of a trait on a type. */
+/** The `Item` of an iteration trait's projection; a type known now that has none is no iterator (`<i32 as IntoIterator>::Item`). */
+function iterationItem(self: Type, trait: string, span: Span): Type {
+  const item = intoIterItem(self);
+  if (item) return item;
+  if (!['param', 'opaque', 'var'].includes(shallow(self).kind)) {
+    compileError(span, `${typeToString(self)} は ${trait} ではありません（繰り返せません）。`);
+  }
+  return freshVar();
+}
+
 export function projectionDef(trait: TraitDef, name: string, module: Module): AdtDef {
   return {
     name: `${trait.name}::${name}`,
