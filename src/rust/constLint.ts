@@ -578,16 +578,33 @@ export class ConstLint {
     for (const arm of arms) {
       const matches = this.matchesPattern(arm.pattern, scrutinee);
       if (matches === false) continue;
-      // An arm after a guard is reached both from the match and from the failed guard, where rustc forgets what it
-      // knew of the variables.
-      if (afterGuard) this.known.clear();
-      this.bind(arm.pattern, matches === true ? scrutinee : undefined);
-      for (const cond of arm.guard ?? []) this.condition(cond);
-      allDiverge = this.branch(() => this.expr(arm.body)) && allDiverge;
+      allDiverge = this.matchArm(arm, matches === true ? scrutinee : undefined, afterGuard) && allDiverge;
       if (matches === true && !arm.guard) break;
       afterGuard ||= arm.guard !== undefined;
     }
     this.diverged = allDiverge && arms.length > 0;
+  }
+
+  /**
+   * Checks one arm a match may reach, telling whether it diverges. An arm after a guard is reached both from the match
+   * and from the failed guard, where rustc forgets what it knew of the variables; it knows them again after the
+   * match, except those the arm assigns.
+   */
+  private matchArm(arm: MatchArm, value: Known | undefined, afterGuard: boolean): boolean {
+    const saved = afterGuard ? new Map(this.known) : undefined;
+    if (saved) this.known.clear();
+    this.bind(arm.pattern, value);
+    for (const cond of arm.guard ?? []) this.condition(cond);
+    const diverges = this.branch(() => this.expr(arm.body));
+    if (saved) this.restoreKnown(saved);
+    return diverges;
+  }
+
+  /** Takes back what was known before an arm, forgetting the variables the arm gave a value. */
+  private restoreKnown(saved: Map<LocalVar, Known>): void {
+    const assigned = new Set(this.known.keys());
+    this.known.clear();
+    for (const [local, value] of saved) if (!assigned.has(local)) this.known.set(local, value);
   }
 
   /** An assignment to a variable gives it a value, which its propagation mode may keep. */
