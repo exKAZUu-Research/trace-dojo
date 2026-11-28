@@ -686,7 +686,9 @@ function isTypeOnlySpecifier(
   if (fsImportMeanings(moduleName, importedName)?.value === false && !ambientExports?.values.has(importedName))
     return true;
   return (
-    ambientExports !== undefined && !ambientExports.values.has(importedName) && ambientExports.types.has(importedName)
+    ambientExports !== undefined &&
+    !ambientExports.values.has(importedName) &&
+    (ambientExports.types.has(importedName) || ambientExports.typeOnlyValues.has(importedName))
   );
 }
 
@@ -712,7 +714,27 @@ function exportView(node: TreeNode, binder: Binder): ViewNode {
   }
   if (declaration) return view(declaration, binder);
   const value = node.childForFieldName('value');
-  return value ? expressionStatement(node, withDefaultName(view(value, binder))) : leaf(node, 'empty_statement');
+  if (!value || isErasedDefaultExportValue(value, binder)) return leaf(node, 'empty_statement');
+  return expressionStatement(node, withDefaultName(view(value, binder)));
+}
+
+function isErasedDefaultExportValue(value: TreeNode, binder: Binder): boolean {
+  if (value.type !== 'identifier') return false;
+  const name = nameOf(value);
+  const scope = binder.scopeOf(value);
+  const valueSymbol = scope.lookupValue(name);
+  if (!valueSymbol) return Boolean(scope.lookupType(name) ?? scope.lookupNamespace(name));
+  const target = unwrapAliasSymbol(valueSymbol, binder, new Set());
+  if (!target) return true;
+  return target.kind === 'symbol' && !hasRuntimeSymbolValue(target.symbol);
+}
+
+function hasRuntimeSymbolValue(symbol: Sym): boolean {
+  if (symbol.valueEntries.some((entry) => entry.kind !== 'namespace')) return true;
+  if (symbol.valueDeclarations.some((decl) => decl.childForFieldName('name')?.type === 'string')) return true;
+  const declarations =
+    symbol.namespaceDeclarations.length > 0 ? symbol.namespaceDeclarations : symbol.valueDeclarations;
+  return declarations.some((decl) => !isAmbient(decl) && Boolean(emittedNamespacePath(decl)));
 }
 
 function withDefaultName(viewed: ViewNode): ViewNode {

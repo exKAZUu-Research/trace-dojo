@@ -219,11 +219,38 @@ export class StatementChecker {
   ): void {
     if (value) {
       if (isInAmbientContext(node)) checkAmbientExportTarget(this.c, value);
-      else this.c.expressions.check(value);
+      else this.checkDefaultExportValue(value);
     }
     if (!declaration && !value && assigned && !source && !this.c.isModule && isAmbientModuleBody(node.parent)) {
       checkAmbientExportAssignment(this.c, node, assigned);
     }
+  }
+
+  private checkDefaultExportValue(value: TreeNode): void {
+    if (value.type === 'identifier' && this.isNonRuntimeDefaultIdentifier(value)) return;
+    this.c.expressions.check(value);
+  }
+
+  private isNonRuntimeDefaultIdentifier(ident: TreeNode): boolean {
+    const scope = this.c.scopeOf(ident);
+    const name = canonicalIdentifier(ident.text, ident);
+    const valueSymbol = scope.lookupValue(name, this.c.budget);
+    if (!valueSymbol) {
+      return Boolean(scope.lookupType(name) ?? scope.lookupNamespace(name, this.c.budget));
+    }
+    if (valueSymbol.unsupported) return false;
+    if (valueSymbol.importTarget?.typeOnly) return true;
+    if (valueSymbol.valueKind === 'import' && this.c.namespaces.isExportedTypeOnlyValue(valueSymbol)) return true;
+    if (valueSymbol.valueKind === 'namespace') return !this.hasRuntimeNamespaceValue(valueSymbol);
+    if (valueSymbol.valueKind === 'importAlias') {
+      const target = this.c.namespaces.imported(valueSymbol, 'value');
+      return !target || (target.valueKind === 'namespace' && !this.hasRuntimeNamespaceValue(target));
+    }
+    return false;
+  }
+
+  private hasRuntimeNamespaceValue(symbol: Sym): boolean {
+    return symbol.valueEntries.some((entry) => entry.kind !== 'namespace') || this.c.namespaces.isInstantiated(symbol);
   }
 
   private checkLocalExportClause(clause: TreeNode): void {
@@ -231,7 +258,13 @@ export class StatementChecker {
       const name = specifier.childForFieldName('name');
       const scope = name && this.c.scopeOf(name);
       const localName = name && decodedExportSpecifier(name);
-      if (name && localName && !scope?.lookupValue(localName) && !scope?.lookupType(localName))
+      if (
+        name &&
+        localName &&
+        !scope?.lookupValue(localName, this.c.budget) &&
+        !scope?.lookupType(localName) &&
+        !scope?.lookupNamespace(localName, this.c.budget)
+      )
         this.c.error(name, `名前 ${localName} が見つかりません。`);
     }
   }
