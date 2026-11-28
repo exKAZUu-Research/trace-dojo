@@ -26,7 +26,6 @@ const FAT_POINTER: Layout = { size: 16, align: 8, niche: { size: 8, available: 1
 /** `RawVec`'s capacity is at most `isize::MAX`, which leaves the values above it as a niche of `Vec` and `String`. */
 const CAPACITY_NICHE: Niche = { size: 8, available: 2n ** 63n };
 
-/** The layouts of the standard library's collections, which hold pointers and lengths. */
 const COLLECTION_LAYOUTS: Partial<Record<string, Layout>> = {
   String: { size: 24, align: 8, niche: CAPACITY_NICHE },
   Vec: { size: 24, align: 8, niche: CAPACITY_NICHE },
@@ -99,7 +98,6 @@ export function layoutOf(type: Type): Layout {
   }
 }
 
-/** The layout of a standard type whose declaration does not show its storage. */
 function builtinLayout(builtin: string | undefined, args: Type[]): Layout | undefined {
   const collection = COLLECTION_LAYOUTS[builtin as string];
   if (collection) return collection;

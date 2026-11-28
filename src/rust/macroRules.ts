@@ -19,7 +19,6 @@ export type Token =
       invisible?: true;
     };
 
-/** A part of a rule's matcher or transcriber. */
 type Part =
   | { kind: 'token'; token: Token & { kind: 'leaf' } }
   | { kind: 'group'; open: string; close: string; parts: Part[]; spaced?: boolean; closeSpaced?: boolean }
@@ -31,14 +30,12 @@ export interface MacroRule {
   transcriber: Part[];
 }
 
-/** What a rule's variables matched: tokens, or for a variable in a repetition, the matches of each round. */
 type Binding = { kind: 'one'; tokens: Token[]; fragment: string } | { kind: 'rep'; rounds: Map<string, Binding>[] };
 
 export class MacroError extends Error {}
 
 const LEAF_TYPES = new Set(['string_literal', 'raw_string_literal', 'char_literal', 'lifetime', 'metavariable']);
 
-/** Whether a token's grammar type is a string literal, cooked (`"..."`) or raw (`r"..."`). */
 export function isStringLiteral(type: string): boolean {
   return type === 'string_literal' || type === 'raw_string_literal';
 }
@@ -120,7 +117,6 @@ function group(leaves: (Token & { kind: 'leaf' })[], start: number, close?: stri
   return [tokens, index];
 }
 
-/** Reads a rule's matcher (`$x:expr`, `$( ... ),*`) or transcriber (`$x`, `$( ... )*`) from its tokens. */
 export function parseParts(tokens: Token[], matcher: boolean): Part[] {
   const parts: Part[] = [];
   for (let index = 0; index < tokens.length; index++) {
@@ -257,7 +253,6 @@ function matchPart(
   }
 }
 
-/** Matches as many rounds of a repetition as the tokens hold, binding each variable to its rounds. */
 // code-gauge-allow functionCognitiveComplexity -- Follows the macro_rules repetition matcher of rustc.
 function matchRepetition(
   part: Part & { kind: 'rep' },
@@ -294,8 +289,6 @@ function variablesIn(parts: Part[]): string[] {
   });
 }
 
-/** Where a fragment that starts at `start` ends, or -1 if none does. */
-/** The fragments of one token, by what that token must be. */
 const SINGLE_TOKEN_FRAGMENTS: Record<string, (token: Token) => boolean> = {
   tt: () => true,
   ident: (token) => token.kind === 'leaf' && /^(?:r#)?[\p{L}_][\p{L}\p{N}_]*$/u.test(token.text) && token.text !== '_',
@@ -303,6 +296,7 @@ const SINGLE_TOKEN_FRAGMENTS: Record<string, (token: Token) => boolean> = {
   block: (token) => token.kind === 'group' && token.open === '{',
 };
 
+/** Where a fragment that starts at `start` ends, or -1 if none does. */
 function matchFragment(fragment: string, tokens: Token[], start: number, following: Part | undefined): number {
   const token = tokens[start];
   if (fragment === 'literal') return matchLiteral(tokens, start);
@@ -314,7 +308,6 @@ function matchFragment(fragment: string, tokens: Token[], start: number, followi
   return begins ? matchUntilStop(fragment, tokens, start, following) : -1;
 }
 
-/** The words before an item's keyword: its visibility and qualifiers (`pub unsafe fn`, `const fn`, `async fn`). */
 const QUALIFIERS = new Set(['pub', 'const', 'unsafe', 'async', 'extern', 'default', 'safe']);
 
 /** The keywords of items whose `{ ... }` body ends them; the others end at their `;`. */
@@ -425,7 +418,6 @@ function angleChange(text: string | undefined, opens: boolean, depth: number): n
   return text === '>' ? -1 : text === '>>' ? -2 : 0;
 }
 
-/** The index after the `|` that closes the closure parameters opened at `index`. */
 function closureParamsEnd(tokens: Token[], index: number): number {
   for (let end = index + 1; end < tokens.length; end++) if (leafText(tokens[end]) === '|') return end + 1;
   return tokens.length;
@@ -590,5 +582,4 @@ export function tokenText(tokens: Token[], inGroup = false): string {
   return text;
 }
 
-/** The comment that marks the parentheses an `expr` variable keeps its operand in. */
 const EXPR_MARK = '/*expr*/';

@@ -58,7 +58,6 @@ function patternValue(value: Value): Value {
   return pattern instanceof StringValue ? pattern.text : pattern;
 }
 
-/** The byte offset in UTF-8 of a UTF-16 index. */
 function byteOffset(text: string, index: number): number {
   return byteLength(text.slice(0, index));
 }
@@ -258,7 +257,6 @@ function lower(text: string): string {
   return text.toLowerCase();
 }
 
-/** `str::parse`, by the target type. */
 function parse(ctx: NativeContext, text: string): Value {
   const target = normalize(shallow(ctx.typeArgs[0]));
   switch (target.kind) {

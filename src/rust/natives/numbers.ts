@@ -87,7 +87,6 @@ function wrappingPower(name: IntName, base: bigint, exp: bigint): bigint {
   return wrap(name, result);
 }
 
-/** Truncated division and remainder, as Rust's integer `/` and `%` are. */
 function divEuclid(a: bigint, b: bigint): bigint {
   const q = a / b;
   if (a % b < 0n) return b > 0n ? q - 1n : q + 1n;
@@ -176,7 +175,6 @@ function nextMultiple(a: bigint, b: bigint): bigint {
   return remainder === 0n ? a : a + (b - remainder);
 }
 
-/** Integer methods beyond the basic arithmetic: euclidean, shifting, logarithmic, and sign-crossing variants. */
 const integerExtras: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   overflowing_div: ([a, b], ctx) => {
     if ((b as bigint) === 0n) panic(ctx, 'attempt to divide by zero');

@@ -109,7 +109,6 @@ function lowerRange(pattern: Extract<Pattern, { kind: 'range' }>, annotations: A
   return lo > hi ? EMPTY_RANGE : { kind: 'range', lo, hi };
 }
 
-/** The integer or code point an end of a range pattern stands for. */
 export function endValue(end: Pattern, annotations: Annotations): bigint | undefined {
   if (end.kind === 'lit') {
     if (end.expr.kind === 'int') return end.expr.value;
@@ -217,7 +216,6 @@ function substituteParams(type: Type, subst: Map<unknown, Type>): Type {
   return t;
 }
 
-/** Expands or-patterns at the head of a row. */
 function expandRow(row: Pat[]): Pat[][] {
   const [head, ...rest] = row;
   if (head?.kind === 'or') return head.alts.flatMap((alt) => expandRow([alt, ...rest]));
@@ -323,7 +321,6 @@ function rangeCuts(rows: Pat[][]): bigint[] {
   return [...cuts].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-/** The segments of the domain that the head covers, split at the cuts. */
 function* segments(
   head: Pat,
   domain: [bigint, bigint][],
@@ -424,7 +421,6 @@ function specialize(rows: Pat[][], ctor: string, arity: number): Pat[][] {
   return result;
 }
 
-/** A pattern no arm matches, described for a message, or undefined when the arms cover every value. */
 export function missingPattern(patterns: Pat[], type: Type, budget: ExecutionBudget): string | undefined {
   const witness = useful(
     patterns.map((pattern) => [pattern]),
@@ -436,7 +432,6 @@ export function missingPattern(patterns: Pat[], type: Type, budget: ExecutionBud
   return describe(witness[0], type);
 }
 
-/** Whether a pattern matches every value of its type, as `let` requires. */
 export function isIrrefutable(pattern: Pat, type: Type, budget: ExecutionBudget): boolean {
   return missingPattern([pattern], type, budget) === undefined;
 }

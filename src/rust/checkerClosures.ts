@@ -82,13 +82,12 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
   return expr.isAsync ? c.program.builtinType('AsyncFuture', [retType]) : closureType;
 }
 
-/** The output an expected future type gives an `async` block. */
 function futureOutput(expected: Type): Type | undefined {
   const t = shallow(expected);
   return t.kind === 'adt' && t.def.builtin === 'AsyncFuture' ? t.args[0] : undefined;
 }
 
-/** Decides how a closure captures and which closure trait it implements, again later while a type it needs is unknown. */
+/** How a closure captures and which closure trait it implements, decided again while a type it needs is unknown. */
 function analyzeCaptures(
   c: Checker,
   fn: FnContext,
@@ -150,13 +149,12 @@ function closureKindOf(
   return { kind, movedAt: uses.firstMove, captures, isSettled: !uses.dependsOnInference };
 }
 
-/** How a closure's body uses the variables it captures: those it moves out and those it modifies. */
 class CaptureUses {
   readonly moved = new Set<LocalVar>();
   readonly mutated = new Set<LocalVar>();
   readonly modes = new Map<Expr, CaptureMode>();
   firstMove: { name: string; span: Span } | undefined;
-  /** Whether a type not inferred yet, or a closure whose own analysis waits for one, can still turn a use into a move. */
+  /** Whether a type not inferred yet, or a closure whose analysis waits for one, can still turn a use into a move. */
   dependsOnInference = false;
 
   constructor(

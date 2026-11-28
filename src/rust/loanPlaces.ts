@@ -95,7 +95,7 @@ export function storedElement<V>(fn: FnDef, args: V[]): V | undefined {
   return args[key.endsWith('::insert') ? 1 : 0];
 }
 
-/** For a value of a reference coerced through shared references (`&&'a str` to `&str`), the inner reference's layout. */
+/** For a reference coerced through shared references (`&&'a str` to `&str`), the inner reference's layout. */
 export function derefCoercedLayout(annotations: Annotations, expr: Expr, layout: Layout): Layout | undefined {
   const derefs = copiedReferenceDerefs(annotations, expr);
   if (derefs === undefined) return undefined;

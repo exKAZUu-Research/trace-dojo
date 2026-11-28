@@ -17,7 +17,6 @@ export abstract class MacroConverter extends PatternConverter {
   private readonly userMacros = new Map<string, MacroRule[]>();
   private macroDepth = 0;
 
-  /** Records a `macro_rules!` definition. */
   protected defineMacro(node: Node): void {
     const name = this.identifier(this.field(node, 'name'));
     const rules = node.namedChildren
@@ -36,7 +35,6 @@ export abstract class MacroConverter extends PatternConverter {
     this.userMacros.set(name, rules);
   }
 
-  /** Whether an invocation names a `macro_rules!` macro of the program. */
   protected isUserMacro(node: Node): boolean {
     const macroNode = node.childForFieldName('macro');
     const name = macroNode?.text.replace(/^(?:crate|self)::/, '');
@@ -133,7 +131,6 @@ export abstract class MacroConverter extends PatternConverter {
     );
   }
 
-  /** The items a node declares: one, none, or the items a macro invocation expands to. */
   protected itemsOf(node: Node): Item[] {
     const invocation = node.type === 'expression_statement' ? macroInvocationOf(node) : node;
     if (invocation?.type === 'macro_invocation' && this.isUserMacro(invocation)) return this.userMacroItems(invocation);
@@ -141,7 +138,6 @@ export abstract class MacroConverter extends PatternConverter {
     return item ? [item] : [];
   }
 
-  /** A user macro in a type's place. */
   protected userMacroType(node: Node): TypeAst {
     return this.expandUserMacro(
       node,
@@ -150,7 +146,6 @@ export abstract class MacroConverter extends PatternConverter {
     );
   }
 
-  /** A user macro in a pattern's place. */
   protected userMacroPattern(node: Node): Pattern {
     return this.expandUserMacro(
       node,
@@ -176,7 +171,6 @@ export abstract class MacroConverter extends PatternConverter {
     return this.macroCall(name, tree, span);
   }
 
-  /** A macro of the standard library that expands to a literal, as that literal; undefined for the other macros. */
   // code-gauge-allow functionNcss -- One case per macro.
   protected literalMacro(node: Node): Expr | undefined {
     const span = this.span(node);
@@ -251,7 +245,6 @@ export abstract class MacroConverter extends PatternConverter {
     }
   }
 
-  /** The text `concat!` makes of its literal arguments. */
   private concatMacro(tree: Node | undefined): string {
     let text = '';
     for (const arg of tree ? this.macroArgs(tree) : []) {
@@ -464,7 +457,6 @@ export abstract class MacroConverter extends PatternConverter {
     return { kind: 'matches', value, pattern };
   }
 
-  /** The value, the pattern, and the guard of `matches!(value, pattern if guard)`. */
   private matchesParts(tree: Node, span: Span): { value: Expr; pattern: Pattern; guard: Condition[] | undefined } {
     const tokens = tree.children.slice(1, -1).filter((child) => !isComment(child));
     const last = tokens.at(-1);
@@ -573,7 +565,6 @@ function firstExpression(root: Node): Node | undefined {
     : statement;
 }
 
-/** The macro invocation an expression statement consists of, if it does. */
 function macroInvocationOf(statement: Node): Node | undefined {
   const inner = statement.namedChildren.find((child) => !isComment(child));
   return inner?.type === 'macro_invocation' ? inner : undefined;

@@ -1,15 +1,12 @@
 import { utf8Length, utf8Reader } from './utf8';
 import { isPlace, type Place, StringValue, textOf, type Value } from './values';
 
-/**
- * The capacities of the collections: as `RawVec` grows a `Vec`, a `VecDeque`, and a `BinaryHeap`, whose arrays do not
- * hold it, and as hashbrown sizes the table of a `HashMap` and a `HashSet`. An array without an entry here has as
- * much capacity as length, as a `Vec` built at its size has (`vec!`, `clone`, an exact-size `collect`).
- */
+// The capacities of the collections: as `RawVec` grows a `Vec`, a `VecDeque`, and a `BinaryHeap`, whose arrays do not
+// hold it, and as hashbrown sizes the table of a `HashMap` and a `HashSet`. An array without an entry here has as
+// much capacity as length, as a `Vec` built at its size has (`vec!`, `clone`, an exact-size `collect`).
 
 const vecCapacities = new WeakMap<object, number>();
 
-/** The capacity of a `Vec`, a `VecDeque`, or a `BinaryHeap`, whose elements are `elemSize` bytes each. */
 export function vecCapacity(items: object, len: number, elemSize: number): number {
   return elemSize === 0 ? Number.MAX_SAFE_INTEGER : (vecCapacities.get(items) ?? len);
 }
@@ -150,9 +147,6 @@ export function concatStrings(left: Value, right: Value): StringValue {
   return madeString(a.text + b.text, capacity, a.byteLength + b.byteLength);
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// hashbrown
-
 /**
  * The entries of a `HashMap` or a `HashSet`, whose table grows and shrinks as hashbrown's does, which gives
  * `capacity()`: the elements plus the room left before the table grows.
@@ -162,7 +156,6 @@ export class TableMap<K, V> extends Map<K, V> {
   entrySize = 8;
   /** The number of buckets, a power of two, or 0 for the empty table that allocates nothing. */
   private buckets = 0;
-  /** How many more elements fit before the table grows. */
   private growthLeft = 0;
 
   get capacity(): number {

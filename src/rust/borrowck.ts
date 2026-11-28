@@ -26,7 +26,6 @@ import { resolve, shallow, substitute as substituteType, type Type } from './typ
 /** Whether a variable holds a value at a point: certainly, certainly not (never assigned or moved), or maybe. */
 interface VarState {
   init: 'yes' | 'no' | 'maybe';
-  /** Where the value moved out, for messages, when it did. */
   movedAt: Span | undefined;
   known?: Known;
   /** Moved-out parts (`x.f`), whose variable can no longer be used as a whole. */
@@ -101,7 +100,6 @@ export class BorrowChecker {
     if (moveError) throw moveError;
   }
 
-  /** Checks the moves and initialization of variables, returning the first error. */
   private checkMoves(item: FnItem, body: Block, context: FnContext): CompileError | undefined {
     const state: State = new Map();
     for (const local of context.locals) {
@@ -118,9 +116,6 @@ export class BorrowChecker {
       return error;
     }
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Statements
 
   private block(block: Block, state: State): State {
     let current = state;
@@ -176,9 +171,6 @@ export class BorrowChecker {
       }
     }
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Expressions
 
   /**
    * Checks an expression. `mode` tells what happens to its value when it is a place: moved (or copied), read without
@@ -394,7 +386,6 @@ export class BorrowChecker {
     return fn && diverges(fn.ret) ? BOTTOM : current;
   }
 
-  /** `break` and `continue` go on at their loop with the state they leave; `return` leaves the function. */
   private jump(expr: Extract<Expr, { kind: 'break' | 'continue' | 'return' }>, state: State): void {
     if (expr.kind === 'continue') {
       this.findLoop(expr.label)?.continues.push(state);
@@ -640,9 +631,6 @@ export class BorrowChecker {
     }
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Places
-
   private usePlace(expr: Extract<Expr, { kind: 'path' }>, state: State, mode: 'move' | 'read' | 'mut'): State {
     const place = this.placeOf(expr);
     if (!place) return state;
@@ -662,7 +650,6 @@ export class BorrowChecker {
     return this.markMoved(state, place, expr.span, false);
   }
 
-  /** Whether an expression is a capture, or a field of one, that the closure being checked owns. */
   private ownsCapture(expr: Expr): boolean {
     let current = expr;
     while (current.kind === 'field') current = current.operand;
@@ -680,7 +667,6 @@ export class BorrowChecker {
     return setVar(state, place.root, { ...varState, partial, movedAt: span });
   }
 
-  /** Requires a variable to hold a value where the program uses it. */
   // code-gauge-allow functionCognitiveComplexity -- Initialization, full moves and partial moves require distinct diagnostics.
   private checkUsable(
     local: LocalVar,
@@ -875,9 +861,6 @@ export class BorrowChecker {
     compileError(expr.span, `${kind}はムーブできません（.clone() で複製するか、& を付けて参照にしてください）。`);
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Helpers
-
   private bindingsOf(pattern: Pattern): LocalVar[] {
     return patternBindings(pattern, this.annotations);
   }
@@ -982,7 +965,6 @@ function isReference(type: Type | undefined): boolean {
   return t.kind === 'ref' || (t.kind === 'adt' && t.def.builtin !== 'Box');
 }
 
-/** Whether a function returns an `impl Trait + 'static`. */
 function isStaticOpaque(ret: Type): boolean {
   const t = shallow(ret);
   return t.kind === 'opaque' && t.opaque.bounds.some(({ trait }) => trait.builtin === 'Static');

@@ -25,7 +25,6 @@ export class Unifier {
     }
   }
 
-  /** Unifies tentatively, undoing every binding when the types do not unify. */
   tryUnify(a: Type, b: Type): boolean {
     const snapshot = this.snapshot();
     if (this.unify(a, b)) return true;
@@ -167,16 +166,12 @@ function occurs(v: TypeVar, type: Type): boolean {
 
 interface PseudoTypes {
   parseError: (target: Type) => Type | undefined;
-  /** The item and the shape of the iterator that `IntoIterator` makes of a value of a type. */
   intoItem: (type: Type) => Type | undefined;
   intoShape: (type: Type) => Type | undefined;
-  /** The error of `TryFrom<source>` for `target`. */
   tryFromError: (source: Type, target: Type) => Type | undefined;
-  /** The type an associated type (`<T as Trait>::Name`) stands for, once it is known. */
   projection: (type: Type & { kind: 'adt' }) => Type | undefined;
 }
 
-/** The types of the standard library's pseudo-types, once their arguments are known. */
 let pseudoTypes: PseudoTypes | undefined;
 
 export function setPseudoTypes(types: PseudoTypes): void {
@@ -263,7 +258,6 @@ export function isPseudo(def: AdtDef): boolean {
   ].includes(def.builtin as string);
 }
 
-/** Resolves a type deeply, normalizing pseudo-types. */
 export function deepNormalize(type: Type): Type {
   const t = normalize(shallow(type));
   if (t.kind === 'dyn' || t.kind === 'fn') return t;

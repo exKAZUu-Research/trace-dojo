@@ -81,7 +81,7 @@ function referencedObject(type: Type, region: RVar): Layout | undefined {
   return isReferenceObject(type) ? { kind: 'opaque', region, object: true, referenceObject: true } : undefined;
 }
 
-/** Whether a reference's target is a trait object whose lifetime is the reference's (`&'a dyn T` is `&'a (dyn T + 'a)`). */
+/** Whether a reference's target is a trait object of the reference's lifetime (`&'a dyn T` is `&'a (dyn T + 'a)`). */
 export function isReferenceObject(type: Type): boolean {
   const target = shallow(type);
   return target.kind === 'dyn' && target.objectLifetime === 'reference';
@@ -216,7 +216,6 @@ function relateAdt(outlives: Outlives, sup: AdtLayout, sub: AdtLayout, invariant
   }
 }
 
-/** The lifetime and type parameters of a type, by index, that it is invariant in. */
 export interface InvariantParams {
   lifetimes: Set<number>;
   params: Set<number>;
@@ -369,7 +368,6 @@ export function outlivesAll(outlives: Outlives, layout: Layout, region: RVar): v
   for (const r of regionsOf(layout)) outlives(r, region);
 }
 
-/** What the lifetime and type parameters of a declared type stand for in a value's layout. */
 export interface Subst {
   lifetime(name: string | undefined): RVar;
   param(param: TypeParam): Layout | undefined;
@@ -414,7 +412,6 @@ export function instantiate(declared: Type, subst: Subst, fresh: () => RVar): La
   }
 }
 
-/** The layout of a field of a value of a struct or an enum variant. */
 export function fieldLayout(layout: Layout, variant: number, field: number, fresh: () => RVar): Layout {
   if (layout.kind === 'opaque') return layout;
   if (layout.kind !== 'adt') return NONE;
@@ -447,7 +444,6 @@ export function elementLayout(layout: Layout): Layout {
   return layout.args[0] ?? NONE;
 }
 
-/** The layout after a deref that an owner does: a `Box`'s content, or a collection's slice. */
 /** What `*` reaches: a reference's target, or what a smart pointer or a guard points to (`*rc`, `*guard`). */
 export function derefLayout(layout: Layout): Layout {
   if (layout.kind === 'ref') return layout.target;
@@ -457,6 +453,7 @@ export function derefLayout(layout: Layout): Layout {
 
 const POINTERS = new Set(['Rc', 'Arc', 'Ref', 'RefMut', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard']);
 
+/** The layout after a deref that an owner does: a `Box`'s content, or a collection's slice. */
 export function ownedDerefLayout(layout: Layout): Layout {
   if (layout.kind !== 'adt') return layout;
   if (layout.def.builtin === 'Box' || POINTERS.has(layout.def.builtin ?? '')) return layout.args[0] ?? NONE;
@@ -475,7 +472,6 @@ export function derefSteps(derefs: readonly DerefKind[] | undefined): string[] {
   return (derefs ?? []).map((step) => (step === 'ref' || step === 'mutRef' ? '*' : step === 'user' ? '&' : '#'));
 }
 
-/** The type of a receiver after the derefs of its method call's adjustment. */
 export function typeAfter(type: Type | undefined, derefs: readonly DerefKind[]): Type | undefined {
   let t = type && normalize(shallow(type));
   for (let index = 0; index < derefs.length && t; index++) {

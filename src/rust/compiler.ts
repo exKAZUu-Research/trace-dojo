@@ -56,7 +56,6 @@ export type PlaceEval = (frame: Frame) => Place;
 
 export interface CompiledFn {
   info: FunctionInfo;
-  /** Stores the arguments in the parameters' slots. */
   bind: (frame: Frame, args: Value[]) => void;
   body: Eval;
   /** The slots the body's own variables are in, in the order declared, which go the last declared first. */
@@ -65,7 +64,6 @@ export interface CompiledFn {
   paramSlots?: readonly (readonly number[])[];
 }
 
-/** What compiled code calls into: functions, closures, natives, conversions, and formatting. */
 type CaptureCopy = (value: Value, type: Type) => Value;
 
 export interface ClosureCapture {
@@ -73,7 +71,6 @@ export interface ClosureCapture {
   duplicate?: (copy: CaptureCopy) => ClosureCapture;
   /** For a variable the closure owns, its type, by which the closure drops it when it goes. */
   owned?: Type;
-  /** For the fields of a variable the closure owns, their paths in its value and their types. */
   ownedFields?: { path: number[]; type: Type }[];
 }
 
@@ -136,7 +133,6 @@ const READERS: { [K in Expr['kind']]: Reader<K> } = {
   macro: (c, expr) => compileMacro(c, expr, expr.macro),
 };
 
-/** Compiles the checked bodies of a program into closures over frames. */
 export class Compiler {
   readonly annotations: Annotations;
   private readonly compiled = new Map<FnContext, CompiledFn>();
@@ -226,9 +222,6 @@ export class Compiler {
     }
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Steps
-
   stepRow(span: Span): number | undefined {
     return this.recordsSteps ? span.row : undefined;
   }
@@ -244,9 +237,6 @@ export class Compiler {
       return value;
     };
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Blocks and statements
 
   compileBlock(block: Block, tailAsStatement = false, clearsLocals = true): Eval {
     const stmts = block.stmts.map((stmt) => this.compileStmt(stmt));
@@ -441,8 +431,8 @@ export class Compiler {
   }
 
   /**
-   * A shared borrow of an owned place, whose referent the variable in `slot` follows. A coercion (to a trait object, say)
-   * applies to the value read from that one evaluation of the place, so an index's expression runs once.
+   * A shared borrow of an owned place, whose referent the variable in `slot` follows. A coercion (to a trait object,
+   * say) applies to the value read from that one evaluation of the place, so an index's expression runs once.
    */
   private directBorrow(expr: Expr, operand: Expr, slot: number): Eval {
     const place = readsThroughUserImpl(this, operand) ? readPlace(this.read(operand)) : this.place(operand);
@@ -474,7 +464,7 @@ export class Compiler {
       const { value, place } = input(frame);
       const matched = frame.runtime.withRoots([place], () => matcher(frame, value, () => place));
       if (matched) takeAll?.(frame);
-      // The temporaries the place is read through (a `RefCell`'s guard) go at the end of the statement, or before `else`.
+      // The temporaries the place is read through (a `RefCell`'s guard) go at the statement's end, or before `else`.
       frame.runtime.releaseGuards(frame, mark);
       if (!matched) elseBlock?.(frame);
       return UNIT_VALUE;
@@ -482,10 +472,6 @@ export class Compiler {
     return this.withStep(stmt.span, run, false);
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Patterns
-
-  /** Binds an irrefutable pattern to a value. */
   compileBinder(pattern: Pattern): (frame: Frame, value: Value) => void {
     const matcher = this.compileMatcher(pattern);
     return (frame, value) => {
@@ -525,7 +511,6 @@ export class Compiler {
     return compileMatcher(this, pattern);
   }
 
-  /** The slots of the variables a pattern binds, which go out of scope with the pattern. */
   patternSlots(pattern: Pattern): number[] {
     return patternBindings(pattern, this.annotations).map((local) => local.slot);
   }
@@ -533,9 +518,6 @@ export class Compiler {
   isCopy(type: Type): boolean {
     return this.checker.solver.isCopy(resolve(type, true));
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Expressions
 
   /** An expression's value where it is moved or copied: a `Copy` aggregate read from a place is copied. */
   value(expr: Expr, asStatement = false): Eval {
@@ -557,8 +539,8 @@ export class Compiler {
   private valueFromPlace(expr: Expr, read: Eval, type: Type): Eval {
     if (!isPlaceExpr(expr, this.annotations)) return read;
     if (this.isCopy(type)) return needsCopy(type) ? (frame) => copyValue(read(frame)) : read;
-    // Moving a whole variable out leaves it without a value, which the trace no longer shows. A `&mut` is not `Copy`, so
-    // it moves too (where rustc reborrows it instead, `adjustedValue` has returned before this).
+    // Moving a whole variable out leaves it without a value, which the trace no longer shows. A `&mut` is not `Copy`,
+    // so it moves too (where rustc reborrows it instead, `adjustedValue` has returned before this).
     if (expr.kind === 'path') {
       const res = this.annotations.paths.get(expr);
       const moves = !isRefType(res?.kind === 'local' ? res.local.type : type) || isMutableRef(type);
@@ -800,7 +782,6 @@ export class Compiler {
     };
   }
 
-  /** The slot of the variable whose `let` extends the temporary of an operand of `&`, if one does. */
   extendedTemporarySlot(operand: Expr): number | undefined {
     return this.extendedOperands.get(operand);
   }

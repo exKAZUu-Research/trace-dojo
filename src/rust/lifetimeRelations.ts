@@ -9,7 +9,6 @@ import { shallow, type Type } from './types';
 interface NamedRegion {
   region: RVar;
   name: string;
-  /** Whether the signature leaves it out, so that no name is written. */
   anonymous: boolean;
   /** The lifetimes of the references and types it is inside, which it outlives by the signature's types. */
   within: string[];
@@ -17,7 +16,6 @@ interface NamedRegion {
   param?: { name: string; span: Span };
 }
 
-/** What the lifetime check of a function's signature reads besides the types: its parameters' names and its bounds. */
 export interface SignatureNames {
   params: { name: string; span: Span }[];
   bounds: { name: string; outlives: string[] }[];
@@ -26,7 +24,6 @@ export interface SignatureNames {
   span: Span;
 }
 
-/** The lifetime check of a function's signature against what its body's borrows require. */
 export function signatureLifetimeError(
   names: SignatureNames,
   body: {

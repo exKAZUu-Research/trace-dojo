@@ -33,7 +33,6 @@ export function constInteger(expr: Expr, scope: TypeScope, expected = USIZE): bi
   return typeof value === 'bigint' ? value : undefined;
 }
 
-/** The value of a constant expression of a scalar type (an integer, `bool`, or `char`), or undefined. */
 export function constScalarValue(expr: Expr, scope: TypeScope, expected: Type): bigint | boolean | string | undefined {
   const evaluatingLengths = scope.evaluatingLengths ?? new Set<Expr>();
   if (evaluatingLengths.has(expr) || evaluatingLengths.size >= 64) return;

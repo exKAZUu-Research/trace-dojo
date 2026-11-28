@@ -77,12 +77,10 @@ export class Scheduler {
     return false;
   }
 
-  /** Whether a thread below the current one waits for something that has come, and so could go on. */
   belowCouldGoOn(): boolean {
     return this.running.slice(0, -1).some((id) => this.waits.get(id)?.() === true);
   }
 
-  /** The threads spawned since `count` threads had been. */
   spawnedSince(count: number): readonly ThreadHandle[] {
     return this.threads.slice(count);
   }
@@ -137,7 +135,6 @@ export class Scheduler {
     );
   }
 
-  /** Runs the threads waiting, the one spawned first first, until `thread` has run. */
   runUntilStarted(ctx: NativeContext, thread: ThreadHandle): void {
     while (thread.state === 'pending' && this.runNext(ctx));
   }
@@ -167,7 +164,6 @@ function spawn(ctx: NativeContext, f: Value): ThreadHandle {
   });
 }
 
-/** `JoinHandle::join`: the thread's result, or `Err` of what its panic carried. */
 function join(ctx: NativeContext, handle: Value): Value {
   const thread = deref(handle) as ThreadHandle;
   thread.joined = true;

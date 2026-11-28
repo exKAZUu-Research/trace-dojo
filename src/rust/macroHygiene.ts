@@ -140,13 +140,13 @@ function addParamBinders(params: Token[], binders: Set<string>): void {
   }
 }
 
+/** The lowercase words of a pattern that bind nothing: keywords and the literals `true` and `false`. */
+const PATTERN_WORDS = new Set(['_', 'mut', 'ref', 'in', 'if', 'true', 'false', 'self']);
+
 /**
  * The variables a pattern of a rule's own code binds: its lowercase names, but not the paths, functions, and
  * constructors they are parts of (`Some(x)`, `S::A`), nor the field names of a struct pattern (`S { a: x }`).
  */
-/** The lowercase words of a pattern that bind nothing: keywords and the literals `true` and `false`. */
-const PATTERN_WORDS = new Set(['_', 'mut', 'ref', 'in', 'if', 'true', 'false', 'self']);
-
 function addPatternBinders(tokens: Token[], binders: Set<string>): void {
   for (const [index, token] of tokens.entries()) {
     if (token.kind === 'group') {
@@ -286,7 +286,6 @@ function renamedLeaf(tokens: Token[], index: number, visible: Visible, suffix: s
   return [variable];
 }
 
-/** What a group is: the fields of a struct expression or pattern (`S { .. }`), a format macro's arguments, or neither. */
 function groupContext(tokens: Token[], index: number): GroupContext | undefined {
   const group = tokens[index] as Token & { kind: 'group' };
   const before = leafText(tokens[index - 1]);

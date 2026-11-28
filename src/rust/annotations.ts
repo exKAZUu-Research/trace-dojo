@@ -3,21 +3,17 @@ import type { Known } from './constLint';
 import type { ProjectedCapture } from './loanCaptures';
 import type { AdtDef, ClosureType, ConstDef, DerefKind, FnDef, TraitRef, Type, TypeParam } from './types';
 
-/** A variable of a function or closure: a `let` binding, a parameter, or a binding of a pattern. */
 export interface LocalVar {
   name: string;
   mutable: boolean;
   type: Type;
   slot: number;
   span: Span;
-  /** The function or closure that owns the variable. */
   owner: FnContext;
   isSelf?: boolean;
-  /** How a binding binds the value it matches: by value, or through a shared or mutable reference. */
   mode: 'move' | 'ref' | 'refMut';
 }
 
-/** What a function's or closure's body compiles to: its slots and the variables the trace shows. */
 export interface FnContext {
   name: string;
   locals: LocalVar[];
@@ -27,9 +23,7 @@ export interface FnContext {
   parent: FnContext | undefined;
   isClosure: boolean;
   isAtomic: boolean;
-  /** For a closure, whether it moves its captures (`move ||`). */
   isMove: boolean;
-  /** For a closure, how it uses its captures, which decides the closure trait it implements. */
   closureKind: 'Fn' | 'FnMut' | 'FnOnce';
   /** For a closure, the captured variables it moves out, which it captures by value even without `move`. */
   movedCaptures?: LocalVar[];
@@ -44,11 +38,9 @@ export type PathRes =
   | { kind: 'fn'; fn: FnDef; typeArgs: Type[] }
   | { kind: 'ctor'; def: AdtDef; variant: number; typeArgs: Type[] }
   | { kind: 'const'; def: ConstDef; type: Type; typeArgs: Type[] }
-  /** A constant of a primitive type, such as `i32::MAX` or `f64::consts::PI`. */
   | { kind: 'builtinConst'; type: Type; name: string }
   /** `_` on the left of an assignment. */
   | { kind: 'discard' }
-  /** A const parameter (`N` of `const N: usize`), whose value each instantiation gives. */
   | { kind: 'constParam'; param: TypeParam; type: Type };
 
 /** How a method call reaches its receiver: through derefs, then by reference or by value. */
@@ -77,15 +69,12 @@ export interface FieldRes {
 export type Coercion =
   /** References that reach the same value: `&String` → `&str`, `&Box<T>` → `&T`, `&&T` → `&T`. */
   | { kind: 'deref'; derefs: DerefKind[]; fromMut: boolean; toStr: boolean }
-  /** A value becomes a trait object of the type it has. */
   /**
    * `shared`: an `Rc` or `Arc` becomes one of a trait object, sharing its counts; `throughCell`: the trait object is in a
    * `RefCell` or a lock the pointer holds.
    */
   | { kind: 'dyn'; type: Type; mutable: boolean; trait: TraitRef; shared?: boolean; throughCell?: boolean }
-  /** A collection becomes an iterator, as `IntoIterator` makes it. */
   | { kind: 'intoIter'; from: Type }
-  /** A reference becomes a raw pointer to what it refers to. */
   | { kind: 'rawPtr' };
 
 export interface IndexRes {

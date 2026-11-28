@@ -454,7 +454,6 @@ function isTrivialClone(type: Type): boolean {
   }
 }
 
-/** Clones of a slice's elements, as a new `Vec` holds them. */
 function clonedItems(ctx: NativeContext, items: Value[]): Value[] {
   ctx.runtime.allocate(items.length);
   return withCloneResults(() => items.map((item) => cloneValue(elemType(ctx), item)));
@@ -499,12 +498,10 @@ function joinStrings(ctx: NativeContext, self: Value, sep: Value): string {
   return parts.join(separator);
 }
 
-/** Drops one element a collection removes, of its element type. */
 function dropOne(ctx: NativeContext): (item: Value) => void {
   return (item) => dropRemoved(ctx, [item]);
 }
 
-/** Drops the elements a collection removes, as their owner does. */
 function dropRemoved(ctx: NativeContext, removed: Value[]): void {
   const { dropper } = ctx.interp;
   if (!dropper.active) return;

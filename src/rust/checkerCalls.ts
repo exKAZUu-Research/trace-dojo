@@ -61,7 +61,6 @@ export function checkCall(c: Checker, expr: Extract<Expr, { kind: 'call' }>, exp
   return callValue(c, expr, type, expected);
 }
 
-/** rustc rejects calling `Drop::drop` in any form, which would drop the value a second time. */
 function callFn(
   c: Checker,
   expr: Extract<Expr, { kind: 'call' }>,
@@ -94,7 +93,6 @@ export function selfParamType(fn: FnDef, subst: Subst): Type {
   return ref(selfType, fn.selfMode === 'mutRef');
 }
 
-/** The type of a `self` whose declared type is `wrapper` around `Self`. */
 export function wrapSelf(program: Program, wrapper: SelfWrapper | undefined, selfType: Type): Type {
   if (!wrapper) return selfType;
   return program.builtinType(wrapper, [wrapper === 'Pin' ? ref(selfType, true) : selfType]);
@@ -235,7 +233,6 @@ function coerceClosure(c: Checker, arg: Expr, type: Type, param: Type): void {
   c.coerce(arg, type, param);
 }
 
-/** Calls a value: a closure, a function, or a value whose type is bounded by a closure trait. */
 // code-gauge-allow functionNcss -- Call rules differ for concrete functions, closures and callable bounds.
 // code-gauge-allow functionCognitiveComplexity -- Call rules differ for concrete functions, closures and callable bounds.
 function callValue(
@@ -463,7 +460,6 @@ function checkSelfMove(
   checkMoveOutOfRef(c, expr, adjust, typeThrough(c, receiverType, derefs) ?? found.selfType);
 }
 
-/** The type a receiver derefs to through its steps, a `Deref` impl's (`W` to its `Target`) included. */
 function typeThrough(c: Checker, receiverType: Type, derefs: DerefKind[]): Type | undefined {
   if (!derefs.includes('user')) return typeAfter(receiverType, derefs);
   let type = receiverType;

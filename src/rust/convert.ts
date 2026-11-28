@@ -55,9 +55,6 @@ export class Converter extends ExpressionConverter {
     return { items };
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Items
-
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
   protected item(node: Node, attrs?: Attributes): Item | undefined {
     const span = this.span(node);
@@ -301,7 +298,6 @@ export class Converter extends ExpressionConverter {
     return { mode: 'value', mutable: isMut, span };
   }
 
-  /** `self: Self`, `self: &Self`, `self: &mut Self`, `self: Box<Self>`, `self: Rc<Self>`, `self: Arc<Self>`, or `self: Pin<&mut Self>`. */
   private typedSelfParam(node: Node): SelfParam {
     const span = this.span(node);
     const written = this.field(node, 'type').text;
@@ -369,7 +365,6 @@ export class Converter extends ExpressionConverter {
     return generics;
   }
 
-  /** Adds the predicates of an item's `where` clause to its generics. */
   private whereClause(node: Node, generics: Generics): void {
     const where = node.namedChildren.find((child) => child.type === 'where_clause');
     for (const predicate of where?.namedChildren ?? []) {
@@ -736,9 +731,6 @@ export class Converter extends ExpressionConverter {
     }
     return unavailable(this.span(node), `パスの書き方（${node.text}）`);
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Types
 
   // code-gauge-allow functionCognitiveComplexity -- Each syntax form determines which child nodes constitute its type.
   // code-gauge-allow functionNcss -- One case per kind of syntax node.

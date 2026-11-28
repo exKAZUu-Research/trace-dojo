@@ -43,7 +43,6 @@ function macroOperands(macro: MacroCall): Expr[] {
   }
 }
 
-/** The expressions a block evaluates in turn: its statements' and its value's. */
 function blockOperands(block: Block): Expr[] {
   const statements = block.stmts.flatMap((stmt) =>
     stmt.kind === 'expr' ? [stmt.expr] : stmt.kind === 'let' && stmt.init ? [stmt.init] : []

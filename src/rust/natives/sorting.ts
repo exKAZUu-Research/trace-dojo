@@ -8,7 +8,6 @@ import { stableSort } from './sort/stable';
 import { unstableSort } from './sort/unstable';
 import { call, callForEach, libraryPanic, type NativeContext } from './support';
 
-/** Sorts a slice in place as std's stable sort (`sort`) or unstable sort (`sort_unstable`) does. */
 export function sortSlice(
   ctx: NativeContext,
   slice: Value,
@@ -46,7 +45,6 @@ function ordViolation(ctx: NativeContext): never {
   );
 }
 
-/** `a < b` by `PartialOrd`, as `sort` compares its elements. */
 export function lessByPartialOrd(type: Type): (a: Value, b: Value) => boolean {
   return (a, b) => testPartialOrder('lt', type, a, b);
 }

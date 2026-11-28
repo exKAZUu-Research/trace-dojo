@@ -1,7 +1,6 @@
 import { compileError, type Module } from './items';
 import { type AdtDef, childTypes, shallow, type Type } from './types';
 
-/** Which of a struct's or enum's type and lifetime parameters its fields use. */
 interface Usage {
   params: boolean[];
   lifetimes: boolean[];
@@ -57,7 +56,6 @@ function usageOf(root: AdtDef): Usage {
   return usages.get(root) as Usage;
 }
 
-/** Marks the parameters of `def` that a field's type uses. */
 class UsageMarker {
   changed = false;
 

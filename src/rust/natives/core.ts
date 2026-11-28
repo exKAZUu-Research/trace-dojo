@@ -53,9 +53,6 @@ import {
   unsupportedAtRun,
 } from './support';
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Turtle
-
 function turtleOf(self: Value): TurtleState {
   return (deref(self) as TurtleValue).state;
 }
@@ -125,9 +122,6 @@ export function turtleImplSource(): string {
   return `impl Turtle {\n    pub fn new() -> Turtle;\n    ${methods.join('\n    ')}\n}`;
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Traits implemented by the standard library for every type that has them
-
 /**
  * The capacity `to_string` gives an integer's text: room for the most digits of a signed type (and its sign), and
  * exactly the text for an unsigned one, but 3 for `u8` and 4 for `i8`.
@@ -144,7 +138,6 @@ function selfType(ctx: NativeContext): Type {
   return ctx.typeArgs[0];
 }
 
-/** The default value of a type, as `Default::default` gives it. */
 export function defaultValue(ctx: NativeContext, type: Type): Value {
   const method = ctx.interp.program.traitDef('Default').methods.get('default')!;
   return ctx.interp.callFn(method, [type], [], undefined, ctx.span, ctx.frame);
@@ -249,7 +242,6 @@ function adtDefaultValue(ctx: NativeContext, t: Type & { kind: 'adt' }): Value {
   return new StructValue(t.def, fields);
 }
 
-/** Whether a type is or holds a union, in its fields, elements or type arguments. */
 function containsUnion(type: Type, seen = new Set<unknown>()): boolean {
   const t = normalize(shallow(type));
   if (t.kind === 'array') return containsUnion(t.elem, seen);
@@ -482,7 +474,6 @@ function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): bool
   return range.end === undefined || testPartialOrder(range.inclusive ? 'le' : 'lt', type, value, range.end);
 }
 
-/** `T::from(value)` for the conversions of the standard library. */
 export function convert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
   const source = normalize(shallow(from));
   const target = normalize(shallow(to));

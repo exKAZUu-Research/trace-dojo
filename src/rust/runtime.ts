@@ -37,7 +37,6 @@ export const UNASSIGNED: unique symbol = Symbol('unassigned');
 /** What a field or element holds after a pattern, a field read, or a struct update moved its value out. */
 export const MOVED = undefined as unknown as Value;
 
-/** A local variable as the trace shows it. */
 export interface LocalInfo {
   name: string;
   slot: number;
@@ -99,9 +98,7 @@ export class Frame implements TracedFrame {
     readonly runtime: Runtime,
     readonly info: FunctionInfo,
     readonly callRow: number | undefined,
-    /** The concrete types of the type parameters of a generic function, by parameter. */
     readonly typeArgs: ReadonlyMap<TypeParam, Type>,
-    /** The places a closure's captured variables live in. */
     readonly captures: readonly Place[] = []
   ) {
     this.locals = Array.from({ length: info.slotCount }, () => UNASSIGNED);
@@ -112,7 +109,6 @@ export class Frame implements TracedFrame {
   }
 }
 
-/** A panic, which unwinds the program to its end. */
 export class RustPanic {
   constructor(
     readonly message: string,
@@ -143,12 +139,10 @@ export function writtenText(format: () => string): string {
   }
 }
 
-/** `std::process::exit`, which ends the program at once. */
 export class ProcessExit {
   constructor(readonly code: number) {}
 }
 
-/** `break`, `continue`, and `return`, which unwind to the loop or function they leave. */
 export class ControlSignal {
   constructor(
     readonly kind: 'break' | 'continue' | 'return',
@@ -235,7 +229,6 @@ export class Runtime implements TracedRuntime<Frame> {
     return roots;
   }
 
-  /** Counts allocated elements against {@link LIMITS.maxSlots}. */
   allocate(count: number, bytes: number | bigint = count * SLOT_BYTES): void {
     this.slots += count;
     if (this.slots > LIMITS.maxSlots) throw new OutOfMemory(bytes);
@@ -273,7 +266,6 @@ export class Runtime implements TracedRuntime<Frame> {
    * borrows as its receiver (`v.into_iter().next()`), which need dropping.
    */
   readonly liveGuards: { release(): void }[] = [];
-  /** Whether a panic is unwinding the running thread, dropping its values on the way out. */
   unwinding = false;
 
   /**

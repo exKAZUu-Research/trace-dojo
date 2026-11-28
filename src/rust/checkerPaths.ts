@@ -106,7 +106,6 @@ export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type |
   }
 }
 
-/** The type arguments for a generic item: those written in the path, or fresh variables. */
 export function typeArgsFor(
   c: Checker,
   params: TypeParam[],
@@ -297,7 +296,6 @@ export function checkMethodVisible(c: Checker, fn: FnDef, span: Span): void {
   }
 }
 
-/** A method of the program's own trait impl is callable only where the trait is in scope, as rustc requires. */
 /**
  * Rejects a function of a trait that is not in scope: the program's traits by their impls, and the standard library's
  * outside the prelude. A bound of a type parameter, a trait object, or an opaque type brings its traits into scope.

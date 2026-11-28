@@ -35,7 +35,6 @@ const BINARY: Record<string, string> = {
   Shr: '>>',
 };
 
-/** The number type of an operand, through a reference. */
 function operandType(type: Type): Type {
   const t = normalize(shallow(type));
   return t.kind === 'ref' ? normalize(shallow(t.target)) : t;

@@ -31,7 +31,6 @@ import {
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 type Derefs = DerefKind[];
 
-/** The place a place expression denotes, which assignments and `&mut` borrows write through. */
 export function compilePlace(c: Compiler, expr: Expr): PlaceEval {
   const place = directPlace(c, expr);
   if (place) return place;
@@ -245,7 +244,6 @@ function userDerefs(
   });
 }
 
-/** Calls the program's `Deref::deref`, or `DerefMut::deref_mut` for a place, on a value of a type. */
 export function userDerefCall(
   c: Compiler,
   self: Type,
@@ -314,7 +312,6 @@ export function compileField(c: Compiler, expr: ExprOf<'field'>): Eval {
   };
 }
 
-/** The types of the fields of the union a field expression reads, or undefined for a field of another type. */
 export function unionFields(expr: ExprOf<'field'>): Type[] | undefined {
   let t = normalize(shallow(expr.operand.ty!));
   while (t.kind === 'ref') t = normalize(shallow(t.target));

@@ -22,7 +22,6 @@ const BTREE_OPS: Record<string, SetOp> = {
   '^': 'symmetric_difference',
 };
 
-/** An operator that calls the method of an operator trait's impl, with its operands as the arguments. */
 function compileOverloaded(c: Compiler, expr: Expr, compileOperands: () => Eval[]): Eval | undefined {
   const operator = c.annotations.operators.get(expr);
   if (!operator) return undefined;

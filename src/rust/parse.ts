@@ -27,7 +27,6 @@ export function parseRust(source: string, budget: ExecutionBudget): Crate {
   });
 }
 
-/** Parses a source with a converter that may reparse macro arguments. */
 export function parseWith<T>(
   source: string,
   convert: (root: Node, reparseTokens: typeof reparse, source: string) => T

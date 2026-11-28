@@ -2,7 +2,6 @@ import type { Generics, Span, TypeAst } from './ast';
 import { compileError, type Module } from './items';
 import type { BuiltinAdt } from './types';
 
-/** The traits of the standard library that learning programs implement for their own types. */
 export const STD_TRAITS_LEARNERS_IMPLEMENT = new Set([
   'Display',
   'Future',
@@ -185,7 +184,6 @@ export function builtinStruct(module: Module, name: string): BuiltinAdt | undefi
   return module.path === 'std::io' ? 'IoError' : undefined;
 }
 
-/** The macros of the standard library that the converter expands, by the module that defines them. */
 const STD_MACROS: Record<string, ReadonlySet<string>> = {
   '': new Set([
     'assert',

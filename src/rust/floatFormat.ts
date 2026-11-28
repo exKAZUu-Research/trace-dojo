@@ -119,7 +119,6 @@ export function fixedFloat(value: number, precision: number): string {
   return `${sign}${text.slice(0, -precision)}.${text.slice(-precision)}`;
 }
 
-/** A float's exact value as a fraction of bigints. */
 // code-gauge-allow duplicateLines -- Each language decodes a float's bits for its own exact formatting.
 function exactFraction(value: number): { numerator: bigint; denominator: bigint } {
   const view = new DataView(new ArrayBuffer(8));

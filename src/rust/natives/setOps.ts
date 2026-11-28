@@ -4,11 +4,9 @@ import { compareValues, spendCollectionWork } from '../ops';
 import type { Type } from '../types';
 import { DONE, IterValue, type Next, type SetValue, type Value } from '../values';
 
-/**
- * The iterators of `BTreeSet`'s `union`, `intersection`, `difference`, and `symmetric_difference`, which take the
- * steps std's do (`MergeIterInner`, and `Stitch`, `Search`, or `Answer` chosen by the sets' ends and sizes), so that
- * `{:?}` shows the state std's shows and a printing `Ord` sees the same comparisons.
- */
+// The iterators of `BTreeSet`'s `union`, `intersection`, `difference`, and `symmetric_difference` take the steps std's
+// do (`MergeIterInner`, and `Stitch`, `Search`, or `Answer` chosen by the sets' ends and sizes), so that `{:?}` shows
+// the state std's shows and a printing `Ord` sees the same comparisons.
 
 export type SetOp = 'union' | 'intersection' | 'difference' | 'symmetric_difference';
 
@@ -126,7 +124,6 @@ class SortedIter {
 }
 
 interface Context {
-  /** The order of two elements, by their type's `Ord`. */
   cmp: (a: Value, b: Value) => number;
   contains: (set: SetValue, value: Value) => boolean;
   /** The type of the sets, which `Search` shows. */
@@ -365,13 +362,11 @@ function stitchDifference(self: SortedIter, other: SortedIter, cmp: Context['cmp
   };
 }
 
-/** A value of a type, if there is one. */
 function valuePart(value: Value | undefined, item: Type, show: DebugValue): DebugPart | undefined {
   if (value === undefined) return undefined;
   return (indent, sink) => show(value, item, indent, sink);
 }
 
-/** The order of two elements of a type, by its `Ord`. */
 function orderOf(type: Type): Context['cmp'] {
   return (a, b) => compareValues(type, a, b) ?? 0;
 }

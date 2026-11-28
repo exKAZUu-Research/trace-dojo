@@ -94,10 +94,10 @@ function addBinding(names: Set<string>, name: string, pattern: Pattern): void {
 }
 
 /**
- * Checks a pattern against the type of the value it matches, declaring its bindings. Matching a reference with a
- * pattern that is not a reference pattern looks through it and binds by reference, as Rust's match ergonomics do.
+ * Matching a reference with a pattern that is not a reference pattern looks through it and binds by reference, as
+ * Rust's match ergonomics do. `inherited`: the outer reference of `type` is the one a default binding mode gives the
+ * field (`ref`).
  */
-/** `inherited`: the outer reference of `type` is the one a default binding mode gives the field (`ref`). */
 // code-gauge-allow functionNcss -- One case per kind of pattern.
 function checkPatternPart(c: Checker, pattern: Pattern, type: Type, mode: LocalVar['mode'], inherited = false): void {
   pattern.ty = type;

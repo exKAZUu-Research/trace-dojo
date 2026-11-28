@@ -169,7 +169,6 @@ export class BTree<V> {
     return [edgeRank(first), edgeRank(last)];
   }
 
-  /** The entry of a rank, in key order. */
   entryAt(rank: number): V {
     const { node, index } = atRank(this.root!, rank);
     return node!.entries[index];

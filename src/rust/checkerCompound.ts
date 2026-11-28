@@ -71,7 +71,7 @@ function deferredCompound(
   }
 }
 
-/** `a += b` and the like on numbers and `bool`: both sides of one type, bitwise operators for integers and `bool` only. */
+/** `a += b` on numbers and `bool`: both sides of one type, and bitwise operators for integers and `bool` only. */
 function numericCompound(
   c: Checker,
   expr: Extract<Expr, { kind: 'compoundAssign' }>,

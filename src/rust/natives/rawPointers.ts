@@ -7,7 +7,6 @@ function pointer(value: unknown): RawPtr {
   return deref(value as never) as RawPtr;
 }
 
-/** A pointer `count` elements after (or before) where one points into an array. */
 function moved(value: unknown, count: number, ctx: NativeContext): RawPtr {
   const { place } = pointer(value);
   if (!(place instanceof ElementPlace)) {

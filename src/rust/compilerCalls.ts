@@ -111,7 +111,10 @@ function borrowedIteratorSelf(self: Eval): Eval {
   };
 }
 
-/** A receiver taken by value after derefs: a `Copy` value is copied, and through owners only (a `Box`), one that is not `Copy` moves out of the place that owns it. */
+/**
+ * A receiver taken by value after derefs: a `Copy` value is copied, and through owners only (a `Box`), one that is not
+ * `Copy` moves out of the place that owns it.
+ */
 function derefedSelf(c: Compiler, receiver: Expr, derefs: ReceiverAdjust['derefs'], read: Eval): Eval {
   let type = receiver.ty!;
   for (let index = 0; index < derefs.length; index++) type = derefOnce(c.program, type)?.type ?? type;

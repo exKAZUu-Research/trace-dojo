@@ -31,7 +31,6 @@ import {
   type Value,
 } from './values';
 
-/** The options of a placeholder, with counts resolved to numbers. */
 /** std's I/O handles, whose `Debug` shows nothing they hold (`Stdin { .. }`) or what this environment does not keep. */
 const IO_HANDLES = new Set([
   'Stdin',
@@ -78,12 +77,9 @@ export interface FormatHooks {
   withActiveBorrows<T>(values: Value[], use: () => T): T;
 }
 
-/** A lock's `poisoned` field in `Debug`: no thread here panics while it holds a lock. */
-
 export class Formatter {
   constructor(private readonly hooks: FormatHooks) {}
 
-  /** Formats a format string's pieces with the values and types of its arguments. */
   format(pieces: FormatPiece[], values: Value[], types: Type[], write?: WriteChunk): string {
     return this.hooks.withActiveBorrows(values, () => this.formatArguments(pieces, values, types, write));
   }
@@ -639,7 +635,6 @@ function deref(value: Value): Value {
   return current;
 }
 
-/** The chars `ToUppercase` or `ToLowercase` has left, which it displays. */
 function caseIterText(value: Value): string {
   return ((value as IterValue).rest?.() ?? []).join('');
 }
@@ -746,14 +741,12 @@ function escapeChar(char: string, isChar: boolean): string {
   }
 }
 
-/** The `Display` of the standard library's error types, or undefined for another type. */
 /** What a lock's `Debug` shows for its data while held where std cannot take it (quoted for `Mutex` alone). */
 function lockedText(builtin: string, cell: CellBox): DebugPart | undefined {
   if (builtin === 'Mutex') return cell.borrows === 0 ? undefined : textPart('"<locked>"');
   return cell.borrows < 0 ? textPart('<locked>') : undefined;
 }
 
-/** A part of a `Debug` text that is fixed text. */
 function textPart(text: string): DebugPart {
   return (_inner, sink) => emit(text, sink);
 }
@@ -896,7 +889,10 @@ function escapeAscii(byte: number): string {
   return `\\x${byte.toString(16).padStart(2, '0')}`;
 }
 
-/** The `Display` of an error type of std; `ErrorKind` and an `io::Error` std made write theirs with `write_str`, which ignores the width. */
+/**
+ * The `Display` of an error type of std; `ErrorKind` and an `io::Error` std made write theirs with `write_str`, which
+ * ignores the width.
+ */
 function stdErrorText(builtin: string, v: Value, spec: Spec, write: WriteChunk | undefined): string {
   const text = stdErrorDisplay(builtin, v);
   if (text === undefined) return '';

@@ -21,7 +21,6 @@ import {
   USIZE,
 } from './types';
 
-/** A question of whether a type implements one of the standard library's traits. */
 interface Goal {
   solver: TraitSolver;
   t: Type;
@@ -172,7 +171,6 @@ export const RANGE_TYPES = new Set([
   'RangeFull',
 ]);
 
-/** The types of std with `Deref` impls (and `DerefMut` impls). */
 const DEREF_TYPES = new Set([
   'Rc',
   'Ref',
@@ -296,7 +294,6 @@ function indexesByUsize(solver: TraitSolver, index: Type | undefined): Answer {
   return index.kind === 'int' && index.name === 'usize' ? 'yes' : 'no';
 }
 
-/** What names a file: text, a `Path`, or a `PathBuf`, or a reference to one. */
 function isPathLike(type: Type): boolean {
   const t = normalize(shallow(type));
   if (t.kind === 'ref') return isPathLike(t.target);
@@ -599,7 +596,6 @@ function copyRef(solver: TraitSolver): TraitRef {
   return { trait: solver.program.traitDef('Copy'), args: [] };
 }
 
-/** `yes` when both answers are, `no` when either is. */
 function bothAnswers(a: Answer, b: Answer): Answer {
   if (a === 'no' || b === 'no') return 'no';
   return a === 'yes' && b === 'yes' ? 'yes' : 'unknown';
@@ -701,7 +697,6 @@ const SEQUENCE_EQ = new Set([
   'VecDeque=&array',
 ]);
 
-/** A side of a sequence comparison: its kind as `SEQUENCE_EQ` names it, its element type, and an array's length. */
 function sequenceSide(type: Type): { kind: string; elem: Type; len?: number } | undefined {
   const isRef = type.kind === 'ref';
   const t = isRef ? normalize(shallow(type.target)) : type;
@@ -817,7 +812,6 @@ function asRef({ solver, t, ref }: Goal): Answer {
   return solver.unifier.tryUnify(target, { kind: 'slice', elem }) ? 'yes' : 'no';
 }
 
-/** A `usize`, or a range of them. */
 function sliceIndex({ solver, t }: Goal): Answer {
   if (t.kind === 'int') return t.name === 'usize' ? 'yes' : 'no';
   if (t.kind !== 'adt' || !RANGE_TYPES.has(t.def.builtin as string)) return t.kind === 'var' ? 'unknown' : 'no';
@@ -879,7 +873,6 @@ function sliceOf({ solver, t, ref }: Goal): Answer {
   return elem && solver.unifier.tryUnify(elem, ref.args[0]) ? 'yes' : 'no';
 }
 
-/** `Join` separates by an element or by a slice of elements. */
 function joinSeparator({ solver, t, ref }: Goal): Answer {
   if (t.kind !== 'ref') return t.kind === 'var' ? 'unknown' : 'no';
   const target = normalize(shallow(t.target));
@@ -1084,15 +1077,14 @@ function isPrimitive(t: Type): boolean {
   return t.kind === 'int' || t.kind === 'float' || t.kind === 'bool' || t.kind === 'char';
 }
 
-/**
- * Whether a closure is `Copy` (or `Clone`), which it is when what it captures is: a shared reference always, a
- * `&mut` never, a value when its type is.
- */
-/** The types of what a closure holds: a reference for what it captures by reference, or the value itself. */
 function capturedTypes(t: Type & { kind: 'closure' }): Type[] {
   return (t.closure.captures ?? []).map(({ type, mode }) => (mode === 'value' ? type : ref(type, mode === 'mut')));
 }
 
+/**
+ * Whether a closure is `Copy` (or `Clone`), which it is when what it captures is: a shared reference always, a
+ * `&mut` never, a value when its type is.
+ */
 function closureCaptures(t: Type & { kind: 'closure' }, all: (types: Type[]) => Answer): Answer {
   const captures = t.closure.captures ?? [];
   if (captures.some((capture) => capture.mode === 'mut')) return 'no';
@@ -1129,7 +1121,6 @@ function borrowedSliceElem(type: Type): Type | 'unknown' | undefined {
   return target.kind === 'slice' ? target.elem : undefined;
 }
 
-/** The builtin types that are iterators themselves, not only collections that make one. */
 export const ITERATOR_BUILTINS: ReadonlySet<string> = new Set([
   'Iter',
   'Range',

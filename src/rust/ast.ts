@@ -37,9 +37,7 @@ export interface TypeAliasItem {
 
 export interface Attributes {
   derives: { name: string; span: Span }[];
-  /** `#[default]` on the unit variant that `#[derive(Default)]` gives an enum. */
   isDefault?: boolean;
-  /** The integer type `#[repr(u8)]` and the like give an enum's discriminants. */
   repr?: IntName;
   /** Whether a `#[repr(..)]` is written, of any kind (`C`, `transparent`, an integer). */
   hasRepr?: boolean;
@@ -47,9 +45,7 @@ export interface Attributes {
 
 export interface Generics {
   params: GenericParamAst[];
-  /** The lifetime parameters' names (`'a`). */
   lifetimes: string[];
-  /** The lifetimes each lifetime outlives (`'b: 'a` in the parameters or the `where` clause). */
   lifetimeBounds?: { name: string; outlives: string[] }[];
   where: WherePredicate[];
 }
@@ -59,7 +55,6 @@ export interface GenericParamAst {
   span: Span;
   bounds: BoundAst[];
   defaultType?: TypeAst;
-  /** For a const parameter (`const N: usize`), its type. */
   constType?: TypeAst;
 }
 
@@ -69,20 +64,16 @@ export interface WherePredicate {
   span: Span;
 }
 
-/** A bound on a type parameter, an opaque result or a trait. */
 export type BoundAst =
   | { kind: 'trait'; path: PathAst; span: Span }
   | { kind: 'static'; span: Span }
-  /** `?Sized`, which lets the parameter be a type of unknown size (`str`, `[T]`, `dyn Trait`). */
   | { kind: 'maybeSized'; span: Span }
-  /** A lifetime bound (`T: 'a`), which only the borrow checker reads. */
   | { kind: 'lifetime'; name: string; span: Span }
   | { kind: 'fn'; trait: 'Fn' | 'FnMut' | 'FnOnce'; params: TypeAst[]; ret: TypeAst | undefined; span: Span };
 
 export interface FnItem {
   kind: 'fn';
   isConst?: boolean;
-  /** An `unsafe fn`, which only unsafe code may call. */
   isUnsafe?: boolean;
   name: string;
   span: Span;
@@ -106,7 +97,6 @@ export interface SelfParam {
   /** `self: Box<Self>` and the like, which take the receiver's pointer, and which a `Box<dyn Trait>` can call. */
   wrapper?: SelfWrapper;
   mutable: boolean;
-  /** The lifetime that `&'a self` names. */
   lifetime?: string;
   span: Span;
 }
@@ -126,7 +116,6 @@ export interface StructItem {
   shape: 'named' | 'tuple' | 'unit';
   fields: FieldAst[];
   attrs: Attributes;
-  /** A `union`, whose fields share one place. */
   isUnion?: boolean;
 }
 
@@ -158,7 +147,6 @@ export interface VariantAst {
 
 export interface TraitItem {
   kind: 'trait';
-  /** An `unsafe trait`, which only an `unsafe impl` implements. */
   isUnsafe?: boolean;
   name: string;
   span: Span;
@@ -166,16 +154,12 @@ export interface TraitItem {
   generics: Generics;
   supertraits: BoundAst[];
   methods: FnItem[];
-  /** The associated types the trait declares (`type Item: Display;`). */
-  /** `generics`: the parameters of a generic associated type (`type Item<T>;`). */
   assocTypes: { name: string; bounds: BoundAst[]; generics: Generics; span: Span }[];
-  /** The associated constants the trait declares, with their default values if any. */
   consts: ConstItem[];
 }
 
 export interface ImplItem {
   kind: 'impl';
-  /** An `unsafe impl`, of an `unsafe trait` only. */
   isUnsafe?: boolean;
   span: Span;
   generics: Generics;
@@ -183,7 +167,6 @@ export interface ImplItem {
   selfType: TypeAst;
   methods: FnItem[];
   consts: ConstItem[];
-  /** The associated types a trait impl sets (`type Item = u32;`). */
   assocTypes: { name: string; type: TypeAst; generics: Generics; span: Span }[];
 }
 
@@ -195,9 +178,7 @@ export interface ConstItem {
   type: TypeAst;
   /** Undefined for a constant of the standard library whose value is native. */
   value: Expr | undefined;
-  /** A `static`, which is one value that every use refers to, rather than a value each use copies. */
   isStatic?: boolean;
-  /** A `static mut`, which only unsafe code may read or write. */
   isMutable?: boolean;
 }
 
@@ -213,12 +194,8 @@ export interface UseItem {
   kind: 'use';
   span: Span;
   vis: Visibility;
-  /** Each imported path with the name it binds; `*` imports every public name. */
   entries: { path: string[]; alias: string | undefined; glob: boolean; span: Span }[];
 }
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Types
 
 export type TypeAst =
   | { kind: 'path'; path: PathAst; span: Span }
@@ -231,18 +208,14 @@ export type TypeAst =
   | { kind: 'dyn'; bounds: BoundAst[]; lifetime?: string; span: Span }
   | { kind: 'impl'; bounds: BoundAst[]; span: Span }
   | { kind: 'fnBound'; bound: BoundAst & { kind: 'fn' }; span: Span }
-  /** A value given to a const parameter (`3` of `Matrix<2, 3>`, `{ N + 1 }`). */
-  /** `type`: the const parameter's type, which the value must have, once the parameter it is given to is known. */
+  /** `type`: the type of the const parameter the value is given to, set once that parameter is known. */
   | { kind: 'constArg'; value: Expr; span: Span; type?: TypeAst }
-  /** A raw pointer type (`*const T`, `*mut T`). */
   | { kind: 'pointer'; mutable: boolean; target: TypeAst; span: Span }
-  /** A function pointer type (`fn(i32) -> i32`). */
   | {
       kind: 'fnPointer';
       params: TypeAst[];
       ret: TypeAst | undefined;
       isUnsafe?: boolean;
-      /** The lifetimes `for<'a>` binds for its own parameters and result. */
       bound?: string[];
       span: Span;
     };
@@ -259,29 +232,20 @@ export interface PathSegment {
   /** For the first segment of `<T as Trait>::name` or `<T>::name`: the type and the trait it is qualified by. */
   qualified?: { self: TypeAst; trait: PathAst | undefined };
   args: TypeAst[] | undefined;
-  /** The lifetime arguments (`Parser<'a>`). */
   lifetimes?: string[];
-  /** The associated types a trait bound sets (`Iterator<Item = i32>`). */
   bindings?: { name: string; type: TypeAst; span: Span }[];
   span: Span;
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Statements and expressions
-
 export interface Block {
   kind: 'block';
   stmts: Stmt[];
-  /** The expression that gives the block its value. */
   tail: Expr | undefined;
   span: Span;
   endRow: number;
-  /** Items declared inside the block, which are visible throughout it. */
   items: Item[];
   ty?: Type;
-  /** A `const { ... }` block, whose value is a constant. */
   isConst?: boolean;
-  /** An `unsafe { ... }` block, in which unsafe operations may happen. */
   isUnsafe?: boolean;
 }
 
@@ -339,7 +303,6 @@ export type Expr = ExprBase &
     | { kind: 'binary'; op: BinaryOp; left: Expr; right: Expr; opSpan: Span }
     | { kind: 'assign'; target: Expr; value: Expr }
     | { kind: 'compoundAssign'; op: ArithOp; target: Expr; value: Expr }
-    /** `raw`: `&raw const x` or `&raw mut x`, which makes a raw pointer. */
     | { kind: 'ref'; mutable: boolean; operand: Expr; raw?: boolean }
     | { kind: 'cast'; operand: Expr; type: TypeAst }
     | { kind: 'call'; callee: Expr; args: Expr[] }
@@ -399,7 +362,6 @@ export interface MatchArm {
   span: Span;
 }
 
-/** A format string with its arguments, as `println!` and `format!` take them. */
 export interface FormatArgs {
   pieces: FormatPiece[];
   args: Expr[];
@@ -409,7 +371,6 @@ export interface FormatArgs {
 export type FormatPiece = string | FormatSpec;
 
 export interface FormatSpec {
-  /** The index of the argument the placeholder prints. */
   arg: number;
   trait: 'display' | 'debug' | 'lowerHex' | 'upperHex' | 'octal' | 'binary' | 'lowerExp' | 'upperExp';
   fill: string;
@@ -419,7 +380,6 @@ export interface FormatSpec {
   zero: boolean;
   width: { kind: 'literal'; value: number } | { kind: 'arg'; arg: number } | undefined;
   precision: { kind: 'literal'; value: number } | { kind: 'arg'; arg: number } | undefined;
-  /** `{:x?}` and `{:X?}`: `Debug` with integers in hexadecimal. */
   debugHex?: 'x' | 'X';
 }
 
@@ -437,9 +397,6 @@ export type MacroCall =
   /** `dbg!`'s arguments, with their source text as `stringify!` gives it (whitespace runs as single spaces). */
   | { kind: 'dbg'; args: Expr[]; texts: string[] };
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Patterns
-
 interface PatternBase {
   span: Span;
   ty?: Type;
@@ -452,7 +409,6 @@ export type Pattern = PatternBase &
         kind: 'binding';
         name: string;
         mutable: boolean;
-        /** `ref x` and `ref mut x`, which borrow what they bind. */
         byRef?: 'ref' | 'refMut';
         sub: Pattern | undefined;
       }
@@ -463,12 +419,10 @@ export type Pattern = PatternBase &
         kind: 'struct';
         path: PathAst;
         fields: { name: string; pattern: Pattern; span: Span }[];
-        /** Whether the pattern ends with `..`, which leaves the other fields out. */
         rest: boolean;
       }
     /** `..` among the elements of a tuple, tuple struct, or slice pattern, which the checker expands for tuples. */
     | { kind: 'rest' }
-    /** `a..=b`, `a..b`, `a..`, or `..=b`, whose ends are literal or constant patterns. */
     | { kind: 'range'; start: Pattern | undefined; end: Pattern | undefined; inclusive: boolean }
     /** `[a, b, rest @ .., z]`; `restIndex` is the position of its `..`, which the checker finds. */
     | { kind: 'slice'; elems: Pattern[]; restIndex?: number }

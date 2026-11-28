@@ -16,8 +16,6 @@ import {
 import { defaultValue } from './core';
 import { call, define, deref, err, type NativeContext, none, ok, panic, placeOf, some } from './support';
 
-/** `Rc` and `Weak`, `RefCell` and its guards, and `Cell`, whose values share or guard what they hold. */
-
 function shared(value: Value): SharedBox {
   return deref(value) as SharedBox;
 }

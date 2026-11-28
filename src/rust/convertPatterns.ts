@@ -3,7 +3,6 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type { PathSegment, Pattern, Span } from './ast';
 import { isComment, SyntaxConverter, syntaxError, unavailable } from './convertSyntax';
 
-/** Converts patterns. */
 export abstract class PatternConverter extends SyntaxConverter {
   protected abstract userMacroPattern(node: Node): Pattern;
 
@@ -14,7 +13,6 @@ export abstract class PatternConverter extends SyntaxConverter {
     return grouped ? elems[0] : { kind: 'tuple', elems, span };
   }
 
-  /** `mut name` or `mut name @ pattern` in a pattern, which binds a variable that can be assigned to. */
   private mutableBinding(node: Node, span: Span): Pattern {
     const inner = node.namedChildren.find((child) => child.type !== 'mutable_specifier' && !isComment(child));
     const pattern = inner && this.pattern(inner);
@@ -22,7 +20,6 @@ export abstract class PatternConverter extends SyntaxConverter {
     return { ...pattern, mutable: true, span };
   }
 
-  /** `ref name` and `ref mut name`, which bind a reference to what they match. */
   private refBinding(node: Node, span: Span): Pattern {
     const inner = node.namedChildren.find((child) => !isComment(child));
     const pattern = inner && this.pattern(inner);
@@ -30,7 +27,6 @@ export abstract class PatternConverter extends SyntaxConverter {
     return { ...pattern, mutable: false, byRef: pattern.mutable ? 'refMut' : 'ref', span };
   }
 
-  /** `name @ pattern`, which binds the whole value while the pattern matches it. */
   private capturedPattern(node: Node, span: Span): Pattern {
     const nameNode = node.namedChildren.find((child) => !isComment(child)) as Node;
     // The pattern after `@` may be an unnamed token (`x @ _`).

@@ -70,7 +70,6 @@ export function withDefaultArgs(def: AdtDef, written: Type[]): Type[] {
   return args;
 }
 
-/** The const parameter an expression names (`N` of `[T; N]`), if it names one. */
 export function constParamOf(expr: Expr, scope: Pick<TypeScope, 'params'>): TypeParam | undefined {
   const inner = expr.kind === 'block' && expr.stmts.length === 0 ? expr.tail : expr;
   if (inner?.kind !== 'path' || inner.path.segments.length !== 1) return undefined;

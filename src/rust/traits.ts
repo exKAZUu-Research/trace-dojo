@@ -49,7 +49,6 @@ const SAME_TYPE_OPERATORS = new Set([
   'BitXorAssign',
 ]);
 
-/** Decides which types implement which traits: from impls, derives, bounds, and the standard library's rules. */
 export class TraitSolver {
   private readonly implGoals: { trait: TraitDef; type: Type; args: Type[] }[] = [];
   private readonly sizedGoals: Type[] = [];

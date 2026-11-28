@@ -449,7 +449,6 @@ function entryValue(entry: Value): EntryValue {
   return deref(entry) as EntryValue;
 }
 
-/** Inserts an entry's key with a value when the map lacks it, returning a place for the entry's value. */
 function orInsertWith(ctx: NativeContext, entry: EntryValue, make: () => Value, given?: Value): Value {
   let existing = entry.map.entries.get(entry.lookup);
   if (existing) {

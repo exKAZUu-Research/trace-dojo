@@ -33,7 +33,6 @@ const RANGE_SHAPES: Record<string, string> = {
   RangeFrom: 'RangeFromShape',
 };
 
-/** The element type a `for` loop over a value of this type binds, as `IntoIterator` gives it. */
 // code-gauge-allow functionNcss -- Follows std's `IntoIterator` impls case by case.
 export function intoIterItem(type: Type): Type | undefined {
   const t = normalize(shallow(type));
@@ -127,7 +126,6 @@ function borrowedIterItem(type: Extract<Type, { kind: 'ref' }>): Type | undefine
   }
 }
 
-/** The shape of the iterator that `IntoIterator` makes of a value of this type. */
 // code-gauge-allow functionCognitiveComplexity -- One case per kind of iterable type.
 // code-gauge-allow functionNcss -- One case per kind of iterable type.
 export function intoIterShape(program: Program, type: Type): Type | undefined {
@@ -197,14 +195,12 @@ function userIteratorItem(type: Type): Type | undefined {
   return found && item && substitute(item, found.subst);
 }
 
-/** Whether a type is one of the program's iterators, or a `&mut` of one. */
 export function isUserIterator(type: Type): boolean {
   const t = normalize(shallow(type));
   if (t.kind === 'ref') return t.mutable && userIteratorImpl(t.target) !== undefined;
   return userIteratorImpl(t) !== undefined;
 }
 
-/** The `Iterator` or `IntoIterator` bound of a type parameter or an opaque type, by which it iterates. */
 export function iterationBound(type: Type): TraitRef | undefined {
   const bounds =
     type.kind === 'param'

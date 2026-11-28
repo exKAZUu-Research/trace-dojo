@@ -514,9 +514,6 @@ function forExpr(c: Checker, expr: Extract<Expr, { kind: 'for' }>): Type {
     }
     compileError(expr.iterable.span, `${t} は for で繰り返せません。`);
   }
-  if (resolved.kind === 'adt' && resolved.def.builtin === 'RangeFrom') {
-    // An unbounded range iterates forever.
-  }
   c.annotations.loops.set(expr, { item, from: iterable });
   c.withScope(() => {
     checkPattern(c, expr.pattern, item, 'move');

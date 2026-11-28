@@ -22,7 +22,6 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   attributed_expression: '式に付けた属性',
 };
 
-/** Converts statements and expressions. */
 export abstract class ExpressionConverter extends MacroConverter {
   /** Whether the expressions being converted are in an `async` block, where `.await` may be written. */
   protected inAsync = false;
@@ -126,7 +125,6 @@ export abstract class ExpressionConverter extends MacroConverter {
     return children;
   }
 
-  /** The invocation of a program's macro that a block's child is, as a statement, if it is one. */
   private userMacroStatement(child: Node): Node | undefined {
     const node = child.type === 'expression_statement' ? child.namedChildren.find((part) => !isComment(part)) : child;
     return node?.type === 'macro_invocation' && this.isUserMacro(node) ? node : undefined;
@@ -244,7 +242,6 @@ export abstract class ExpressionConverter extends MacroConverter {
     }
   }
 
-  /** `unsafe { ... }`, `const { ... }`, or `async { ... }`. */
   private specialBlock(node: Node, span: Span): Expr {
     const inner =
       node.childForFieldName('body') ?? (node.namedChildren.find((child) => child.type === 'block') as Node);
@@ -559,7 +556,6 @@ export abstract class ExpressionConverter extends MacroConverter {
     return this.expr(node);
   }
 
-  /** Whether the left side of an assignment destructures the value (`(a, b) = ...`), rather than naming one place. */
   private isDestructuring(node: Node): boolean {
     if (node.type === 'parenthesized_expression') return this.isDestructuring(this.onlyChild(node));
     if (node.type === 'call_expression') return this.field(node, 'function').type !== 'field_expression';
@@ -770,7 +766,6 @@ export abstract class ExpressionConverter extends MacroConverter {
     return { kind: 'loop', label, body: loopBody, span, isBlock: true };
   }
 
-  /** The conditions of a condition or of a `let` chain (`let Some(x) = a && x > 0`), in order. */
   private conditions(node: Node): Condition[] {
     if (node.type !== 'let_chain') return [this.condition(node)];
     return node.namedChildren.filter((child) => !isComment(child)).map((child) => this.condition(child));
@@ -839,7 +834,6 @@ export abstract class ExpressionConverter extends MacroConverter {
     return { kind: 'closure', isMove, params, ret: undefined, body: inner, span };
   }
 
-  /** Converts with `.await` allowed or not, as in an `async` block or a closure or function. */
   protected inContext<T>(inAsync: boolean, convert: () => T): T {
     const outer = this.inAsync;
     this.inAsync = inAsync;
@@ -879,9 +873,9 @@ function asyncBlock(body: Block, isMove: boolean, span: Span): Expr {
 }
 
 /**
- * `future.await` as `{ let mut f = future; loop { match Future::poll(unsafe { Pin::new_unchecked(&mut f) }, &mut cx) { Ready(v) => break v,
- * Pending => thread::yield_now() } } }`: it polls the future until it is ready, letting waiting threads run between
- * polls, so the `async` block it is in never returns `Pending` itself.
+ * `future.await` as `{ let mut f = future; loop { match Future::poll(unsafe { Pin::new_unchecked(&mut f) }, &mut cx)
+ * { Ready(v) => break v, Pending => thread::yield_now() } } }`: it polls the future until it is ready, letting waiting
+ * threads run between polls, so the `async` block it is in never returns `Pending` itself.
  */
 function awaitLoop(future: Expr, span: Span): Expr {
   const name = `fut#${span.row}:${span.col}`;

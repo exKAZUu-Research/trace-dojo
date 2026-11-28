@@ -73,7 +73,6 @@ interface Dispatch {
 /** Where a library call that a loop or an adapter makes, not the program, reports a panic it has no place for. */
 const NO_SPAN: Span = { row: 0, col: 1 };
 
-/** Runs a checked program: calls, trait dispatch, natives, and formatting. */
 export class Interpreter implements CallSupport {
   runtime!: Runtime;
   readonly formatter: Formatter;
@@ -148,9 +147,6 @@ export class Interpreter implements CallSupport {
     return { order: result.variant === 0 ? undefined : (result.fields[0] as EnumValue).variant - 1 };
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Calls
-
   /** Calls a function with concrete type arguments: a trait method dispatches on its `Self` type. */
   callFn(def: FnDef, typeArgs: Type[], args: Value[], callRow: number | undefined, span: Span, frame: Frame): Value {
     if (def.trait && def.trait.methods.get(def.name) === def) {
@@ -183,7 +179,6 @@ export class Interpreter implements CallSupport {
     return this.callNative(def, concrete, receiverArgs, span, frame);
   }
 
-  /** The impl method that a trait method runs for a concrete type, or the trait's default method. */
   private dispatch(
     trait: TraitDef,
     receiver: Type,
@@ -249,7 +244,6 @@ export class Interpreter implements CallSupport {
     return this.invoke(compiled, typeMap, args, callRow, []);
   }
 
-  /** Runs a compiled body in a new frame, returning its value or the value of a `return` in it. */
   invoke(
     compiled: CompiledFn,
     typeArgs: ReadonlyMap<TypeParam, Type>,
@@ -408,9 +402,6 @@ export class Interpreter implements CallSupport {
     return iter;
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Constants and conversions
-
   constValue(def: ConstDef, frame: Frame, types: Type[]): Value {
     if (def.trait) {
       const implemented = this.traitConstImpl(def, types);
@@ -551,7 +542,6 @@ export class Interpreter implements CallSupport {
     return this.convertFrom(value, from, to, frame);
   }
 
-  /** `From::from`: the program's impl, or the standard library's conversion. */
   convertFrom(value: Value, from: Type, to: Type, frame: Frame): Value {
     const dispatch = this.dispatch(this.program.traitDef('From'), normalize(shallow(to)), 'from', [from]);
     const span = { row: 0, col: 0 };
@@ -581,9 +571,6 @@ export class Interpreter implements CallSupport {
     void frame;
     return new TurtleValue(created);
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Formatting
 
   private userFmt(
     trait: 'Display' | 'Debug',
@@ -627,7 +614,6 @@ function opaqueProjection(declaration: Type, implementation: Type, id: number): 
   return undefined;
 }
 
-/** The types of a variant's fields with a generic type's parameters replaced by its arguments. */
 export function fieldTypes(def: AdtDef, args: Type[], variant: number): Type[] {
   const fields = def.variants[variant]?.fields ?? [];
   if (def.params.length === 0) return fields.map((field) => field.type);
@@ -635,7 +621,6 @@ export function fieldTypes(def: AdtDef, args: Type[], variant: number): Type[] {
   return fields.map((field) => substitute(field.type, subst));
 }
 
-/** The concrete type and receiver of a trait object's method call. */
 function unwrapDyn(receiver: Value, mutable: boolean): { type: Type; receiver: Value } {
   if (receiver instanceof DynValue) {
     return { type: receiver.type, receiver: mutable ? receiver.value : derefAll(receiver.value) };

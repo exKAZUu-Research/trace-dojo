@@ -171,7 +171,6 @@ export class ConstLint {
     }
   }
 
-  /** Records the constants that a pattern binds. */
   // code-gauge-allow functionCognitiveComplexity -- Binding mode determines whether the analyzed value is propagated.
   private bind(pattern: Pattern, value: Known | undefined): void {
     if (pattern.kind === 'binding') {
@@ -207,7 +206,6 @@ export class ConstLint {
     return diverged;
   }
 
-  /** Checks an expression's operations, returning its value when it is a constant. */
   private expr(expr: Expr): Known | undefined {
     // What follows an operand that never finishes (a later argument, the other side of an operator) is unreachable.
     return this.diverged ? undefined : this.reachable(expr);
@@ -528,7 +526,6 @@ export class ConstLint {
     return this.bindMatched(cond.pattern, this.expr(cond.value));
   }
 
-  /** Whether a match guard's conditions all hold, as far as their values are known. */
   private guardHolds(conds: Condition[]): boolean | undefined {
     for (const cond of conds) {
       const holds = this.condition(cond);
@@ -607,7 +604,6 @@ export class ConstLint {
     for (const [local, value] of saved) if (!assigned.has(local)) this.known.set(local, value);
   }
 
-  /** An assignment to a variable gives it a value, which its propagation mode may keep. */
   private assign(target: Expr, value: Known | undefined): void {
     const res = target.kind === 'path' ? this.annotations.paths.get(target) : undefined;
     if (res?.kind === 'local') this.setKnown(res.local, value);
@@ -692,7 +688,6 @@ export class ConstLint {
     }
   }
 
-  /** `&&` and `||` evaluate their right operand only when the left one does not decide the result. */
   private logical(expr: Extract<Expr, { kind: 'binary' }>, left: Known | undefined): Known | undefined {
     const decided = expr.op === '||';
     if (left === decided) return decided;
@@ -869,7 +864,6 @@ function intTypeOf(type: Type | undefined): IntName | undefined {
   return checked?.kind === 'int' ? checked.name : undefined;
 }
 
-/** The arguments of an assertion's message. */
 function assertionMessage(macro: MacroCall): Expr[] {
   return (macro.kind === 'assert' || macro.kind === 'assertEq' ? macro.format?.args : undefined) ?? [];
 }
@@ -886,7 +880,6 @@ function bits(name: IntName): number {
   return name === 'isize' || name === 'usize' ? 64 : Number(name.slice(1));
 }
 
-/** The value of an integer type's associated constant (`i32::MAX`), which rustc's lints know. */
 function floatLimit(name: string): number | undefined {
   const [ty, key] = name.split('::');
   return ty === 'f32' || ty === 'f64' ? FLOAT_LIMITS[key]?.[ty] : undefined;
@@ -896,7 +889,6 @@ function aggregate(fields: Iterable<readonly [string, Known | undefined]>, ctor?
   return { fields: new Map(fields), ctor };
 }
 
-/** Whether a pattern matches a constant: surely, surely not, or unknown. */
 // code-gauge-allow functionNcss -- Each Rust pattern has distinct rules for deciding whether it can match.
 // code-gauge-allow functionCognitiveComplexity -- Each Rust pattern has distinct rules for deciding whether it can match.
 function patternMatches(

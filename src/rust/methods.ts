@@ -202,7 +202,6 @@ function rangeAsIter(program: Program, range: Type): Type | undefined {
   return item && shape && program.iterType(item, shape);
 }
 
-/** Finds a method of iterators for a receiver that is an iterator of another type. */
 function probeAsIter(
   program: Program,
   solver: TraitSolver,
@@ -410,7 +409,6 @@ export function arrayAsSlice(fn: FnDef, selfType: Type): Type {
   return selfType;
 }
 
-/** A trait's default method, called on a type with an impl of the trait that does not override it. */
 function matchDefault(
   solver: TraitSolver,
   impl: ImplDef,
@@ -451,7 +449,6 @@ interface Associated {
   ambiguousWith?: TraitDef;
 }
 
-/** Finds an associated function or method by a path such as `Type::name`, for calls like `String::from` or `Point::new`. */
 export function lookupAssociated(
   program: Program,
   solver: TraitSolver,

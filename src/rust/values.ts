@@ -83,7 +83,6 @@ export class EnumValue {
   ) {}
 }
 
-/** Where a mutable reference points: a variable, a field, an element, or a value a `Box` holds. */
 export interface Place {
   readonly isPlace: true;
   get(): Value;
@@ -134,7 +133,6 @@ export function isPlace(value: unknown): value is Place {
   return typeof value === 'object' && value !== null && (value as Place).isPlace === true;
 }
 
-/** A shared or mutable slice of an array or `Vec`: a window on its elements. */
 export class SliceView {
   constructor(
     readonly base: Value[],
@@ -173,13 +171,11 @@ export function swapOwnedElements(items: Value[], first: number, second: number)
   [items[first], items[second]] = [items[second], items[first]];
 }
 
-/** The array and offset a slice's elements live in, for places that refer to them. */
 export function sliceBase(value: Value): { base: Value[]; start: number } {
   if (value instanceof SliceView) return { base: value.base, start: value.start };
   return { base: value as Value[], start: 0 };
 }
 
-/** A function, closure, or constructor as a value. */
 export class FnValue {
   constructor(
     readonly call: (args: Value[], callRow: number | undefined) => Value,
@@ -193,19 +189,16 @@ export class FnValue {
    * concrete type), and what it captures by reference stays shared.
    */
   duplicate: ((copy: (value: Value, type: Type) => Value) => FnValue) | undefined;
-  /** For a closure, drops what it captured by value, as the closure going does. */
   dropCaptures: (() => void) | undefined;
 }
 
 export const DONE: unique symbol = Symbol('done');
 export type Next = Value | typeof DONE;
 
-/** An iterator: `next` yields elements until it returns `DONE`. */
 export class IterValue {
   constructor(
     public next: () => Next,
     public nextBack?: () => Next,
-    /** The number of elements left, for iterators that know it (ExactSizeIterator). */
     public remaining?: () => number | bigint,
     /** Owned values the iterator keeps alive across calls. */
     readonly roots: unknown[] = []
@@ -217,13 +210,11 @@ export class IterValue {
   trustedSizeHint?: boolean;
   stateRoots?: () => Iterable<unknown>;
 
-  /** Elements pushed back by `peekable`. */
   peeked: Next[] | undefined;
 
   /** What goes when the iterator does: the captured values of the closures its adaptors took (`map(move |x| ..)`). */
   releases: (() => void)[] | undefined;
 
-  /** Runs what goes with the iterator, once. */
   release(): void {
     const releases = this.releases;
     this.releases = undefined;
@@ -249,9 +240,6 @@ export class IterValue {
 
   frontIndex?: () => number;
 
-  /**
-   * An independent copy of the iterator at its position, as `Clone` makes it.
-   */
   fork: (() => IterValue) | undefined;
   ownedItemType?: Type;
   /** An adapter's source and own state, whose iterators (`chain`'s second, `zip`'s other) go when the adapter does. */
@@ -274,7 +262,6 @@ export class SetValue {
   }
 }
 
-/** A `Range` or `RangeInclusive`, which is its own iterator. */
 export class RangeValue {
   constructor(
     public start: Value,
@@ -298,7 +285,6 @@ export interface RangeEndpoint {
   included: boolean;
 }
 
-/** A trait object: a value with the type that decides which implementation its methods run. */
 export class DynValue {
   constructor(
     readonly type: Type,
@@ -310,7 +296,6 @@ export class TurtleValue {
   constructor(readonly state: TurtleState) {}
 }
 
-/** The `fmt::Formatter` that a `Display` or `Debug` implementation writes to. */
 export class FormatterValue {
   text = '';
   constructor(
@@ -332,7 +317,6 @@ export class FormatterValue {
   }
 }
 
-/** An entry of a map (`map.entry(key)`), which knows its key and whether the map has it. */
 export class EntryValue {
   constructor(
     readonly map: MapValue,
@@ -341,7 +325,6 @@ export class EntryValue {
   ) {}
 }
 
-/** The allocation that `Rc` (and `Arc`) values share: the value, and how many strong and weak pointers there are. */
 export class SharedBox {
   strong = 1;
   weak = 0;
@@ -367,7 +350,6 @@ export class CellBox {
   constructor(public value: Value) {}
 }
 
-/** A `Ref` or `RefMut` (or a lock's guard): access to a `CellBox`'s value until the guard goes. */
 export class BorrowGuard {
   released = false;
   constructor(
@@ -375,11 +357,9 @@ export class BorrowGuard {
     readonly mutable: boolean,
     /** For a lock's guard, whether a panic is unwinding the thread, which poisons a lock held for writing. */
     readonly unwinding?: () => boolean,
-    /** For a lock's guard, the thread holding it. */
     readonly holder?: number
   ) {}
 
-  /** Ends the borrow, once. */
   release(): void {
     if (this.released) return;
     this.released = true;
@@ -389,7 +369,6 @@ export class BorrowGuard {
     else this.cell.borrows--;
   }
 
-  /** The place of the value, which a `RefMut` writes through. */
   place(): Place {
     const { cell } = this;
     return new AccessorPlace(
@@ -412,7 +391,6 @@ export class RawPtr {
   }
 }
 
-/** Standard input, a file, or a buffered reader or writer of one: what it reads from and writes to. */
 export class IoStream {
   constructor(
     readonly reader: TextReader | undefined,
@@ -455,7 +433,6 @@ export class BufferedWriter {
   }
 }
 
-/** The queue of an `mpsc` channel, which its `Sender`s and its `Receiver` share. */
 export class ChannelEnd {
   /** Whether the `Receiver` has gone, after which a send gives back its message as an error. */
   receiverDropped = false;
@@ -464,7 +441,6 @@ export class ChannelEnd {
   constructor(readonly queue: Value[]) {}
 }
 
-/** A spawned thread: its function, and whether it has run, with its result or the panic that ended it. */
 export class ThreadHandle {
   state: 'pending' | 'running' | 'done' | 'panicked' = 'pending';
   result: Value;
@@ -478,10 +454,8 @@ export class ThreadHandle {
 
 export const PENDING: unique symbol = Symbol('pending');
 
-/** A future of the standard library (an `async` block's or function's, `ready`, `pending`). */
 export class FutureValue {
   constructor(
-    /** Polls the future: its output, or `PENDING`. */
     readonly poll: (context: Value) => Value | typeof PENDING,
     /** What the future keeps alive, such as its closure, for garbage collection. */
     readonly roots: unknown[] = []
@@ -491,7 +465,6 @@ export class FutureValue {
 /** The longest `Duration`, in nanoseconds: `u64::MAX` seconds and 999_999_999 nanoseconds. */
 export const MAX_DURATION = (2n ** 64n - 1n) * 1_000_000_000n + 999_999_999n;
 
-/** A `Duration`, in nanoseconds. */
 export class DurationValue {
   constructor(readonly nanos: bigint) {}
 }

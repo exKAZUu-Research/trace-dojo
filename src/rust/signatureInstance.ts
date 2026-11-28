@@ -16,7 +16,6 @@ import {
 } from './regions';
 import { childTypes, type FnDef, shallow, type TraitRef, type Type, type TypeParam } from './types';
 
-/** How a relation makes regions and relates them. */
 interface Regions {
   readonly fresh: () => RVar;
   readonly outlives: Outlives;
@@ -276,7 +275,6 @@ function higherRankedInputs(sig: { params: Type[]; ret: Type }): boolean[] {
   return sig.params.map((type) => type.kind === 'ref' && type.lifetime === undefined && !namesLifetime(sig.ret));
 }
 
-/** Relates a call of a value of a type by the closure bound the type has, if it has one. */
 export function relateCallThroughBound(
   callee: Type | undefined,
   args: Layout[],
@@ -288,7 +286,6 @@ export function relateCallThroughBound(
   return sig !== undefined;
 }
 
-/** The signature of a callee that is called through a closure bound or a trait object (`F: Fn(&T) -> U`). */
 function boundSignatureOf(type: Type | undefined): { params: Type[]; ret: Type } | undefined {
   let t = type && normalize(shallow(type));
   while (t && (t.kind === 'ref' || (t.kind === 'adt' && t.def.builtin === 'Box'))) {

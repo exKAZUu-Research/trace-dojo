@@ -24,7 +24,6 @@ import {
 } from '../values';
 import { define, deref, err, type NativeContext, ok, panic, placeOf } from './support';
 
-/** The options of `OpenOptions`, which `open` reads. */
 class OpenOptionsValue {
   read = false;
   write = false;
@@ -53,7 +52,6 @@ const OS_ERRORS: Record<OsErrorCode, [string, number, string]> = {
   EINVAL: ['Invalid argument', 22, 'InvalidInput'],
 };
 
-/** `io::Error`'s `Display`. */
 export function ioErrorDisplay(value: Value): string {
   const payload = ioErrorPayload(value);
   if (payload.code) {
@@ -69,7 +67,6 @@ export function ioErrorPads(value: Value): boolean {
   return !payload.code && payload.message !== undefined;
 }
 
-/** `io::ErrorKind`'s `Display`, by the variant's name. */
 export function ioErrorKindDisplay(kind: string): string {
   return ERROR_KIND_TEXT[kind] ?? kind;
 }
@@ -116,7 +113,6 @@ const ERROR_KIND_TEXT: Record<string, string> = {
   Other: 'other error',
 };
 
-/** `io::Error`'s `Debug`. */
 export function ioErrorDebug(value: Value, indent: number | undefined): string {
   const payload = ioErrorPayload(value);
   const fields: [string, string][] = payload.code
@@ -149,7 +145,6 @@ function ioError(ctx: NativeContext, payload: IoErrorPayload): Value {
   return new StructValue(ctx.interp.program.adtDef('IoError'), [payload as unknown as Value]);
 }
 
-/** Runs a file system operation, giving `Ok` of its value or `Err` of the `io::Error` its failure is. */
 function attempt(ctx: NativeContext, run: () => Value): Value {
   try {
     return ok(ctx, run());
@@ -163,7 +158,6 @@ function pathOf(value: Value): string {
   return textOf(deref(value));
 }
 
-/** Bytes or text to write, as text: what `&str`, `String`, `&[u8]`, and `Vec<u8>` hold. */
 function textToWrite(value: Value, span: Span): string {
   const target = deref(value);
   if (typeof target === 'string' || target instanceof StringValue) return textOf(target);
@@ -204,7 +198,6 @@ function linesOf(ctx: NativeContext, source: Value): IterValue {
   });
 }
 
-/** Reads from a stream, giving `Ok` of what `read` gives. */
 function reading(ctx: NativeContext, source: Value, read: (reader: TextReader) => Value): Value {
   return ok(ctx, read(textReaderOf(ctx, source)));
 }
@@ -451,7 +444,6 @@ function invalidOptions(options: OpenOptionsValue): string | undefined {
   return !options.read && !writes ? 'must specify at least one of read, write, or append access' : undefined;
 }
 
-/** Writes text to the file a stream writes to, for `write!` and `Write::write_all` on a file. */
 export function writeToStream(target: Value, text: string, span: Span): undefined {
   const { writer } = stream(target);
   if (!writer) throw new RustPanic('読み込み用に開いたファイルへの書き込みは、この採点環境では使えません。', span);
@@ -469,7 +461,6 @@ export function writtenText(bytes: readonly Value[], span: Span): string {
   }
 }
 
-/** How a type's `Write` impl writes: to a file, through a `BufWriter`'s buffer, or not at all. */
 export function writeTarget(type: Parameters<typeof normalize>[0]): 'file' | 'buffered' | undefined {
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));

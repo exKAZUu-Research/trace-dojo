@@ -27,7 +27,6 @@ import {
   WeakRef,
 } from './values';
 
-/** Hooks into the program's own impls, which the type-directed operations call for user types, and into its run. */
 export interface UserImpls {
   /** Counts the elements a clone makes against the run's limit. */
   allocate(count: number): void;
@@ -38,7 +37,6 @@ export interface UserImpls {
   order?(method: OrderMethod, type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
   cmp?(type: Type, a: Value, b: Value, partial: boolean, rhs?: Type): { order: number | undefined } | undefined;
   clone?(type: Type, value: Value): { value: Value } | undefined;
-  /** Substitutes a generic type's parameters with its arguments in a field's type. */
   fieldTypes(def: AdtDef, args: Type[], variant: number): Type[];
 }
 
@@ -64,9 +62,6 @@ export function spendCollectionWork(count: number): void {
 function fieldTypes(def: AdtDef, args: Type[], variant: number): Type[] {
   return hooks?.fieldTypes(def, args, variant) ?? def.variants[variant].fields.map((field) => field.type);
 }
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Integers
 
 const OP_NAMES: Record<string, string> = {
   '+': 'add',
@@ -143,7 +138,6 @@ export function bitsOf(name: IntName): number {
   return Number(name.slice(1));
 }
 
-/** Wraps an integer to a type's width, as `as` and the wrapping methods do. */
 export function wrap(name: IntName, value: bigint): bigint {
   const bits = bitsOf(name);
   return name.startsWith('i') ? BigInt.asIntN(bits, value) : BigInt.asUintN(bits, value);
@@ -216,9 +210,6 @@ function saturatingFloatToInt(value: number, name: IntName): bigint {
   const truncated = BigInt(Math.trunc(value));
   return truncated < min ? min : truncated > max ? max : truncated;
 }
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Equality, ordering, hashing, cloning
 
 /** Strips references from a type, as comparisons of references compare what they refer to. */
 function derefType(type: Type): Type {
@@ -374,7 +365,6 @@ function rangesEqual(elem: Type, x: RangeValue, y: RangeValue): boolean {
   return bound(x.start, y.start) && bound(x.end, y.end) && x.exhausted === y.exhausted;
 }
 
-/** Whether two values of a struct or an enum have equal fields, as `#[derive(PartialEq)]` compares them. */
 function fieldsEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
   if (x instanceof StructValue && y instanceof StructValue) {
     const types = fieldTypes(t.def, t.args, 0);
@@ -705,7 +695,6 @@ export function cloneValue(type: Type, value: Value): Value {
   return cloneResults || !hooks ? clonePart(type, value) : withCloneResults(() => clonePart(type, value));
 }
 
-/** The program's own `clone` of a value, whose body builds values of its own. */
 function userClone(type: Type, value: Value): { value: Value } | undefined {
   const building = cloneResults;
   cloneResults = undefined;
@@ -812,7 +801,6 @@ function cloneShared(t: Type & { kind: 'adt' }, target: Value): Value {
   return new CellBox(clonePart(t.args[0], (target as CellBox).value));
 }
 
-/** A clone of a struct's or an enum's value, field by field, as `#[derive(Clone)]` makes it. */
 function cloneFields(t: Type & { kind: 'adt' }, value: Value): Value {
   const { def } = t;
   if (value instanceof StructValue) {
@@ -890,7 +878,6 @@ function cloneItems(items: Value[], clone: (value: Value) => Value): Value[] {
   return copy;
 }
 
-/** A clone of a map or a set, with its table's size, of keys (and values) of the types `args`. */
 function cloneCollection(args: Type[], source: MapValue | SetValue): MapValue | SetValue {
   if (source instanceof MapValue) {
     hooks?.allocate(source.entries.size * 2);
@@ -906,7 +893,6 @@ function cloneCollection(args: Type[], source: MapValue | SetValue): MapValue | 
   return copy;
 }
 
-/** What an `Rc`, a cell, or a `RefCell`'s guard holds. */
 function pointee(value: Value): Value {
   const target = derefAll(value);
   if (target instanceof SharedBox || target instanceof CellBox) return target.value;
@@ -920,7 +906,6 @@ function derefAll(value: Value): Value {
   return current;
 }
 
-/** Orders byte strings as slices do: by their first differing byte, or the shorter first. */
 function compareBytes(a: bigint[], b: bigint[]): number {
   for (let index = 0; index < Math.min(a.length, b.length); index++) {
     if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;

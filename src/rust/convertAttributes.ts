@@ -41,7 +41,6 @@ const TOOL_NAMESPACES = new Set(['rustfmt', 'clippy', 'rustdoc', 'rust_analyzer'
 /** Attributes that need `unsafe(...)` since edition 2024. */
 const UNSAFE_ATTRIBUTES = new Set(['no_mangle', 'export_name', 'link_section']);
 
-/** `cfg` options whose values depend on the target's CPU or OS. */
 const TARGET_OPTIONS = new Set([
   'unix',
   'windows',
@@ -77,7 +76,6 @@ const UNAVAILABLE_ATTRIBUTES: Record<string, string> = {
   track_caller: '呼び出し元の位置で panic を報告する属性（#[track_caller]）',
 };
 
-/** The representations `#[repr(..)]` names: `C`, `transparent`, `packed`, `align(N)`, `Rust`, and integer types. */
 const REPR_NAMES = new Set(['C', 'Rust', 'transparent', 'packed', 'align', ...INT_NAMES]);
 
 /** Requires `#[repr(..)]` to name known representations, `align` and `packed` alone taking `(N)` (E0539, E0565). */
@@ -97,7 +95,6 @@ function partition<T>(items: T[], test: (item: T) => boolean): [T[], T[]] {
   return [items.filter(test), items.filter((item) => !test(item))];
 }
 
-/** The name of an attribute (`cfg` of `#[cfg(test)]`), if it is one. */
 function attributeName(node: Node): string | undefined {
   return node.namedChildren.find((child) => child.type === 'attribute')?.namedChildren[0]?.text;
 }
@@ -105,7 +102,6 @@ function attributeName(node: Node): string | undefined {
 export class AttributeReader {
   constructor(
     private readonly span: (node: Node) => Span,
-    /** Reads the attributes of `#[cfg_attr(...)]` from their source text. */
     private readonly reparseAttributes: (text: string) => Node[]
   ) {}
 
@@ -143,7 +139,6 @@ export class AttributeReader {
     return this.apply(node, { derives: [] });
   }
 
-  /** Applies one attribute, telling whether what it is on stays. */
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of attribute.
   // code-gauge-allow functionNcss -- One case per kind of attribute.
   private apply(node: Node, attrs: Attributes): boolean {
@@ -235,7 +230,6 @@ export class AttributeReader {
     return true;
   }
 
-  /** The value of `cfg!(...)`, whose token tree holds a `cfg` predicate. */
   cfgMacro(tree: Node, span: Span): boolean {
     return this.condition(cfgTokens(tree), span);
   }
@@ -255,7 +249,6 @@ export class AttributeReader {
     return name === 'debug_assertions';
   }
 
-  /** `not(...)`, `all(...)`, or `any(...)` of predicates. */
   private combined(name: string, parts: Node[][], span: Span): boolean {
     if (name === 'not') {
       if (parts.length !== 1) syntaxError(span, 'cfg の not には、条件を1つ書いてください。');
@@ -267,7 +260,6 @@ export class AttributeReader {
   }
 }
 
-/** The tokens inside a token tree's brackets. */
 function cfgTokens(tree: Node): Node[] {
   return tree.children.slice(1, -1).filter((child) => !isComment(child));
 }

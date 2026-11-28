@@ -133,7 +133,6 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
   };
 }
 
-/** `write!` to a file, or to a `BufWriter`'s buffer. */
 function writeFile(
   program: Program,
   target: Eval,

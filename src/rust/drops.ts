@@ -46,7 +46,6 @@ export class Dropper {
 
   private counted = false;
 
-  /** Whether any value of the program can need dropping. */
   get active(): boolean {
     return this.counted || this.impls.length > 0;
   }
@@ -281,7 +280,6 @@ const COUNTED = new Set([
   'BufWriter',
 ]);
 
-/** The types of the values a value of a type holds: its fields and type arguments, elements, or contents. */
 function partsOf(t: Type): Type[] {
   switch (t.kind) {
     case 'adt': {

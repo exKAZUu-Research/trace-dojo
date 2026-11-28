@@ -3,7 +3,6 @@ import { normalize } from './infer';
 import { type AdtDef, callableSignature, ref, shallow, type Type } from './types';
 import { DONE, type IterValue, type RangeValue, type Value } from './values';
 
-/** Writes `{:?}` of a value of a type at a nesting depth. */
 export type DebugValue = (value: Value, type: Type, indent: number | undefined, write?: WriteChunk) => string;
 
 /** The iterators whose remaining elements std writes in a tuple struct of that name (`Iter([1, 2])`). */
@@ -84,7 +83,6 @@ const DESCRIBED_ADAPTERS = new Set([
   'FlatMapShape',
 ]);
 
-/** Sets how `{:?}` writes an iterator, as std's `Debug` impl of its type does. */
 export function described(
   iter: IterValue,
   describe: (show: DebugValue, item: Type, target: IterValue) => DebugPart
@@ -100,17 +98,14 @@ export function described(
   return iter;
 }
 
-/** A struct of an iterator's fields (`Windows { v: [1, 2], size: 2 }`). */
 export function fieldsPart(name: string, fields: [string, DebugPart][]): DebugPart {
   return (indent, write) => structText(name, fields, indent, false, write);
 }
 
-/** A tuple struct of parts (`Drain([1, 2])`). */
 export function tuplePart(name: string, parts: DebugPart[]): DebugPart {
   return (indent, write) => tupleText(name, parts, indent, write);
 }
 
-/** A list of values of a type (`[1, 2]`). */
 export function listPart(values: Value[], type: Type, show: DebugValue): DebugPart {
   return (indent, write) =>
     list(
@@ -122,17 +117,14 @@ export function listPart(values: Value[], type: Type, show: DebugValue): DebugPa
     );
 }
 
-/** `Some(..)` of a part, or `None`. */
 export function optionPart(part: DebugPart | undefined): DebugPart {
   return part ? tuplePart('Some', [part]) : () => 'None';
 }
 
-/** A number, as a field (`size: 2`). */
 export function numberPart(value: number | bigint | boolean): DebugPart {
   return () => String(value);
 }
 
-/** Whether this interpreter writes `{:?}` of iterators of a shape as std does. */
 export function supportsDebug(shape: Type): boolean {
   const t = normalize(shallow(shape));
   if (t.kind !== 'adt') return false;
@@ -184,7 +176,6 @@ function patternHasDebug(pattern: Type): boolean {
   return kind !== 'closure' && kind !== 'fn' && kind !== 'var';
 }
 
-/** `{:?}` of an iterator of `item`s of a shape, as std's `Debug` impls of its iterator types write it. */
 // code-gauge-allow functionCognitiveComplexity -- One case per iterator type of std.
 // code-gauge-allow functionNcss -- One case per iterator type of std.
 export function iteratorDebug(
@@ -268,7 +259,6 @@ const CALLBACK_INPUTS: Record<string, { shapeArg: number; param: number }> = {
   ScanShape: { shapeArg: 2, param: 1 },
 };
 
-/** The items of the iterator an adapter adapts. */
 function adaptedItem(name: string, shape: Type & { kind: 'adt' }, item: Type): Type {
   const t = normalize(shallow(item));
   const callback = CALLBACK_INPUTS[name];

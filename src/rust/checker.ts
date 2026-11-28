@@ -86,7 +86,6 @@ export interface BodyContext {
   retType: Type;
   loops: LoopContext[];
   scopes: Map<string, LocalVar>[];
-  /** Whether the body is a closure's, whose `return` returns from the closure. */
   isClosure: boolean;
   module: Module;
   typeParams: Map<string, TypeParam>;
@@ -111,7 +110,6 @@ interface CoverageCheck {
   constantPattern?: Pattern;
 }
 
-/** Checks the types of every function body, recording what the compiler needs in {@link Annotations}. */
 export class Checker {
   private readonly adtStorage: AdtStorage;
   readonly annotations = new Annotations();
@@ -129,9 +127,8 @@ export class Checker {
   }[] = [];
   /** Bodies of functions declared in blocks, checked after the function around them. */
   private readonly nestedFns: FnDef[] = [];
-  /** The context of each checked function, which the compiler reads. */
   readonly fnContexts = new Map<FnDef | ConstDef, FnContext>();
-  /** For each instantiated type parameter of a call, the bounds that closures passed for it take their signature from. */
+  /** For each instantiated type parameter of a call, the bounds that closures passed for it take a signature from. */
   readonly varBounds = new Map<unknown, TraitRef[]>();
   body!: BodyContext;
   deferredChecks: (() => void)[] = [];
@@ -151,7 +148,7 @@ export class Checker {
   /** Moves out of a reference by `&` patterns, which rustc's borrow checker reports in order with its other errors. */
   patternMoves: { span: Span; message: string }[] = [];
 
-  /** The rows of the `// atomic` annotations that mark a function, which each of them must. */
+  /** The rows of `// atomic` annotations that a function claimed; an unclaimed one is misplaced. */
   private readonly claimedAtomicRows = new Set<number>();
 
   constructor(
@@ -334,7 +331,6 @@ export class Checker {
     return true;
   }
 
-  /** Requires the methods of a trait impl to take `self`, their parameters, and return as the trait declares them. */
   // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
   private checkImplSignatures(impl: ImplDef): void {
     const traitRef = impl.trait;
@@ -414,7 +410,6 @@ export class Checker {
     }
   }
 
-  /** The types an impl gives the trait's associated types meet the bounds the trait declares for them (E0277). */
   private checkAssocTypeBounds(impl: ImplDef, trait: TraitRef, self: Type): void {
     const subst: Subst = new Map([
       ...trait.trait.params.map((param, index): [TypeParam, Type] => [param, trait.args[index]]),
@@ -634,7 +629,7 @@ export class Checker {
     const selfType: Type | undefined = def.trait ? { kind: 'param', param: def.trait.self } : def.impl?.selfType;
     const resultTypes: [OpaqueType, Type][] = [];
     const returnType = hasOpaque(def.ret) ? openOpaqueResults(def.ret, resultTypes) : def.ret;
-    // The body sees what an `impl Trait` result is bound by, as a closure returned for `impl Fn(..)` takes its signature.
+    // The body sees what an `impl Trait` result is bound by, as a closure returned for `impl Fn(..)` needs.
     for (const [opaque, hidden] of resultTypes) this.recordTypeBounds(hidden, opaque.bounds);
     this.body = this.newBody({
       name: def.name,
@@ -712,7 +707,6 @@ export class Checker {
     if (moves.length > 0) compileError(moves[0].span, moves[0].message);
   }
 
-  /** Coerces the value a function's body ends with to its result type. */
   private coerceReturned(tail: Expr, type: Type, retType: Type): void {
     if (shallow(type).kind === 'never') return;
     if (tail.kind === 'block' || tail.kind === 'if' || tail.kind === 'match') {
@@ -722,7 +716,6 @@ export class Checker {
     this.coerce(tail, type, retType);
   }
 
-  /** Checks a block's value against the function's result, reporting the mismatch at the result type. */
   private coerceTail(block: Block, actual: Type, expected: Type, item: FnItem): void {
     if (block.tail) return;
     const t = shallow(actual);
@@ -742,8 +735,8 @@ export class Checker {
   }
 
   /**
-   * Rejects an expression whose type is not known yet at the variable it is read from, whose type rustc asks for
-   * (E0282), when its type is not known either.
+   * Reports E0282 at the variable an expression is read from (through fields and indexes) while that variable's type
+   * is unknown, as rustc asks for the variable's type rather than the expression's.
    */
   unknownLocal(expr: Expr): void {
     let root = expr;
@@ -759,7 +752,6 @@ export class Checker {
     }
   }
 
-  /** Requires every variable's type to be known once inference is done, as rustc does (E0282). */
   requireKnownTypes(): void {
     const contexts = [this.body.fn, ...[...this.annotations.closures.values()].map((info) => info.context)];
     for (const context of contexts) {
@@ -776,7 +768,6 @@ export class Checker {
     }
   }
 
-  /** Solves the remaining obligations, applies the default types of literals, and requires every type to be known. */
   private finishBody(span: Span): void {
     this.solveObligations(false);
     for (const check of this.deferredChecks.splice(0)) check();
@@ -786,7 +777,7 @@ export class Checker {
     void span;
   }
 
-  /** Rejects number literals out of their types' ranges, as rustc's deny-by-default `overflowing_literals` lint does. */
+  /** Rejects number literals out of their types' ranges, as rustc's deny-by-default `overflowing_literals` does. */
   private checkLiteralRanges(): void {
     for (const literal of this.literals.splice(0)) {
       const type = normalize(shallow(resolve(literal.ty!, true)));
@@ -931,9 +922,6 @@ export class Checker {
     this.require(type, { trait: this.program.traitDef(name), args: [] }, span);
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Variables and scopes
-
   declareLocal(name: string, type: Type, mutable: boolean, span: Span, mode: LocalVar['mode'] = 'move'): LocalVar {
     const fn = this.body.fn;
     const local: LocalVar = {
@@ -986,9 +974,6 @@ export class Checker {
     index = this.body.fn.captures.indexOf(local);
     return { kind: 'capture', local, index };
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Types
 
   typeScope(): TypeScope {
     return {
@@ -1152,7 +1137,7 @@ export class Checker {
     );
   }
 
-  /** `Box<[T; N]>` → `Box<[T]>` and `Box<T>` → `Box<dyn Trait>`, and so for `Rc` and `Arc`, also inside a `Pin`; false when none applies. */
+  /** `Box<[T; N]>` → `Box<[T]>` and `Box<T>` → `Box<dyn Trait>`, also for `Rc` and `Arc` and inside a `Pin`. */
   private coerceBox(expr: Expr, a: Type, t: Type): boolean {
     if (a.kind !== 'adt' || t.kind !== 'adt' || a.def.builtin !== t.def.builtin) return false;
     if (a.def.builtin === 'Pin') {
@@ -1298,9 +1283,6 @@ export class Checker {
     this.require(type, target.trait, span);
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Statements
-
   checkBlock(block: Block, expected: Type | undefined): Type {
     return this.withScope(() => {
       if (block.items.length > 0) this.declareBlockItems(block);
@@ -1389,7 +1371,6 @@ export class Checker {
     return diverges;
   }
 
-  /** Requires the code to be in an `unsafe` block for an operation that may break memory safety (E0133). */
   requireUnsafe(span: Span, what: string): void {
     if (this.body.unsafeDepth === 0) {
       compileError(span, `${what}は、unsafe ブロックの中でだけできます（E0133）。`);
@@ -1414,9 +1395,6 @@ export class Checker {
   deferCoverage(run: () => void, constantPattern?: Pattern): void {
     this.body.coverage.push({ run, constantPattern });
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Expressions
 
   /** Checks an expression, whose type `expected` may guide (the type of a literal, a closure's parameters). */
   expr(expr: Expr, expected: Type | undefined): Type {
@@ -1517,7 +1495,7 @@ function hasOpaque(type: Type): boolean {
   return t.kind === 'opaque' || childTypes(t).some(hasOpaque);
 }
 
-/** What a trait's method signature reads as in an impl: its `Self`, the trait's and the method's own type parameters. */
+/** What a trait's method signature reads as in an impl: its `Self`, the trait's and the method's type parameters. */
 function implSubst(impl: ImplDef, traitRef: TraitRef, decl: FnDef, fn: FnDef): Map<TypeParam, Type> {
   const { trait } = traitRef;
   const subst = new Map<TypeParam, Type>([[trait.self, impl.selfType]]);

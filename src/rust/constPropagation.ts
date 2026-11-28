@@ -23,14 +23,12 @@ export function propagationModes(body: Block, annotations: Annotations): Map<Loc
   return modes;
 }
 
-/** How many times a body assigns each variable, and which it borrows. */
 class VariableUses {
   readonly assignments = new Map<LocalVar, number>();
   readonly borrowed = new Set<LocalVar>();
 
   constructor(private readonly annotations: Annotations) {}
 
-  /** The `let`s of a block assign their variables. */
   lets(block: Block): void {
     for (const stmt of block.stmts) {
       if (stmt.kind !== 'let') continue;

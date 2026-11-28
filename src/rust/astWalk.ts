@@ -249,7 +249,6 @@ export interface PatternBindingPart {
   refMut: boolean;
 }
 
-/** The variables a pattern binds, in order, each with the part it binds. */
 // code-gauge-allow functionCognitiveComplexity -- Follows rustc's binding modes case by case.
 // code-gauge-allow functionNcss -- Follows rustc's binding modes case by case.
 export function patternBindingParts(pattern: Pattern, annotations: Annotations): PatternBindingPart[] {

@@ -2,7 +2,7 @@ import { normalize } from './infer';
 import type { Answer, TraitSolver } from './traits';
 import { allSupertraits, shallow, type Type } from './types';
 
-/** What an iterator's shape gives: taking from the back (`DoubleEndedIterator`) and its length (`ExactSizeIterator`). */
+/** What an iterator's shape gives: taking from the back (`DoubleEndedIterator`), its length (`ExactSizeIterator`). */
 type Capability = 'back' | 'exact';
 const CAPABILITY_TRAITS = { back: 'DoubleEndedIterator', exact: 'ExactSizeIterator' } as const;
 
@@ -118,7 +118,6 @@ function abstractCapability(type: Type, capability: Capability, solver?: TraitSo
 
 const DIRECT_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom', 'EscapeDefault', 'EscapeUnicode']);
 
-/** The capabilities of an adapter, from those of the iterators it adapts. */
 function adapterCapability(name: string, args: Type[], capability: Capability, solver?: TraitSolver): Answer {
   const inner = (index: number, cap: Capability = capability): Answer => iteratorCapability(args[index], cap, solver);
   if (SAME_AS_INNER.has(name)) return inner(0);

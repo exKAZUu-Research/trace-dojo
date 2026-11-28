@@ -118,7 +118,6 @@ function projectionType(solver: TraitSolver, type: Type & { kind: 'adt' }): Type
   );
 }
 
-/** The associated type a bound of a type parameter, a trait object, or an `impl Trait` sets. */
 function boundAssocType(bounds: TraitRef[], self: Type, trait: TraitDef, name: string): Type | undefined {
   for (const bound of allSupertraits(bounds, self)) {
     if (bound.trait !== trait) {
@@ -134,7 +133,10 @@ function boundAssocType(bounds: TraitRef[], self: Type, trait: TraitDef, name: s
   return undefined;
 }
 
-/** The associated type the program's impl for `self` gives; a type not fully known yet (`MyBox<{integer}>`) settles it only when one impl can be its. */
+/**
+ * The associated type the program's impl for `self` gives; a type not fully known yet (`MyBox<{integer}>`) settles it
+ * only when one impl can be its.
+ */
 function implAssocType(
   solver: TraitSolver,
   {
@@ -163,7 +165,6 @@ function implAssocType(
   return found;
 }
 
-/** The associated types of the standard library's traits for the types whose impls the interpreter knows. */
 function builtinAssocType(trait: TraitDef, name: string, self: Type, args: Type[]): Type | undefined {
   const builtin = trait.builtin;
   if (!builtin) return undefined;
@@ -197,7 +198,6 @@ function untypedNumber(type: Type, left: Type): boolean {
   return literal !== undefined && literal === left.kind;
 }
 
-/** The kind of number literal a type not known yet is (through references), if it is one. */
 function literalKind(type: Type): 'int' | 'float' | undefined {
   const t = normalize(shallow(type));
   if (t.kind === 'ref') return literalKind(t.target);

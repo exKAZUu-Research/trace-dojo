@@ -16,7 +16,6 @@ export function syntaxError(span: Span, message: string): never {
   throw new CompileError([{ row: span.row, message }]);
 }
 
-/** The state and the node helpers that every part of the conversion from the syntax tree to the AST shares. */
 export abstract class SyntaxConverter {
   private readonly columns = new Map<number, SourceColumns>();
   /** The names of the modules around the code being converted, which `module_path!` gives. */

@@ -67,7 +67,6 @@ import {
   unsupportedAtRun,
 } from './support';
 
-/** An iterator over an array's elements from `start` to `end`, from both ends. */
 export function arrayIter(
   array: Value[],
   start = 0,
@@ -129,14 +128,12 @@ export function ownedIter(
   return iter;
 }
 
-/** An iterator of a slice's elements; `places` yields places for `iter_mut`. */
 export function sliceIter(slice: Value, places: boolean): IterValue {
   const { base, start } = sliceBase(slice);
   const length = sliceLength(slice);
   return arrayIter(base, start, start + length, places ? (i) => new ElementPlace(base, i) : (i) => base[i]);
 }
 
-/** The iterator `for` uses for a value of a type, as `IntoIterator` makes it. */
 // code-gauge-allow functionCognitiveComplexity -- One case per kind of iterable type.
 export function toIterator(value: Value, from: Type): Value {
   const t = normalize(shallow(from));
@@ -161,7 +158,6 @@ export function toIterator(value: Value, from: Type): Value {
   throw new Error(`Cannot iterate ${t.kind}`);
 }
 
-/** The iterator of a standard collection, of its elements (`value`) or of references to them (`ref`, `mut`). */
 function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value' | 'ref' | 'mut'): Value | undefined {
   switch (type.def.builtin) {
     case 'Box': {
@@ -420,7 +416,6 @@ export function foldingView(iter: IterValue): IterValue {
   );
 }
 
-/** An adapter that maps each element, from either end. */
 function mapped(
   source: IterValue,
   map: (item: Value, callback: Value) => Next,
@@ -442,7 +437,6 @@ function mapped(
   );
 }
 
-/** An adapter that finds the next element `pick` keeps (mapped), from either end. */
 function picked(
   ctx: NativeContext,
   source: IterValue,
@@ -538,7 +532,6 @@ function flattened(
 
 type End = 'front' | 'back';
 
-/** The inner iterators of a flattening adapter, at its front and its back. */
 interface FlattenState {
   front: IterValue | undefined;
   back: IterValue | undefined;
@@ -579,7 +572,6 @@ function takeInner(state: FlattenState, end: End): Next {
   return item;
 }
 
-/** The iterator an element of `flatten` (or a result of `flat_map`'s function) makes, as `IntoIterator` does. */
 function innerIter(ctx: NativeContext, value: Value, type: Type): IterValue {
   return ctx.interp.toIter(value, type) as IterValue;
 }
@@ -1016,7 +1008,6 @@ function secondOfPair(ctx: NativeContext, first: Next, pull: () => Next): Next {
   return first === DONE ? pull() : ctx.runtime.withRoots([first], pull);
 }
 
-/** The shapes of the iterators that are `TrustedRandomAccess` themselves. */
 const RANDOM_ACCESS_SHAPES = new Set([
   'SliceIterShape',
   'SliceIterMutShape',
@@ -1041,7 +1032,6 @@ const RANDOM_ACCESS_ADAPTERS = new Set([
   'ZipShape',
 ]);
 
-/** The shapes of the iterators that are `TrustedLen` themselves, whose size hint is exact. */
 const TRUSTED_LEN_SHAPES = new Set([
   ...RANDOM_ACCESS_SHAPES,
   'RangeInclusiveShape',
@@ -1098,7 +1088,6 @@ export function isTrustedLen(...shapes: Type[]): boolean {
   });
 }
 
-/** Whether iterators of these shapes are all `TrustedRandomAccess`, as std implements it. */
 function isTrustedRandomAccess(...shapes: Type[]): boolean {
   return shapes.every((shape) => trustedRandomAccess(shape));
 }
@@ -1585,7 +1574,6 @@ const IN_PLACE_ADAPTERS = new Set([
   'ZipShape',
 ]);
 
-/** The `into_iter` of a `Vec` under adapters that let `collect` reuse its buffer, if the iterator is one. */
 function inPlaceSource(iter: IterValue, shape: Type): IterValue | undefined {
   let t = normalize(shallow(shape));
   let source: IterValue | undefined = iter;

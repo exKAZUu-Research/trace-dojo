@@ -70,7 +70,6 @@ interface ClosureSummary {
   body: Span;
 }
 
-/** What the builders of a function and of the closures in it share. */
 interface LoanCheck {
   budget: ExecutionBudget;
   errors: LoanError[];
@@ -80,7 +79,6 @@ interface Shared extends LoanCheck {
   summaries: Map<ClosureType, ClosureSummary>;
 }
 
-/** What binding a pattern does at one point. */
 interface Binding {
   accesses: Access[];
   gens: Loan[];
@@ -134,7 +132,6 @@ export class LoanBuilder {
     this.graph = new LoanGraph(shared.budget);
   }
 
-  /** Checks a function's body, reporting the conflicts of borrows to `errors`. */
   static checkFn(
     annotations: Annotations,
     solver: TraitSolver,
@@ -220,9 +217,6 @@ export class LoanBuilder {
     for (const region of this.graph.varRegions[v]) this.graph.universal.add(region);
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Points, variables, and regions
-
   private readonly outlives: Outlives = (sup, sub) => {
     if (sup !== sub) this.graph.outlives.push([sup, sub]);
   };
@@ -294,7 +288,6 @@ export class LoanBuilder {
     return value === undefined ? NONE : this.layouts[value];
   }
 
-  /** Moves a value into a variable (a temporary, or the result of a branch or a block). */
   private store(value: Value, into: Value): void {
     if (value === undefined && into === undefined) return;
     this.point({ uses: value === undefined ? [] : [value], defs: into === undefined ? [] : [into] });
@@ -317,9 +310,6 @@ export class LoanBuilder {
   private storageDead(local: LocalVar, end: Span): Access {
     return { place: { root: this.varOf(local), proj: [] }, kind: 'storageDead', span: end };
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Places
 
   /** The place an expression denotes, evaluating the indexes in it, or undefined for an expression that is no place. */
   private place(expr: Expr, mutable = false): Place | undefined {
@@ -366,7 +356,6 @@ export class LoanBuilder {
     return project(place, '[]');
   }
 
-  /** The place an expression denotes, or a temporary that holds its value. */
   private placeOrTemp(expr: Expr, mutable = false): Place {
     return this.place(expr, mutable) ?? this.temporaryPlace(expr, mutable);
   }
@@ -427,7 +416,6 @@ export class LoanBuilder {
     }
   }
 
-  /** Reads a place by value, copying or moving it. */
   private read(place: Place, type: Type | undefined, span: Span, kind: AccessKind = this.readKind(type)): Value {
     const temp = this.temp(type);
     this.point({ uses: [place.root], defs: temp === undefined ? [] : [temp], accesses: [{ place, kind, span }] });
@@ -489,9 +477,6 @@ export class LoanBuilder {
     this.point({ uses: [value], defs: [reborrowed] });
     return reborrowed;
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Statements
 
   private block(block: Block): Value {
     const locals: LocalVar[] = [];
@@ -578,7 +563,6 @@ export class LoanBuilder {
     this.bind(pattern, source);
   }
 
-  /** What a pattern matching an expression matches: the place it denotes, or a temporary with its value. */
   private source(expr: Expr): Place {
     const coerced = derefCoercedPlace(this.annotations, expr, (e) => this.place(e));
     if (coerced) return coerced.place;
@@ -586,10 +570,6 @@ export class LoanBuilder {
     return place ?? this.valuePlace(this.value(expr));
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Patterns
-
-  /** Binds a pattern's variables, moving, copying, or borrowing the parts of the place they bind. */
   private bind(pattern: Pattern, source: Place): void {
     const binding: Binding = { accesses: [], gens: [], defs: [], relations: [], dropSources: [] };
     this.bindPart(binding, pattern, source, undefined);
@@ -614,7 +594,6 @@ export class LoanBuilder {
     }
   }
 
-  /** Binds a part of a pattern to a place, which bindings take by reference in the binding mode `byRef`. */
   // code-gauge-allow functionNcss -- One case per kind of pattern.
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern.
   private bindPart(binding: Binding, p: Pattern, place: Place, byRef: BindingMode): void {
@@ -672,7 +651,6 @@ export class LoanBuilder {
     }
   }
 
-  /** A variable of a pattern borrows the place it binds in a binding mode by reference, and copies or moves it else. */
   private bindVariable(binding: Binding, p: Pattern, place: Place, mode: BindingMode): void {
     const local = this.annotations.bindings.get(p);
     if (!local) {
@@ -696,10 +674,6 @@ export class LoanBuilder {
     binding.relations.push(() => this.relateBorrow(place, mutable, target, region));
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Expressions
-
-  /** Evaluates an expression for its value, moving or copying the place it denotes. */
   private value(expr: Expr): Value {
     // A reference coerced to the shared reference it holds copies that one, rather than reborrowing the outer one.
     const coerced = derefCoercedPlace(this.annotations, expr, (e) => this.place(e));
@@ -862,7 +836,6 @@ export class LoanBuilder {
     }
   }
 
-  /** `break`, `continue`, and `return` go on elsewhere, after which nothing runs. */
   // code-gauge-allow functionCognitiveComplexity -- Each kind of jump goes on at its own point.
   private jump(expr: Extract<Expr, { kind: 'break' | 'continue' | 'return' }>): void {
     const value = expr.kind !== 'continue' && expr.value ? this.value(expr.value) : undefined;
@@ -1096,7 +1069,6 @@ export class LoanBuilder {
     });
   }
 
-  /** A loop whose body `body` builds, which goes round again from its end. */
   private loop(label: string | undefined, type: Type | undefined, body: () => void, isBlock = false): Value {
     const head = this.graph.newPoint();
     if (this.current !== undefined) this.graph.points[this.current].succ.push(head);
@@ -1142,9 +1114,6 @@ export class LoanBuilder {
     return undefined;
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Calls
-
   // code-gauge-allow functionCognitiveComplexity -- A call defines the result layout and relates it to its borrowed inputs.
   private call(expr: Extract<Expr, { kind: 'call' }>): Value {
     const res = expr.callee.kind === 'path' ? this.annotations.paths.get(expr.callee) : undefined;
@@ -1174,7 +1143,6 @@ export class LoanBuilder {
     return result;
   }
 
-  /** The point of a call, which uses its inputs and defines its result. */
   private callPoint(expr: Expr, inputs: Value[], accesses: Access[]): Value {
     const result = this.temp(expr.ty);
     const uses = inputs.filter((v) => v !== undefined);
@@ -1204,7 +1172,7 @@ export class LoanBuilder {
     if (argument !== undefined) this.storeDrop(point, target, { root: argument, proj: [] });
   }
 
-  /** A method's receiver after its adjustment: autoref borrows it, and `&mut` references (also by value) are reborrowed. */
+  /** A method's receiver after its adjustment: autoref borrows it, and `&mut` references (also by value) reborrow. */
   private receiver(
     expr: Extract<Expr, { kind: 'methodCall' }>,
     method: MethodRes | undefined
@@ -1297,9 +1265,6 @@ export class LoanBuilder {
     }
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Closures and macros
-
   /** A closure borrows, or moves, the places it captures when it is created, and holds them while it lives. */
   // code-gauge-allow functionNcss -- Follows rustc's capture modes case by case.
   // code-gauge-allow functionCognitiveComplexity -- A closure builds a loan summary from its captures and borrowed results.
@@ -1346,7 +1311,6 @@ export class LoanBuilder {
     return temp;
   }
 
-  /** Which regions of the parameters (and of the captures) the result of this closure's body may hold. */
   // code-gauge-allow functionCognitiveComplexity -- Searches the outlives graph from each region of the parameters.
   private summarize(paramVars: Var[], bodySpan: Span): ClosureSummary {
     const edges = new Map<RVar, RVar[]>();
@@ -1477,9 +1441,6 @@ export class LoanBuilder {
     this.point({ uses: [value, ...args], accesses: [{ place: loan.place, kind: 'deep', span, activates: loan }] });
     if (this.current !== undefined) loan.activation = this.current;
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Helpers
 
   private isCopy(type: Type | undefined): boolean {
     if (!type) return true;

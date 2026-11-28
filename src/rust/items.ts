@@ -181,7 +181,6 @@ export class Module {
   }
 }
 
-/** The items of a program and of the standard library, with every impl and trait. */
 export class Program {
   readonly std: Module;
   readonly root: Module;
@@ -190,7 +189,6 @@ export class Program {
   readonly adts: AdtDef[] = [];
   readonly fns: FnDef[] = [];
   readonly consts: ConstDef[] = [];
-  /** The names every module sees without importing them (`Vec`, `Some`, `Turtle`, ...). */
   readonly prelude = new Map<string, string[]>();
   readonly builtinAdts = new Map<BuiltinAdt, AdtDef>();
   readonly builtinTraits = new Map<string, TraitDef>();
@@ -205,7 +203,6 @@ export class Program {
     assocTypes: new Map(),
     consts: new Map(),
   };
-  /** The shapes of iterators (`std::iter::shape`), which stand for std's iterator types, by name. */
   readonly shapes = new Map<string, AdtDef>();
   /** The bodies to check after every item's signature is known. */
   readonly pendingFns: FnDef[] = [];
@@ -237,7 +234,6 @@ export class Program {
     return adt(def, args);
   }
 
-  /** An iterator of `item`s of a shape. */
   iterType(item: Type, shape: Type): Type {
     return adt(this.adtDef('Iter'), [item, shape]);
   }
@@ -252,7 +248,6 @@ const PRIMITIVES = new Map<string, Type>([
   ['str', STR],
 ]);
 
-/** The scope that types and bounds are lowered in: a module and the type parameters and `Self` around them. */
 export interface TypeScope {
   module: Module;
   params: Map<string, TypeParam>;
@@ -277,9 +272,6 @@ export interface TypeScope {
   implTrait?: TraitRef;
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Collecting items
-
 /** Declares the items of a module, leaving their signatures for {@link lowerSignatures}. */
 export class ItemCollector {
   /** Each declared item's work that needs every name declared first. */
@@ -295,7 +287,6 @@ export class ItemCollector {
     this.collectItems(crate.items, module);
   }
 
-  /** Lowers the signatures of every item collected so far. */
   finish(): void {
     for (const lower of this.traitDefaults.splice(0)) lower();
     for (const lower of this.implLowering.splice(0)) lower();
@@ -786,7 +777,6 @@ export class ItemCollector {
   }
 }
 
-/** The associated types of a trait impl (`type Item<T> = Vec<T>;`), lowered with their own parameters in scope. */
 function lowerImplAssocTypes(item: ImplItem, impl: ImplDef, trait: TraitRef, scope: TypeScope): void {
   for (const assoc of item.assocTypes) {
     const declared = trait.trait.assocTypes.get(assoc.name);
@@ -824,9 +814,6 @@ function describeImplType(type: Type): string {
   if (type.kind === 'int' || type.kind === 'float') return type.name;
   return type.kind;
 }
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Name resolution
 
 const EXTERN_CRATES = new Set(['std', 'core', 'alloc']);
 
@@ -1246,7 +1233,6 @@ export function lookupQualifiedValue(module: Module, from: Module, name: string,
   return entry?.binding;
 }
 
-/** Resolves a path in the type namespace: a module, a type, or a trait. */
 // code-gauge-allow functionCognitiveComplexity -- Follows Rust's name resolution case by case.
 // code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
 export function resolveTypePath(segments: string[], module: Module, span: Span): TypeBinding {
@@ -1345,9 +1331,6 @@ function traitArguments(def: TraitDef, written: TypeAst[], scope: TypeScope, spa
   }
   return args;
 }
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Lowering types
 
 // code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
 export function lowerType(ast: TypeAst, scope: TypeScope): Type {

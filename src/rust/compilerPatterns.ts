@@ -238,7 +238,6 @@ function compileRestBinder(c: Compiler, restBinding: Pattern): RestBinder | unde
   };
 }
 
-/** Marks the elements a by-value `rest @ ..` takes as moved out of the array. */
 function movingOut(base: Value[], from: number, to: number): (() => void) & { movesOut: true } {
   const moveOut = (): void => {
     base.fill(MOVED, from, to);
@@ -331,7 +330,6 @@ function ctorMatcher(c: Compiler, pattern: PatternOf<'tupleStruct' | 'struct' | 
   };
 }
 
-/** The matchers of a constructor pattern's fields, with the indexes of the fields they match. */
 function fieldMatchers(
   c: Compiler,
   pattern: PatternOf<'tupleStruct' | 'struct' | 'path'>,
