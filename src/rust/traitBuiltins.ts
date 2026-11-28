@@ -12,10 +12,12 @@ import {
   isIteratorShape,
   isSigned,
   ref,
+  resolve,
   shallow,
   substitute,
   type TraitRef,
   type Type,
+  typeToString,
   USIZE,
 } from './types';
 
@@ -444,18 +446,31 @@ function autoTrait({ solver, t, name, all }: Goal): Answer {
   return 'yes';
 }
 
-/** The program's types whose auto traits are being decided, which a recursive type assumes of itself, as rustc does. */
-const autoTraitGoals = new Set<AdtType['def']>();
+/**
+ * The instances of the program's types whose auto traits are being decided, which a recursive type assumes of itself,
+ * as rustc does; an instance with other arguments (`W<Rc<i32>>` inside `W<i32>`) is decided on its own.
+ */
+const autoTraitGoals = new Set<string>();
+
+/** How many instances of each definition are being decided, nested in one another. */
+const autoTraitNesting = new Map<AdtType['def'], number>();
+
+/** How deep one definition may nest in its own fields with ever new arguments (`W<T>` holding a `W<Vec<T>>`). */
+const MAX_AUTO_TRAIT_NESTING = 8;
 
 /** A program's struct or enum is `Send` or `Sync` when every field of every variant is. */
 function programAdtAutoTrait(t: AdtType, all: (types: Type[]) => Answer): Answer {
-  if (autoTraitGoals.has(t.def)) return 'yes';
-  autoTraitGoals.add(t.def);
+  const key = typeToString(resolve(t));
+  const nesting = autoTraitNesting.get(t.def) ?? 0;
+  if (autoTraitGoals.has(key) || nesting >= MAX_AUTO_TRAIT_NESTING) return 'yes';
+  autoTraitGoals.add(key);
+  autoTraitNesting.set(t.def, nesting + 1);
   try {
     const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
     return all(t.def.variants.flatMap((variant) => variant.fields.map((field) => substitute(field.type, subst))));
   } finally {
-    autoTraitGoals.delete(t.def);
+    autoTraitGoals.delete(key);
+    autoTraitNesting.set(t.def, nesting);
   }
 }
 

@@ -32,7 +32,7 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
     case 'binding': {
       const res = annotations.paths.get(pattern);
       if (res?.kind === 'ctor') return { kind: 'ctor', ctor: `v${res.variant}`, args: [] };
-      if (res?.kind === 'const') return lowerConstantValue(annotations.constPatterns.get(pattern));
+      if (res?.kind === 'const') return lowerConstPattern(pattern, annotations);
       return pattern.sub ? lowerPattern(pattern.sub, annotations) : ANY;
     }
     case 'lit': {
@@ -73,8 +73,7 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
     case 'path': {
       const res = annotations.paths.get(pattern);
       if (res?.kind === 'ctor') return { kind: 'ctor', ctor: `v${res.variant}`, args: [] };
-      if (res?.kind === 'const') return lowerConstantValue(annotations.constPatterns.get(pattern));
-      return ANY;
+      return res?.kind === 'const' || res?.kind === 'builtinConst' ? lowerConstPattern(pattern, annotations) : ANY;
     }
     case 'ref': {
       // References are transparent: types are matched through them.
@@ -84,6 +83,13 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
       return { kind: 'or', alts: pattern.alternatives.map((alt) => lowerPattern(alt, annotations)) };
     }
   }
+}
+
+/** A constant in a pattern (`MAX`, `u8::MAX`); a `char` one is a code point of the ranges a `char` match splits. */
+function lowerConstPattern(pattern: Pattern, annotations: Annotations): Pat {
+  const value = annotations.constPatterns.get(pattern);
+  const type = pattern.ty && normalize(shallow(pattern.ty));
+  return type?.kind === 'char' && typeof value === 'string' ? pointRange(value) : lowerConstantValue(value);
 }
 
 function pointRange(char: string): Pat {
