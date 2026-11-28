@@ -89,7 +89,7 @@ function settledOutput(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, l: T
   return isArithmeticOperand(l) && !(bitwise && l.kind === 'float') && c.unifier.tryUnify(l, r) ? l : undefined;
 }
 
-const BINARY_TRAITS: Record<string, [string, string]> = {
+export const BINARY_TRAITS: Record<string, [string, string]> = {
   '+': ['Add', 'add'],
   '-': ['Sub', 'sub'],
   '*': ['Mul', 'mul'],
@@ -103,7 +103,7 @@ const BINARY_TRAITS: Record<string, [string, string]> = {
 };
 
 /** Whether an operand's type is one whose operators an impl of an operator trait gives, not the language. */
-function isOverloadable(type: Type): boolean {
+export function isOverloadable(type: Type): boolean {
   const t = normalize(shallow(type));
   if (t.kind === 'ref') return isOverloadable(t.target);
   if (t.kind === 'adt') return t.def.builtin !== 'String';
@@ -115,7 +115,7 @@ function isOverloadable(type: Type): boolean {
  * the impl's `Output`.
  */
 // code-gauge-allow functionParameterCount -- Takes both operands, their types and spans, which every operator check needs.
-function overloadedOperator(
+export function overloadedOperator(
   c: Checker,
   expr: Expr,
   traitName: string,
@@ -176,7 +176,7 @@ function checkDeref(c: Checker, expr: Extract<Expr, { kind: 'unary' }>): Type {
  * The number an operand of an operator stands for: std implements the operators for numbers and for shared
  * references to them, one level deep (`&i32 + i32`), but not for `&&i32` or `&mut i32`, which stay as they are.
  */
-function numericOperand(type: Type): Type {
+export function numericOperand(type: Type): Type {
   const t = normalize(shallow(type));
   if (t.kind === 'ref' && !t.mutable) {
     const target = normalize(shallow(t.target));
@@ -371,82 +371,6 @@ export function checkAssign(c: Checker, expr: Extract<Expr, { kind: 'assign' }>)
   return UNIT;
 }
 
-function overloadedCompound(
-  c: Checker,
-  expr: Extract<Expr, { kind: 'compoundAssign' }>,
-  targetType: Type,
-  valueType: Type
-): void {
-  const [trait, method] = BINARY_TRAITS[expr.op];
-  overloadedOperator(c, expr, `${trait}Assign`, `${method}_assign`, targetType, [valueType], expr.span, `${expr.op}=`);
-}
-
-// code-gauge-allow functionCognitiveComplexity -- Follows rustc's compound assignment rules case by case.
-export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'compoundAssign' }>): Type {
-  const targetType = c.expr(expr.target, undefined);
-  if (!isPlaceExpr(c, expr.target))
-    compileError(expr.target.span, '代入の左辺には、変数やフィールドなどを書いてください。');
-  const t = normalize(shallow(targetType));
-  // A target not known yet (a closure's parameter) with a value a program's impl may take picks the operator once
-  // the target's type is known, as `a + b` does.
-  const unknown = t.kind === 'var' && !t.v.literal;
-  const early = unknown ? c.expr(expr.value, undefined) : undefined;
-  if (early && (isOverloadable(numericOperand(early)) || isStrLike(numericOperand(early)))) {
-    c.deferredChecks.push(() => {
-      const known = normalize(shallow(targetType));
-      // `String += &str` needs no impl of the program.
-      if (!(expr.op === '+' && known.kind === 'adt' && known.def.builtin === 'String')) {
-        overloadedCompound(c, expr, targetType, early);
-      }
-    });
-  } else if (expr.op === '+' && t.kind === 'adt' && t.def.builtin === 'String') {
-    c.coerceExpr(expr.value, REF_STR);
-  } else if (isOverloadable(t)) {
-    overloadedCompound(c, expr, targetType, c.expr(expr.value, undefined));
-  } else if (expr.op === '<<' || expr.op === '>>') {
-    const r = numericOperand(early ?? c.expr(expr.value, undefined));
-    if (!isIntegral(t) || !isIntegral(r))
-      compileError(expr.span, `${typeToString(resolve(targetType))} に ${expr.op}= は使えません。`);
-  } else {
-    numericCompound(c, expr, targetType, early ?? c.expr(expr.value, t));
-  }
-  requireMutablePlace(c, expr.target, '書き換える');
-  return UNIT;
-}
-
-/** `a += b` and the like on numbers and `bool`: both sides of one type, bitwise operators for integers and `bool` only. */
-function numericCompound(
-  c: Checker,
-  expr: Extract<Expr, { kind: 'compoundAssign' }>,
-  targetType: Type,
-  valueType: Type
-): void {
-  const t = normalize(shallow(targetType));
-  const v = numericOperand(valueType);
-  const numeric = t.kind === 'int' || t.kind === 'float' || t.kind === 'var';
-  const bitwise = ['&', '|', '^'].includes(expr.op);
-  const boolOp = t.kind === 'bool' && bitwise;
-  if ((!numeric && !boolOp) || !c.unifier.tryUnify(t, v)) {
-    if (t.kind === 'adt' || t.kind === 'param') {
-      compileError(
-        expr.span,
-        `${typeToString(resolve(targetType))} に演算子 ${expr.op}= は使えません（演算子の多重定義は、この採点環境では使えません）。`
-      );
-    }
-    compileError(
-      expr.span,
-      `${typeToString(resolve(targetType))} に ${typeToString(resolve(valueType))} を ${expr.op}= で計算できません（型をそろえてください）。`
-    );
-  }
-  if (bitwise) {
-    c.deferredChecks.push(() => {
-      if (normalize(shallow(resolve(targetType, true))).kind === 'float') {
-        compileError(expr.span, `${typeToString(resolve(targetType))} に ${expr.op}= は使えません。`);
-      }
-    });
-  }
-}
-
 /** What `*p` of a raw pointer reaches, which only unsafe code reads; `&raw const *p` names the place unread. */
 function rawPointee(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, pointer: Type & { kind: 'adt' }): Type {
   if (c.body.rawDeref !== expr) c.requireUnsafe(expr.span, '生ポインタの参照外し（*p）');
@@ -573,13 +497,13 @@ function stripAll(type: Type): Type {
   return t;
 }
 
-function isStrLike(type: Type): boolean {
+export function isStrLike(type: Type): boolean {
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));
   return t.kind === 'str';
 }
 
-function isIntegral(type: Type): boolean {
+export function isIntegral(type: Type): boolean {
   const t = normalize(shallow(type));
   return t.kind === 'int' || (t.kind === 'var' && t.v.literal === 'int');
 }
