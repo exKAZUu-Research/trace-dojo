@@ -281,10 +281,14 @@ export class Runtime implements TracedRuntime<Frame> {
   releaseGuards(frame: Frame, mark: number, kept?: Value): void {
     if (this.liveGuards.length <= mark) return;
     // Rust drops a statement's temporaries in the reverse order of their making.
+    const returned: { release(): void }[] = [];
     for (const guard of this.liveGuards.splice(mark).toReversed()) {
-      if (holds(kept, guard) || frame.locals.some((value) => holds(value, guard))) continue;
-      guard.release();
+      if (frame.locals.some((value) => holds(value, guard))) continue;
+      // A guard in the value given back (`fn guard(&self) -> RefMut<..>`) is a temporary of the caller's statement.
+      if (holds(kept, guard)) returned.unshift(guard);
+      else guard.release();
     }
+    this.liveGuards.push(...returned);
   }
 
   pushFrame(frame: Frame): void {
@@ -325,14 +329,22 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 }
 
-/** Whether a value is a guard, or holds it in an `Option`, a tuple, a struct, or an array, however deep. */
-function holds(value: unknown, guard: { release(): void }, seen = new Set<unknown>()): boolean {
-  if (value === guard) return true;
-  if (seen.has(value)) return false;
-  seen.add(value);
-  const parts =
-    value instanceof StructValue || value instanceof EnumValue ? value.fields : Array.isArray(value) ? value : [];
-  return parts.some((part) => holds(part, guard, seen));
+/**
+ * Whether a value is a guard or holds it, however deep: in a struct, an enum, a tuple, an array, a collection, a
+ * pointer, or the place a reference refers to (`v: &mut Vec<RefMut<..>>`), as the garbage collector reaches values.
+ */
+function holds(value: unknown, guard: { release(): void }): boolean {
+  const seen = new Set<unknown>();
+  const stack = [value];
+  while (stack.length > 0) {
+    const item = stack.pop();
+    if (item === guard) return true;
+    if (typeof item !== 'object' || item === null || seen.has(item)) continue;
+    seen.add(item);
+    if (isPlace(item as Value)) stack.push((item as Place).get());
+    else pushChildren(item, stack);
+  }
+  return false;
 }
 
 export class StackOverflow {}
