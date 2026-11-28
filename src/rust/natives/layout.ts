@@ -104,6 +104,12 @@ function builtinLayout(builtin: string | undefined, args: Type[]): Layout | unde
   const collection = COLLECTION_LAYOUTS[builtin as string];
   if (collection) return collection;
   if (builtin === 'Box' || builtin === 'Rc' || builtin === 'Arc' || builtin === 'Weak') return pointerTo(args[0]);
+  // A `Cell` is its value without the value's niche, a `RefCell` its borrow count (an `isize`) and then the value.
+  if (builtin === 'Cell') {
+    const { size, align } = layoutOf(args[0]);
+    return { size, align };
+  }
+  if (builtin === 'RefCell') return structLayout([scalar(8), layoutOf(args[0])]);
   const opaque = OPAQUE_LAYOUTS[builtin as string];
   if (opaque) return opaque;
   // std's holds `start`, `end`, and `exhausted: bool`.

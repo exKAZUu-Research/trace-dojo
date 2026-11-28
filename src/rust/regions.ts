@@ -96,8 +96,10 @@ function adtLayout(def: AdtDef, own: RVar[], args: Layout[]): Layout {
   return own.length === 0 && args.every(isNone) && !declared ? NONE : { kind: 'adt', def, own, args };
 }
 
+/** Whether a field's type holds what must live for `'static`: a `&'static` reference or a `dyn Trait + 'static`. */
 function staticObject(type: Type): boolean {
   const t = shallow(type);
+  if (t.kind === 'ref' && t.lifetime === "'static") return true;
   return (t.kind === 'dyn' && t.objectLifetime === 'static') || childTypes(t).some(staticObject);
 }
 
