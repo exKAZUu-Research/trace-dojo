@@ -7,7 +7,15 @@ import { isComment, syntaxError, unavailable } from './convertSyntax';
 import { parseFormatString } from './formatString';
 import { parseRawStringLiteral, parseStringLiteral } from './literals';
 import { writtenName } from './macroHygiene';
-import { expand, MacroError, type MacroRule, parseParts, tokensOf, tokenText as macroTokenText } from './macroRules';
+import {
+  expand,
+  isStringLiteral,
+  MacroError,
+  type MacroRule,
+  parseParts,
+  tokensOf,
+  tokenText as macroTokenText,
+} from './macroRules';
 
 const MAX_MACRO_DEPTH = 128;
 
@@ -558,7 +566,7 @@ function fragmentLiteral(node: Node): Node {
   const inner = fragmentInner(node);
   if (!inner) return node;
   const literal = fragmentLiteral(inner);
-  return literal.type.endsWith('string_literal') || literal.type === 'macro_invocation' ? literal : node;
+  return isStringLiteral(literal.type) || literal.type === 'macro_invocation' ? literal : node;
 }
 
 /** The expression in the marked parentheses an `expr` variable keeps its operand in, if `node` is those. */

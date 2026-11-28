@@ -1,4 +1,4 @@
-import type { Token } from './macroRules';
+import { isStringLiteral, type Token } from './macroRules';
 
 let expansions = 0;
 
@@ -194,7 +194,7 @@ function renamed(tokens: Token[], outer: Visible, suffix: string, context?: Grou
       const inner = matchBodies.has(index) ? 'match' : groupContext(tokens, index);
       out.push({ ...token, tokens: renamed(token.tokens, visible, suffix, inner) });
     } else if (!token.fromRule) out.push(token);
-    else if (token.type === 'string_literal') {
+    else if (isStringLiteral(token.type)) {
       out.push(formatString ? { ...token, text: renamedFormat(token.text, visible, suffix) } : token);
       formatString = false;
     } else out.push(...renamedLeaf(tokens, index, visible, suffix, context === 'struct'));

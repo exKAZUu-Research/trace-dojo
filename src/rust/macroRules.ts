@@ -37,6 +37,11 @@ type Binding = { kind: 'one'; tokens: Token[]; fragment: string } | { kind: 'rep
 export class MacroError extends Error {}
 
 const LEAF_TYPES = new Set(['string_literal', 'raw_string_literal', 'char_literal', 'lifetime', 'metavariable']);
+
+/** Whether a token's grammar type is a string literal, cooked (`"..."`) or raw (`r"..."`). */
+export function isStringLiteral(type: string): boolean {
+  return type === 'string_literal' || type === 'raw_string_literal';
+}
 const CLOSERS: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
 
 /** The tokens of a token tree, inside its outer delimiters, grouped by the delimiters within. */
