@@ -60,29 +60,31 @@ function letBindings(tokens: Token[], index: number): Binding[] {
   if (!['if', 'while', '&&'].includes(leafText(tokens[index - 1]) ?? '')) {
     return [pattern, { names, from: patternEnd(tokens, index + 1, [';']), to: tokens.length }];
   }
-  const scrutineeEnd = conditionScrutineeEnd(tokens, patternStop);
+  const scrutineeEnd = conditionEnd(tokens, patternStop, true);
   if (scrutineeEnd === undefined) return [pattern];
-  const body = nextBrace(tokens, scrutineeEnd) ?? tokens.length - 1;
+  const body = isBrace(tokens[scrutineeEnd])
+    ? scrutineeEnd
+    : (conditionEnd(tokens, scrutineeEnd, false) ?? tokens.length - 1);
   return [pattern, { names, from: scrutineeEnd, to: body + 1 }];
 }
 
 /**
- * Where the scrutinee after a condition's `=` ends: at a `&&` of the chain or the body's `{`. A `{ }` right after the
- * `=` or an `else` is a block of the scrutinee, and one after `if`, `match`, `while`, `for`, `loop` or `unsafe` closes
- * that expression, so neither is the body's.
+ * Where a condition that goes on after the `=` or `&&` at `start` ends: at a `&&` of the chain (when `atChain`) or
+ * the body's `{`. A `{ }` right
+ * after `=`, `else` or `&&` is a block of the condition, and one after `if`, `match`, `while`, `for`, `loop` or
+ * `unsafe` closes that expression, so neither is the body's.
  */
-function conditionScrutineeEnd(tokens: Token[], equals: number): number | undefined {
+function conditionEnd(tokens: Token[], start: number, atChain: boolean): number | undefined {
   let open = 0;
-  for (let at = equals + 1; at < tokens.length; at++) {
+  for (let at = start + 1; at < tokens.length; at++) {
     const text = leafText(tokens[at]);
     if (isBrace(tokens[at])) {
-      const previous = leafText(tokens[at - 1]);
-      if (at === equals + 1 || previous === 'else') continue;
+      if (['=', 'else', '&&'].includes(leafText(tokens[at - 1]) ?? '')) continue;
       if (open === 0) return at;
       open--;
     } else if (text && SCRUTINEE_BLOCK_WORDS.has(text)) {
       open++;
-    } else if (text === '&&' && open === 0) {
+    } else if (atChain && text === '&&' && open === 0) {
       return at;
     }
   }
