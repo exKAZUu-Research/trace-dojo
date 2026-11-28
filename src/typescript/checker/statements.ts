@@ -645,7 +645,7 @@ export class StatementChecker {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (!symbol) return;
         this.c.functions.recordDeclaredVariableYields(symbol, annotation !== undefined, collected?.yields);
-        const declared = this.c.literals.widenDeclared(type, isConst);
+        const declared = this.c.literals.widenDeclared(type, true);
         this.c.expressions.setVariableType(symbol, declared);
         this.c.flow.set(`s${symbol.id}`, { type: this.c.flow.assignmentReduced(declared, assigned), assigned: true });
       },
@@ -682,7 +682,7 @@ export class StatementChecker {
       annotation ??
       (value ? this.c.expressions.check(value, this.c.patterns.impliedBindingType(nameNode, isConst)) : anyType);
     const type = this.c.patterns.patternType(nameNode, source, symbol, { isConst, annotated: !!annotation });
-    return this.c.literals.widenDeclared(type, isConst);
+    return this.c.literals.widenDeclared(type, true);
   }
 
   private loopVariableType(node: TreeNode, symbol: Sym): Type {
@@ -694,9 +694,8 @@ export class StatementChecker {
     const rightType = this.c.expressions.check(right);
     const elementType = isOf ? this.iteratedLoopType(node, right, rightType, false) : stringType;
     if (left.type === 'identifier') return this.c.literals.widenDeclared(elementType, true);
-    const widenedElement = this.c.literals.widenDeclared(elementType, true, true);
     return this.c.literals.widenDeclared(
-      this.c.patterns.patternType(left, widenedElement, symbol, {
+      this.c.patterns.patternType(left, elementType, symbol, {
         isConst,
         literalSource: isOf ? right : undefined,
       }),
@@ -985,10 +984,9 @@ export class StatementChecker {
     yieldDeps?: Set<number>
   ): void {
     const isConst = kind === 'const';
-    const widenedElement = this.c.literals.widenDeclared(elementType, true, true);
     this.c.patterns.bindPattern(
       left,
-      widenedElement,
+      elementType,
       (identifier, type, assigned = type) => {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (!symbol) return;

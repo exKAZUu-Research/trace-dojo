@@ -496,7 +496,10 @@ export class BindingPatterns {
       return errorType;
     }
     this.c.members.checkPropertyUse(node, node, node, type, property);
-    return propertyAccessType(property, 'read', true);
+    const value = propertyAccessType(property, 'read', true);
+    return type.kind === 'object' && type.fresh && (!property.readonly || property.getterOnly === true)
+      ? this.c.literals.widenDeclared(value, false, true)
+      : value;
   }
 
   /** The union of a property's types when each member of a union has it, or `undefined` when one lacks it. */
