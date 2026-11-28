@@ -141,6 +141,7 @@ export type BuiltinAdt =
   | 'ControlFlow'
   | 'EscapeDefault'
   | 'EscapeUnicode'
+  | 'PathDisplay'
   | 'ParseError'
   | 'Unsigned'
   | 'Signed'

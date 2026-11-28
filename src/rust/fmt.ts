@@ -176,7 +176,8 @@ export class Formatter {
         const user = this.hooks.userFmt('Display', t, v, spec, write);
         if (user !== undefined) return user;
         switch (t.def.builtin) {
-          case 'String': {
+          case 'String':
+          case 'PathDisplay': {
             return padString(textOf(v), spec, write);
           }
           case 'Box':
@@ -395,7 +396,8 @@ export class Formatter {
     const { def } = t;
     switch (def.builtin) {
       case 'Path':
-      case 'PathBuf': {
+      case 'PathBuf':
+      case 'PathDisplay': {
         return quotedDebug(textOf(v), false, write);
       }
       case 'Rc':

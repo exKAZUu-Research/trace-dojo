@@ -114,7 +114,6 @@ const ERROR_KIND_TEXT: Record<string, string> = {
   UnexpectedEof: 'unexpected end of file',
   OutOfMemory: 'out of memory',
   Other: 'other error',
-  Uncategorized: 'uncategorized error',
 };
 
 /** `io::Error`'s `Debug`. */

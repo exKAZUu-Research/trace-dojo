@@ -179,6 +179,7 @@ export const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
 };
 
 export function builtinStruct(module: Module, name: string): BuiltinAdt | undefined {
+  if (name === 'Display') return module.path === 'std::path' ? 'PathDisplay' : undefined;
   if (name !== 'Error') return BUILTIN_STRUCTS[name];
   if (module.name === 'fmt') return 'FmtError';
   return module.path === 'std::io' ? 'IoError' : undefined;

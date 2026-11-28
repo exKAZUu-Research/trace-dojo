@@ -1495,7 +1495,7 @@ pub mod io {
         WouldBlock, NotADirectory, IsADirectory, DirectoryNotEmpty, ReadOnlyFilesystem, StaleNetworkFileHandle,
         InvalidInput, InvalidData, TimedOut, WriteZero, StorageFull, NotSeekable, QuotaExceeded, FileTooLarge,
         ResourceBusy, ExecutableFileBusy, Deadlock, CrossesDevices, TooManyLinks, InvalidFilename,
-        ArgumentListTooLong, Interrupted, Unsupported, UnexpectedEof, OutOfMemory, Other, Uncategorized,
+        ArgumentListTooLong, Interrupted, Unsupported, UnexpectedEof, OutOfMemory, Other,
     }
     impl Error {
         pub fn new<E: super::fmt::Display>(kind: ErrorKind, error: E) -> Error;
@@ -1832,13 +1832,14 @@ pub mod path {
     use super::pseudo::AsPath;
     pub struct Path { inner: () }
     pub struct PathBuf { inner: () }
+    pub struct Display<'a>;
     impl Path {
         pub fn new<S: AsPath>(s: &S) -> &Path;
         pub fn exists(&self) -> bool;
         pub fn is_file(&self) -> bool;
         pub fn is_dir(&self) -> bool;
         pub fn to_str(&self) -> Option<&str>;
-        pub fn display(&self) -> &str;
+        pub fn display(&self) -> Display<'_>;
         pub fn join<P: AsPath>(&self, path: P) -> PathBuf;
         pub fn to_path_buf(&self) -> PathBuf;
     }
@@ -1849,7 +1850,7 @@ pub mod path {
         pub fn as_path(&self) -> &Path;
         pub fn exists(&self) -> bool;
         pub fn to_str(&self) -> Option<&str>;
-        pub fn display(&self) -> &str;
+        pub fn display(&self) -> Display<'_>;
         pub fn join<P: AsPath>(&self, path: P) -> PathBuf;
     }
 }

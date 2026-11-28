@@ -180,10 +180,11 @@ function operatorOutput(builtin: string, self: Type, args: Type[]): Type | undef
   // An untyped number on the left takes the type of the number on the right (`Add::add(2, x)`), but a shift does not.
   const right = args[0] && primitiveOperand(args[0]);
   if (right && untypedNumber(self, right) && builtin !== 'Shl' && builtin !== 'Shr') return right;
-  // Two untyped numbers of one kind (`Add::add(4, 1)`) select no impl, so they fall back to `i32` or `f64` before the
-  // result meets the type expected of it, as rustc's fallback does.
+  // Two untyped numbers of one kind (`Add::add(4, 1)`), or one of a unary operator (`Neg::neg(5)`), select no impl, so
+  // they fall back to `i32` or `f64` before the result meets the type expected of it, as rustc's fallback does.
   const lhs = normalize(shallow(self));
-  if (lhs.kind === 'var' && lhs.v.literal && args[0] && literalKind(args[0]) === lhs.v.literal) {
+  const unary = builtin === 'Neg' || builtin === 'Not';
+  if (lhs.kind === 'var' && lhs.v.literal && (unary || (args[0] && literalKind(args[0]) === lhs.v.literal))) {
     return lhs.v.literal === 'int' ? intType('i32') : F64;
   }
   if (builtin === 'Add' && self.kind === 'adt' && self.def.builtin === 'String') return self;
