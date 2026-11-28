@@ -77,6 +77,15 @@ const UNAVAILABLE_ATTRIBUTES: Record<string, string> = {
   track_caller: '呼び出し元の位置で panic を報告する属性（#[track_caller]）',
 };
 
+function partition<T>(items: T[], test: (item: T) => boolean): [T[], T[]] {
+  return [items.filter(test), items.filter((item) => !test(item))];
+}
+
+/** The name of an attribute (`cfg` of `#[cfg(test)]`), if it is one. */
+function attributeName(node: Node): string | undefined {
+  return node.namedChildren.find((child) => child.type === 'attribute')?.namedChildren[0]?.text;
+}
+
 export class AttributeReader {
   constructor(
     private readonly span: (node: Node) => Span,
@@ -91,7 +100,10 @@ export class AttributeReader {
    */
   read(nodes: Node[], on: 'item' | 'variant' | 'other' = 'other'): Attributes | undefined {
     const attrs: Attributes = { derives: [] };
-    for (const node of nodes) {
+    // rustc removes what a `#[cfg]` leaves out before it reads the other attributes, wherever they stand.
+    const [cfgs, others] = partition(nodes, (node) => attributeName(node) === 'cfg');
+    if (!cfgs.every((node) => this.apply(node, attrs))) return undefined;
+    for (const node of others) {
       if (isComment(node)) continue;
       if (!this.apply(node, attrs)) return undefined;
       if (on !== 'item' && attrs.derives.length > 0) {

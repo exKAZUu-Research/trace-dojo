@@ -36,8 +36,10 @@ export { type Reparse, syntaxError, unavailable } from './convertSyntax';
 export class Converter extends ExpressionConverter {
   convertCrate(root: Node): Crate {
     const items: Item[] = [];
+    // An inner `#![cfg(..)]` at the top that does not hold removes the whole program.
+    if (!this.innerCfgHolds(root)) return { items };
     for (const child of root.namedChildren) {
-      if (isComment(child)) continue;
+      if (isComment(child) || child.type === 'inner_attribute_item') continue;
       const isMacro =
         child.type === 'expression_statement' &&
         child.namedChildren.find((part) => !isComment(part))?.type === 'macro_invocation';
@@ -61,7 +63,7 @@ export class Converter extends ExpressionConverter {
     const span = this.span(node);
     switch (node.type) {
       case 'function_item': {
-        return this.fnItem(node, false);
+        return this.innerCfgHolds(node.childForFieldName('body')) ? this.fnItem(node, false) : undefined;
       }
       case 'struct_item': {
         return this.structItem(node, attrs ?? { derives: [] });
@@ -108,9 +110,7 @@ export class Converter extends ExpressionConverter {
         if (!body) unavailable(span, '別のファイルのモジュール（mod 名前;）');
         const items: Item[] = [];
         const name = this.identifier(this.field(node, 'name'));
-        // An inner `#![cfg(..)]` that does not hold removes the whole module.
-        const inner = body.namedChildren.filter((child) => child.type === 'inner_attribute_item');
-        if (!inner.every((child) => this.attributes.readInner(child))) return undefined;
+        if (!this.innerCfgHolds(body)) return undefined;
         this.modulePath.push(name);
         for (const child of body.namedChildren) {
           if (isComment(child) || child.type === 'inner_attribute_item') continue;
@@ -184,6 +184,12 @@ export class Converter extends ExpressionConverter {
       macro_invocation: '関数の外のマクロの呼び出し',
     };
     return unavailable(span, names[node.type] ?? `この書き方（${node.type}）`);
+  }
+
+  /** Whether the inner attributes of a module, a function's body or the file keep it (`#![cfg(test)]` removes it). */
+  private innerCfgHolds(body: Node | null): boolean {
+    const inner = body?.namedChildren.filter((child) => child.type === 'inner_attribute_item') ?? [];
+    return inner.every((child) => this.attributes.readInner(child));
   }
 
   private attributed(node: Node): Item | undefined {
@@ -551,7 +557,7 @@ export class Converter extends ExpressionConverter {
         if (isComment(syntax) || syntax.type === 'empty_statement') continue;
         const { attributes, target: child } = splitAttributes(syntax);
         const attrs = this.attributes.read(attributes);
-        if (!attrs || !child) continue;
+        if (!attrs || !child || !this.innerCfgHolds(child.childForFieldName('body'))) continue;
         if (child.type === 'function_item' || child.type === 'function_signature_item') {
           const method = this.fnItem(child, child.type === 'function_signature_item');
           if (method.isConst) syntaxError(method.span, 'トレイトの関数は const にできません（E0379）。');
@@ -610,7 +616,7 @@ export class Converter extends ExpressionConverter {
         if (isComment(syntax) || syntax.type === 'empty_statement') continue;
         const { attributes, target: child } = splitAttributes(syntax);
         const attrs = this.attributes.read(attributes);
-        if (!attrs || !child) continue;
+        if (!attrs || !child || !this.innerCfgHolds(child.childForFieldName('body'))) continue;
         if (child.type === 'function_item') methods.push(this.fnItem(child, false));
         else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true));
         else if (child.type === 'const_item') consts.push(this.item(child) as ImplItem['consts'][number]);
