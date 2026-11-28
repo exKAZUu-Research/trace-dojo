@@ -151,6 +151,10 @@ export class Dropper {
     }
     if (iter.adapterSource) this.dropRest(iter.adapterSource);
     for (const part of Object.values(iter.adapterState ?? {})) if (part instanceof IterValue) this.dropRest(part);
+    // What it has left is gone, so a later drop of the same iterator drops nothing again.
+    iter.rest = undefined;
+    iter.adapterSource = undefined;
+    iter.adapterState = undefined;
     iter.release();
   }
 
