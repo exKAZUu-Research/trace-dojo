@@ -193,12 +193,15 @@ define({
   },
   // `*` and autoderef of `Rc` and of `RefCell`'s guards, which reach what they point to.
   'Deref::deref': ([self], ctx) => {
+    // A `Box` is its value, so a reference to it is one to what it holds.
+    if (isBox(ctx.typeArgs[0])) return self;
     const target = deref(self);
     if (target instanceof SharedBox) return target.value;
     if (target instanceof BorrowGuard) return target.cell.value;
     return panic(ctx, `${describe(ctx.typeArgs[0])} は * でたどれません。`);
   },
   'DerefMut::deref_mut': ([self], ctx) => {
+    if (isBox(ctx.typeArgs[0])) return self;
     const target = deref(self);
     if (target instanceof BorrowGuard && target.mutable) return target.place();
     return panic(ctx, `${describe(ctx.typeArgs[0])} は * で書き換えられません。`);
@@ -228,4 +231,9 @@ function cellPlace(target: CellBox): Place {
 function describe(type: Type): string {
   const t = normalize(shallow(type));
   return t.kind === 'adt' ? t.def.name : t.kind;
+}
+
+function isBox(type: Type | undefined): boolean {
+  const t = type && normalize(shallow(type));
+  return t?.kind === 'adt' && t.def.builtin === 'Box';
 }
