@@ -4,7 +4,12 @@ import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations'
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
 import { normalize } from './infer';
-import { signatureLifetimeError, type SignatureNames, staticInputError } from './lifetimeRelations';
+import {
+  signatureLifetimeError,
+  type SignatureNames,
+  staticInputError,
+  staticItemBoundError,
+} from './lifetimeRelations';
 import {
   type Access,
   type AccessKind,
@@ -201,7 +206,7 @@ export class LoanBuilder {
     const staticError =
       !relationError &&
       staticInputError(this.graph.outlives, regions, this.staticRegion, body.span, this.shared.budget);
-    if (staticError) this.shared.errors.push(staticError);
+    if (staticError) this.shared.errors.push(staticItemBoundError(params, body.span) ?? staticError);
     this.graph.check(this.shared.errors);
     if (relationError) this.shared.errors.push(relationError);
     return paramVars;

@@ -251,3 +251,32 @@ function bodyResultSpan(body: Expr): Span {
   if (body.kind !== 'block') return body.span;
   return body.tail?.span ?? body.stmts.at(-1)?.span ?? body.span;
 }
+
+/**
+ * The error for a parameter bounded by a trait whose associated type names `'static` (`impl Iterator<Item = &'static
+ * str>`), whose own borrows the region graph cannot keep apart from the borrows of those items.
+ */
+export function staticItemBoundError(params: readonly { type: Type | undefined }[], span: Span): LoanError | undefined {
+  if (!params.some(({ type }) => type !== undefined && boundNamesStatic(type))) return undefined;
+  return {
+    span,
+    message:
+      "関連型に 'static を書いた境界（Iterator<Item = &'static str> など）を持つ引数は、この採点環境では使えません。",
+  };
+}
+
+function boundNamesStatic(type: Type): boolean {
+  const t = shallow(type);
+  const bounds = t.kind === 'param' ? t.param.bounds : t.kind === 'opaque' ? t.opaque.bounds : [];
+  if (t.kind === 'ref') return boundNamesStatic(t.target);
+  return bounds.some((bound) => [bound.item, ...(bound.assoc?.values() ?? [])].some((assoc) => namesStatic(assoc)));
+}
+
+function namesStatic(type: Type | undefined): boolean {
+  const t = type && shallow(type);
+  if (!t) return false;
+  if (t.kind === 'ref') return t.lifetime === "'static" || namesStatic(t.target);
+  if (t.kind === 'adt') return t.args.some((arg) => namesStatic(arg));
+  if (t.kind === 'tuple') return t.elems.some((elem) => namesStatic(elem));
+  return false;
+}
