@@ -42,14 +42,20 @@ export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'com
   } else if (isOverloadable(t)) {
     overloadedCompound(c, expr, targetType, c.expr(expr.value, undefined));
   } else if (expr.op === '<<' || expr.op === '>>') {
-    const r = numericOperand(early ?? c.expr(expr.value, undefined));
-    if (!isIntegral(t) || !isIntegral(r))
-      compileError(expr.span, `${typeToString(resolve(targetType))} に ${expr.op}= は使えません。`);
+    const valueType = early ?? c.expr(expr.value, undefined);
+    if (unknown) c.deferredChecks.push(() => checkShiftCompound(expr, targetType, valueType));
+    else checkShiftCompound(expr, targetType, valueType);
   } else {
     numericCompound(c, expr, targetType, early ?? c.expr(expr.value, t));
   }
   requireMutablePlace(c, expr.target, '書き換える');
   return UNIT;
+}
+
+/** `a <<= b` and `a >>= b`: integers of any types on both sides. */
+function checkShiftCompound(expr: Extract<Expr, { kind: 'compoundAssign' }>, target: Type, value: Type): void {
+  if (!isIntegral(normalize(shallow(resolve(target)))) || !isIntegral(numericOperand(value)))
+    compileError(expr.span, `${typeToString(resolve(target))} に ${expr.op}= は使えません。`);
 }
 
 /** `a += b` of a target known only once the program's types are: `String += &str`, an operator impl, or numbers. */
