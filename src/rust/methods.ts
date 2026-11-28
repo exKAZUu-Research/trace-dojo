@@ -360,7 +360,7 @@ function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type, wrapp
     const t = normalize(shallow(receiverType));
     // A `dyn Trait` in a `Box` is the `Self` of a method taking `self: Box<Self>`.
     if (t.kind === 'dyn' && wrapper === 'Box') return receiverType;
-    if (wrapper && wrapper !== 'Box') return wrappedSelf(t, wrapper);
+    if (wrapper) return wrappedSelf(t, wrapper);
     return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? undefined : receiverType;
   }
   const t = shallow(receiverType);
@@ -370,7 +370,7 @@ function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type, wrapp
   return t.target;
 }
 
-/** `Self` for a method taking `self: Rc<Self>`, `self: Arc<Self>`, or `self: Pin<&mut Self>`, called on that pointer. */
+/** `Self` for a method taking `self: Box<Self>`, `Rc<Self>`, `Arc<Self>`, or `Pin<&mut Self>`, called on that pointer. */
 function wrappedSelf(t: Type, wrapper: SelfWrapper): Type | undefined {
   if (t.kind !== 'adt' || t.def.builtin !== wrapper) return undefined;
   if (wrapper !== 'Pin') return t.args[0];
