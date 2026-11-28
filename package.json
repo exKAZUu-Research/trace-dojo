@@ -77,7 +77,7 @@
     "@willbooster/shared-lib": "12.0.0",
     "@willbooster/shared-lib-react": "6.3.0",
     "@willbooster/tree-sitter-bash": "15.0.3",
-    "@willbooster/tree-sitter-c": "43.0.0",
+    "@willbooster/tree-sitter-c": "45.0.1",
     "@willbooster/tree-sitter-c-sharp": "22.0.4",
     "@willbooster/tree-sitter-cpp": "42.0.0",
     "@willbooster/tree-sitter-dart": "22.0.4",
