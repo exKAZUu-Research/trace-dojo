@@ -3,7 +3,7 @@ import type { Annotations } from './annotations';
 import type { Pattern } from './ast';
 import type { Known } from './constLint';
 import { normalize } from './infer';
-import { intMax, intMin, shallow, type Type } from './types';
+import { intMax, intMin, type IntName, shallow, type Type } from './types';
 
 /**
  * A pattern reduced to what decides matching: a constructor with subpatterns, or anything (a wildcard or binding).
@@ -131,11 +131,18 @@ function lowerSlice(pattern: Extract<Pattern, { kind: 'slice' }>, annotations: A
   return { kind: 'slice', prefix, suffix, variable: true };
 }
 
-/** The values of an integer type or of `char`, as disjoint ranges in order, or undefined for other types. */
+/**
+ * The values of an integer type or of `char`, as disjoint ranges in order, or undefined for other types. `usize` and
+ * `isize` reach one past their `MAX` (and `isize` one below its `MIN`), as rustc treats their ends as open, so only a
+ * range pattern without that end covers it.
+ */
 function rangeDomain(type: Type): [bigint, bigint][] | undefined {
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));
-  if (t.kind === 'int') return [[intMin(t.name), intMax(t.name)]];
+  if (t.kind === 'int') {
+    const [min, max] = [intMin(t.name), intMax(t.name)];
+    return [isPointerSized(t.name) ? [min === 0n ? 0n : min - 1n, max + 1n] : [min, max]];
+  }
   if (t.kind === 'char') {
     return [
       [0n, 0xd7_ffn],
@@ -465,8 +472,26 @@ function describeRange(pattern: Extract<Pat, { kind: 'range' }>, type: Type): st
     if (type.kind === 'int' && value === intMax(type.name)) return `${type.name}::MAX`;
     return `${value}_${type.kind === 'int' ? type.name : ''}`;
   };
+  const open = type.kind === 'int' && isPointerSized(type.name) ? openEnded(pattern, type.name, show) : undefined;
+  if (open) return open;
   if (pattern.lo === pattern.hi) return show(pattern.lo);
   return `${show(pattern.lo)}..=${show(pattern.hi)}`;
+}
+
+/** A range of `usize` or `isize` that reaches past `MAX` or below `MIN`, shown as open: `6_usize..`, `..isize::MIN`. */
+function openEnded(
+  pattern: Extract<Pat, { kind: 'range' }>,
+  name: IntName,
+  show: (value: bigint) => string
+): string | undefined {
+  const [min, max] = [intMin(name), intMax(name)];
+  if (pattern.hi > max) return `${show(pattern.lo > max ? max : pattern.lo)}..`;
+  if (pattern.lo < min) return pattern.hi < min ? `..${show(min)}` : `..=${show(pattern.hi)}`;
+  return undefined;
+}
+
+function isPointerSized(name: string): boolean {
+  return name === 'usize' || name === 'isize';
 }
 
 const NON_EXHAUSTIVE_STD_ENUMS = new Set(['IoErrorKind', 'IntErrorKind']);

@@ -55,6 +55,16 @@ export abstract class PatternConverter extends SyntaxConverter {
     return { kind: 'range', start: left ? end(left) : undefined, end: right ? end(right) : undefined, inclusive, span };
   }
 
+  private slicePattern(node: Node, span: Span): Pattern {
+    for (const child of this.subpatterns(node)) {
+      const range = child.type === 'captured_pattern' ? child.namedChildren.at(-1) : child;
+      if (range?.type === 'range_pattern' && !range.childForFieldName('right') && range.childForFieldName('left')) {
+        syntaxError(this.span(range), 'スライスのパターンの中の X.. は、不安定な機能なので使えません（E0658）。');
+      }
+    }
+    return { kind: 'slice', elems: this.subpatterns(node).map((child) => this.pattern(child)), span };
+  }
+
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
   pattern(node: Node): Pattern {
     const span = this.span(node);
@@ -114,7 +124,7 @@ export abstract class PatternConverter extends SyntaxConverter {
         return this.rangePattern(node, span);
       }
       case 'slice_pattern': {
-        return { kind: 'slice', elems: this.subpatterns(node).map((child) => this.pattern(child)), span };
+        return this.slicePattern(node, span);
       }
       case 'generic_pattern': {
         const typeArguments = this.field(node, 'type_arguments');
