@@ -23,7 +23,7 @@ export function sizeHintShape(
 
 /**
  * Whether the shape's count of what it has left is not its own: an adapter takes it from its source's, which an
- * unbounded source, a `cycle`, or a `dyn Iterator` inside it does not give.
+ * unbounded source, a `cycle`, a `dyn Iterator` or an adapter that may drop items inside it does not give.
  */
 export function hidesCount(shape: Type): boolean {
   const t = normalize(shallow(shape));
@@ -31,7 +31,21 @@ export function hidesCount(shape: Type): boolean {
   return COUNT_HIDING_SHAPES.has(t.def.name) || t.args.some((arg) => hidesCount(arg));
 }
 
-const COUNT_HIDING_SHAPES = new Set([...UNBOUNDED_SHAPES, 'CycleShape', 'DynIteratorShape', 'IntoShape']);
+// The adapters after `IntoShape` give as many items as their source at most, not exactly as many.
+const COUNT_HIDING_SHAPES = new Set([
+  ...UNBOUNDED_SHAPES,
+  'CycleShape',
+  'DynIteratorShape',
+  'IntoShape',
+  'FilterShape',
+  'FilterMapShape',
+  'FlatMapShape',
+  'FlattenShape',
+  'MapWhileShape',
+  'TakeWhileShape',
+  'SkipWhileShape',
+  'ScanShape',
+]);
 
 /** Whether an iterator and every iterator it draws from know how many they have left, which an adapter's count adds up. */
 export function countsWhatIsLeft(iter: IterValue): boolean {

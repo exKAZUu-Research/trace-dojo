@@ -585,8 +585,7 @@ define({
     if (isUserIterator(ctx.typeArgs[0])) return [0n, none(ctx)];
     const shape = sizeHintShape(ctx, deref(self), ctx.typeArgs[0]);
     if (UNBOUNDED_SHAPES.has(shape?.def.name ?? '')) return [intMax('usize'), none(ctx)];
-    if (!shape || hidesCount(shape))
-      unsupportedAtRun(ctx, '終わりのない反復子や dyn Iterator を元にした反復子の size_hint');
+    if (!shape || hidesCount(shape)) unsupportedAtRun(ctx, '残りの個数が決まらない反復子を元にした反復子の size_hint');
     const iter = iterOf(ctx.interp.toIter(deref(self), ctx.typeArgs[0]));
     if (!countsWhatIsLeft(iter)) unsupportedAtRun(ctx, 'この反復子の size_hint');
     const left = lengthOf(iter);
