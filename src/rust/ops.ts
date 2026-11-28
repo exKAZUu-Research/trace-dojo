@@ -574,9 +574,12 @@ function comparePaths(x: string, y: string): number {
   return Math.sign(a.length - b.length);
 }
 
-/** A path's components: its parts between `/`, of which only a leading empty one (the root) counts. */
+/**
+ * A path's components as std's `components` gives them: its parts between `/`, of which a leading empty one is the
+ * root and a `.` counts only at the start.
+ */
 function pathComponents(path: string): string[] {
-  return path.split('/').filter((part, index) => part !== '' || index === 0);
+  return path.split('/').filter((part, index) => index === 0 || (part !== '' && part !== '.'));
 }
 
 function compareOrderedEntries(
