@@ -504,17 +504,34 @@ function stringified(tokens: Token[]): Token[] {
   return out;
 }
 
-/** The text of tokens with the spaces the source has between them, as `stringify!` gives it. */
-function writtenText(tokens: Token[], top = true): string {
+/**
+ * The text of tokens as `stringify!` gives it: with the spaces the source has between them, but none before `,`,
+ * `;`, or a call's or an index's brackets, and none inside `( )` and `[ ]`, as rustc prints tokens.
+ */
+function writtenText(tokens: Token[], top = true, tight = false): string {
   return tokens
     .map((token, index) => {
-      const space = (index > 0 || !top) && token.spaced ? ' ' : '';
-      if (token.kind === 'leaf') return `${space}${token.text}`;
-      const inner = writtenText(token.tokens, token.invisible ? top && index === 0 : false);
-      if (token.invisible) return `${space}${inner}`;
-      return `${space}${token.open}${inner}${token.closeSpaced && inner ? ' ' : ''}${token.close}`;
+      const glued = (index === 0 && tight) || !spacedAfter(tokens[index - 1], token);
+      const space = (index > 0 || !top) && token.spaced && !glued ? ' ' : '';
+      return `${space}${token.kind === 'leaf' ? token.text : groupText(token, top && index === 0, tight && index === 0)}`;
     })
     .join('');
+}
+
+/** A group's text: its brackets and what is in them, which an `expr` variable's invisible group shows bare. */
+function groupText(group: Token & { kind: 'group' }, first: boolean, tight: boolean): string {
+  const bracket = group.open === '(' || group.open === '[';
+  const inner = writtenText(group.tokens, group.invisible ? first : false, bracket || tight);
+  if (group.invisible) return inner;
+  return `${group.open}${inner}${group.closeSpaced && inner && !bracket ? ' ' : ''}${group.close}`;
+}
+
+/** Whether rustc's token printing keeps a space between two tokens: not before `,` and `;`, nor before a call's `(`. */
+export function spacedAfter(previous: Token | undefined, token: Token): boolean {
+  if (token.kind === 'leaf') return token.text !== ',' && token.text !== ';';
+  if (token.open !== '(' && token.open !== '[') return true;
+  if (previous === undefined) return true;
+  return previous.kind === 'leaf' ? !/^[\p{L}\p{N}_]/u.test(previous.text) : previous.open === '{';
 }
 
 function transcribeVar(name: string, bindings: Map<string, Binding>): Token[] {

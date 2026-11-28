@@ -6,16 +6,8 @@ import { PatternConverter } from './convertPatterns';
 import { isComment, syntaxError, unavailable } from './convertSyntax';
 import { parseFormatString } from './formatString';
 import { parseRawStringLiteral, parseStringLiteral } from './literals';
-import { writtenName } from './macroHygiene';
-import {
-  expand,
-  isStringLiteral,
-  MacroError,
-  type MacroRule,
-  parseParts,
-  tokensOf,
-  tokenText as macroTokenText,
-} from './macroRules';
+import { expand, MacroError, type MacroRule, parseParts, tokensOf, tokenText as macroTokenText } from './macroRules';
+import { fragmentLiteral, tokenText } from './macroText';
 
 const MAX_MACRO_DEPTH = 128;
 
@@ -51,6 +43,9 @@ export abstract class MacroConverter extends PatternConverter {
     return name !== undefined && this.userMacros.has(name);
   }
 
+  /** The column of the outermost macro invocation whose expansion is being converted, which `column!` gives. */
+  private expansionColumn: number | undefined;
+
   /**
    * Expands an invocation of a `macro_rules!` macro and converts the code it makes with `convert`, which gets the
    * syntax tree of `wrap(code)`: the expansion stands on the invocation's row.
@@ -69,10 +64,13 @@ export abstract class MacroConverter extends PatternConverter {
       throw error;
     }
     this.macroDepth++;
+    const enclosing = this.expansionColumn;
+    this.expansionColumn ??= span.col;
     try {
       return this.reparse(`${'\n'.repeat(span.row)}${wrap(code)}`, convert as (root: Node) => unknown) as T;
     } finally {
       this.macroDepth--;
+      this.expansionColumn = enclosing;
     }
   }
 
@@ -193,7 +191,8 @@ export abstract class MacroConverter extends PatternConverter {
         return { kind: 'int', value: BigInt(span.row + 1), suffix: 'u32', span };
       }
       case 'column': {
-        return { kind: 'int', value: BigInt(span.col), suffix: 'u32', span };
+        // In a macro's expansion, rustc gives the column of the outermost invocation, as `line!` its row.
+        return { kind: 'int', value: BigInt(this.expansionColumn ?? span.col), suffix: 'u32', span };
       }
       case 'file': {
         return { kind: 'str', value: 'src/main.rs', span };
@@ -372,7 +371,7 @@ export abstract class MacroConverter extends PatternConverter {
     return {
       kind: 'assert',
       cond: this.expr(cond),
-      text: tokenText([cond]),
+      text: tokenText([cond], true),
       format: this.optionalFormatArgs(rest, span, name),
     };
   }
@@ -558,51 +557,11 @@ export abstract class MacroConverter extends PatternConverter {
   }
 }
 
-/**
- * A string literal or macro call that a macro's `expr` variable passed on (`println!($fmt)`), which keeps it in marked
- * parentheses.
- */
-function fragmentLiteral(node: Node): Node {
-  const inner = fragmentInner(node);
-  if (!inner) return node;
-  const literal = fragmentLiteral(inner);
-  return isStringLiteral(literal.type) || literal.type === 'macro_invocation' ? literal : node;
-}
-
-/** The expression in the marked parentheses an `expr` variable keeps its operand in, if `node` is those. */
-function fragmentInner(node: Node): Node | undefined {
-  const [open, mark, inner] = node.children;
-  const marked = node.type === 'parenthesized_expression' && open?.type === '(' && mark?.text === '/*expr*/';
-  return marked ? inner : undefined;
-}
-
 function firstExpression(root: Node): Node | undefined {
   const statement = root.namedChildren.find((child) => !isComment(child));
   return statement?.type === 'expression_statement'
     ? statement.namedChildren.find((child) => !isComment(child))
     : statement;
-}
-
-/** The text `stringify!` gives tokens: as written, with one space where spaces or newlines separate them. */
-// code-gauge-allow functionCognitiveComplexity -- One walk over the tokens skips comments and expr variables' marks.
-function tokenText(tokens: Node[]): string {
-  let text = '';
-  let end: number | undefined;
-  const visit = (token: Node): void => {
-    if (isComment(token)) return;
-    // An `expr` variable's marked parentheses do not show (`assert!($e)` says `x == 6`).
-    const fragment = fragmentInner(token);
-    if (fragment) return visit(fragment);
-    if (token.childCount > 0 && !token.type.endsWith('_literal')) {
-      for (const child of token.children) visit(child);
-      return;
-    }
-    if (end !== undefined && token.startIndex > end) text += ' ';
-    text += token.type === 'identifier' ? writtenName(token.text) : token.text;
-    end = token.endIndex;
-  };
-  for (const token of tokens) visit(token);
-  return text;
 }
 
 /** The macro invocation an expression statement consists of, if it does. */
