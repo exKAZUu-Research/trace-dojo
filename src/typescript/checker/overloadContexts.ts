@@ -2,12 +2,14 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
-import { isContextSensitiveFunction } from './signatures';
-import { isTaggedTemplateArgument, named } from './syntax';
+import { isGeneratorFunction } from './functions';
+import { isContextSensitiveFunction, parameterNodes } from './signatures';
+import { argumentParameters, isFunctionWithOwnThis, isTaggedTemplateArgument, named } from './syntax';
 import type { Type } from './types';
 
 interface Callbacks {
   nodes: ReadonlySet<number>;
+  eagerNodes: ReadonlySet<number>;
   mayDefer: boolean;
 }
 
@@ -20,6 +22,7 @@ interface Contexts {
 interface Preview {
   id: number;
   callbacks: ReadonlySet<number>;
+  eagerNodes: ReadonlySet<number>;
   staged: Map<number, Type>;
   frame: Contexts;
   eager: boolean;
@@ -36,22 +39,22 @@ export class OverloadContexts {
 
   callbacksOf(args: TreeNode[]): Callbacks {
     const nodes = new Set<number>();
+    const eagerNodes = new Set<number>();
     let mayDefer = false;
     const pending = args.map((node) => ({ node, allowsDeferral: true }));
     while (pending.length > 0) {
       this.c.budget.spend();
       const { node, allowsDeferral } = pending.pop() as (typeof pending)[number];
       if (functionKinds.has(node.type)) {
-        if (isContextSensitiveFunction(node)) {
-          nodes.add(node.id);
-          mayDefer ||= allowsDeferral;
-        }
+        addCallbackNode(node, allowsDeferral, nodes, eagerNodes, () => {
+          mayDefer = true;
+        });
       } else if (!isTaggedTemplateArgument(node)) {
         for (const child of named(node))
           pending.push({ node: child, allowsDeferral: allowsDeferral && triggersDeferral(node, child) });
       }
     }
-    return { nodes, mayDefer };
+    return { nodes, eagerNodes, mayDefer };
   }
 
   withCall<T>(run: () => T): T {
@@ -70,6 +73,7 @@ export class OverloadContexts {
     const preview: Preview = {
       id: ++this.nextId,
       callbacks: callbacks.nodes,
+      eagerNodes: callbacks.eagerNodes,
       staged: new Map(),
       frame,
       eager: frame.includesDeferred || !callbacks.mayDefer,
@@ -115,7 +119,7 @@ export class OverloadContexts {
     const preview = this.preview;
     if (!contextual || !preview?.callbacks.has(node.id) || !contextualSignatureOf(this.c, contextual, node))
       return undefined;
-    if (preview.eager || preview.frame.types.has(node.id)) {
+    if (preview.eager || preview.eagerNodes.has(node.id) || preview.frame.types.has(node.id)) {
       this.lock(preview.frame, node.id, contextual);
       return undefined;
     }
@@ -132,6 +136,48 @@ export class OverloadContexts {
   get cacheKey(): string {
     return `${this.preview?.id ?? 0}/${this.locked.map(({ id }) => id).join(',')}`;
   }
+}
+
+function addCallbackNode(
+  node: TreeNode,
+  allowsDeferral: boolean,
+  nodes: Set<number>,
+  eagerNodes: Set<number>,
+  markDeferred: () => void
+): void {
+  const generator = isGeneratorFunction(node);
+  const deferred = generator ? hasDeferredGeneratorParameters(node) : isContextSensitiveFunction(node);
+  if (deferred) {
+    nodes.add(node.id);
+    if (allowsDeferral) markDeferred();
+    return;
+  }
+  if (generator && !node.childForFieldName('type_parameters') && !node.childForFieldName('return_type')) {
+    nodes.add(node.id);
+    eagerNodes.add(node.id);
+  }
+}
+
+function hasDeferredGeneratorParameters(node: TreeNode): boolean {
+  if (node.childForFieldName('type_parameters')) return false;
+  const params = parameterNodes(node);
+  if (params.some((parameter) => !parameter.childForFieldName('type'))) return true;
+  return argumentParameters(params).length === params.length && referencesOwnThis(node);
+}
+
+function referencesOwnThis(node: TreeNode): boolean {
+  const stack = [
+    ...parameterNodes(node),
+    ...(node.childForFieldName('body') ? [node.childForFieldName('body') as TreeNode] : []),
+  ];
+  for (let current = stack.pop(); current; current = stack.pop()) {
+    if (current.type === 'this') return true;
+    for (const child of named(current)) {
+      if (isFunctionWithOwnThis(child) || child.type === 'field_definition') continue;
+      stack.push(child);
+    }
+  }
+  return false;
 }
 
 /** The expression forms that trigger TypeScript's initial SkipContextSensitive pass on a call. */
