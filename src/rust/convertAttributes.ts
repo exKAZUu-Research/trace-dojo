@@ -187,10 +187,15 @@ export class AttributeReader {
     const comma = topLevelComma(tokens);
     if (comma === -1) syntaxError(span, '#[cfg_attr] には、条件と属性を書いてください。');
     if (!this.condition(tokens.slice(0, comma), span)) return true;
-    const source = args!.text.slice(1, -1);
-    const conditionEnd = tokens[comma].endIndex - args!.startIndex - 1;
-    for (const attribute of this.reparseAttributes(`#[${source.slice(conditionEnd).replace(/^\s*/, '')}]`)) {
-      if (!this.apply(attribute, attrs, inner)) return false;
+    // Each attribute after the condition applies, as its own `#[...]` (`#[cfg_attr(test, derive(Debug), allow(x))]`).
+    for (const part of splitTopLevel(tokens.slice(comma + 1))) {
+      const text = args!.text.slice(
+        part[0].startIndex - args!.startIndex,
+        (part.at(-1) as Node).endIndex - args!.startIndex
+      );
+      for (const attribute of this.reparseAttributes(`#[${text}]`)) {
+        if (!this.apply(attribute, attrs, inner)) return false;
+      }
     }
     return true;
   }
