@@ -77,6 +77,21 @@ const UNAVAILABLE_ATTRIBUTES: Record<string, string> = {
   track_caller: '呼び出し元の位置で panic を報告する属性（#[track_caller]）',
 };
 
+/** The representations `#[repr(..)]` names: `C`, `transparent`, `packed`, `align(N)`, `Rust`, and integer types. */
+const REPR_NAMES = new Set(['C', 'Rust', 'transparent', 'packed', 'align', ...INT_NAMES]);
+
+/** Requires `#[repr(..)]` to name known representations, `align` and `packed` alone taking `(N)` (E0539, E0565). */
+function checkReprArgs(args: Node | null, span: Span): void {
+  const parts = args?.namedChildren.filter((child) => !isComment(child)) ?? [];
+  if (parts.length === 0) syntaxError(span, '#[repr] には、表現（C や u8 など）を書いてください（E0539）。');
+  for (const [index, part] of parts.entries()) {
+    if (part.type === 'token_tree' && ['align', 'packed'].includes(parts[index - 1]?.text ?? '')) continue;
+    if (!['identifier', 'primitive_type'].includes(part.type) || !REPR_NAMES.has(part.text)) {
+      syntaxError(span, `#[repr] の ${part.text} は、表現の名前ではありません（E0539）。`);
+    }
+  }
+}
+
 function partition<T>(items: T[], test: (item: T) => boolean): [T[], T[]] {
   return [items.filter(test), items.filter((item) => !test(item))];
 }
@@ -165,6 +180,7 @@ export class AttributeReader {
         return true;
       }
       case 'repr': {
+        checkReprArgs(args, span);
         const int = args?.namedChildren.find((child) => INT_NAMES.includes(child.text as IntName))?.text;
         if (int) attrs.repr = int as IntName;
         attrs.hasRepr = true;
