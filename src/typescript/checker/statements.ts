@@ -560,7 +560,10 @@ export class StatementChecker {
       return;
     }
     const key = `s${symbol.id}`;
-    const valueType = this.c.expressions.checkAssignedValue(value, annotation);
+    const { result: valueType, yields } = this.c.functions.collectImplicitYields(() =>
+      this.c.expressions.checkAssignedValue(value, annotation)
+    );
+    this.c.functions.recordVariableYieldDeps(symbol, annotation !== undefined, yields);
     if (annotation) this.c.expressions.checkAssignable(nameNode, valueType, annotation, value);
     if (!annotation && isDirectEmptyArray(value)) {
       // `const a = []` evolves as elements are pushed.
@@ -584,7 +587,11 @@ export class StatementChecker {
   private redeclaredVariable(declarator: TreeNode, symbol: Sym, annotation: Type | undefined): void {
     const value = declarator.childForFieldName('value');
     if (!value) return;
-    const valueType = this.c.expressions.check(value, annotation);
+    const { result: valueType, yields } = this.c.functions.collectImplicitYields(() =>
+      this.c.expressions.check(value, annotation)
+    );
+    const hasAnnotation = annotation !== undefined || symbol.valueDeclaration?.childForFieldName('type') !== null;
+    this.c.functions.recordVariableYieldDeps(symbol, hasAnnotation, yields, true);
     if (annotation)
       this.c.expressions.checkAssignable(
         declarator.childForFieldName('name') as TreeNode,
@@ -620,7 +627,10 @@ export class StatementChecker {
     const value = declarator.childForFieldName('value');
     const annotation = this.c.typeNodes.annotationType(declarator.childForFieldName('type'));
     const implied = annotation ? undefined : this.c.patterns.impliedBindingType(pattern, isConst);
-    const valueType = value ? this.c.expressions.check(value, annotation ?? implied) : (annotation ?? anyType);
+    const collected = value
+      ? this.c.functions.collectImplicitYields(() => this.c.expressions.check(value, annotation ?? implied))
+      : undefined;
+    const valueType = collected ? collected.result : (annotation ?? anyType);
     if (annotation && value) this.c.expressions.checkAssignable(pattern, valueType, annotation);
     const sourceType = annotation ?? valueType;
     if (isConst) this.c.patterns.correlatedSources.set(pattern.id, sourceType);
@@ -630,6 +640,7 @@ export class StatementChecker {
       (identifier, type, assigned = type) => {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (!symbol) return;
+        this.c.functions.recordVariableYieldDeps(symbol, annotation !== undefined, collected?.yields);
         const declared = this.c.literals.widenDeclared(type, isConst);
         this.c.expressions.setVariableType(symbol, declared);
         this.c.flow.set(`s${symbol.id}`, { type: this.c.flow.assignmentReduced(declared, assigned), assigned: true });

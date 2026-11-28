@@ -65,6 +65,12 @@ export interface FunctionContext {
   isAsync: boolean;
 }
 
+interface ReturnYieldTracker {
+  collectors: Set<number>[];
+  symbolYields: Map<number, Set<number>>;
+  returnYields: Set<number>;
+}
+
 /** What a generator's annotation or contextual type says it yields, returns, and receives, and what it yields. */
 interface GeneratorContext {
   /** The return type annotation, which the generator's type is. */
@@ -75,6 +81,7 @@ interface GeneratorContext {
   nextType?: Type;
   yieldTypes: Type[];
   inferredNextTypes: Type[];
+  returnYieldTracker?: ReturnYieldTracker;
 }
 
 export interface IterationTypes {
@@ -134,8 +141,86 @@ export class FunctionChecker {
   /** The flow at the `return` statements of each checked function body whose end no path reaches, by function. */
   private readonly returnFlows = new Map<number, FlowState>();
   private readonly checkedAmbientOverloadSymbols = new Set<number>();
+  private committedInferenceDepth = 0;
+  private trackingReturnYields = false;
+  private readonly selfInferredYieldErrors = new WeakMap<Type, ReadonlySet<number>>();
+  private readonly implicitAnyYieldNodes = new Set<number>();
+  private readonly reportedImplicitYieldNodes = new Set<number>();
 
   constructor(private readonly c: Checker) {}
+
+  isTrackingReturnYields(): boolean {
+    return this.contexts.some((context) => context.generator?.returnYieldTracker !== undefined);
+  }
+
+  withCommittedCallInference<T>(run: () => T): T {
+    this.committedInferenceDepth++;
+    try {
+      return run();
+    } finally {
+      this.committedInferenceDepth--;
+    }
+  }
+
+  withoutCommittedCallInference<T>(run: () => T): T {
+    const saved = this.committedInferenceDepth;
+    this.committedInferenceDepth = 0;
+    try {
+      return run();
+    } finally {
+      this.committedInferenceDepth = saved;
+    }
+  }
+
+  collectImplicitYields<T>(run: () => T): { result: T; yields: Set<number> | undefined } {
+    const tracker = this.contexts.at(-1)?.generator?.returnYieldTracker;
+    if (!tracker) return { result: run(), yields: undefined };
+    const yields = new Set<number>();
+    tracker.collectors.push(yields);
+    try {
+      const result = run();
+      const parent = tracker.collectors.at(-2);
+      if (parent) for (const id of yields) parent.add(id);
+      return { result, yields };
+    } finally {
+      tracker.collectors.pop();
+    }
+  }
+
+  recordVariableYieldDeps(
+    symbol: Sym | undefined,
+    annotated: boolean,
+    yields: Set<number> | undefined,
+    merge = false
+  ): void {
+    const tracker = this.contexts.at(-1)?.generator?.returnYieldTracker;
+    if (!tracker || !symbol) return;
+    if (annotated) {
+      tracker.symbolYields.delete(symbol.id);
+      return;
+    }
+    if (!yields || yields.size === 0) {
+      if (!merge) tracker.symbolYields.delete(symbol.id);
+      return;
+    }
+    const existing = merge ? tracker.symbolYields.get(symbol.id) : undefined;
+    if (existing) {
+      for (const id of yields) existing.add(id);
+      return;
+    }
+    tracker.symbolYields.set(symbol.id, new Set(yields));
+  }
+
+  noteIdentifierRead(symbol: Sym): void {
+    for (const context of this.contexts) {
+      const tracker = context.generator?.returnYieldTracker;
+      const deps = tracker?.symbolYields.get(symbol.id);
+      if (!tracker || !deps) continue;
+      const active = tracker.collectors.at(-1);
+      if (active) for (const id of deps) active.add(id);
+      if (context.inReturn) for (const id of deps) tracker.returnYields.add(id);
+    }
+  }
 
   /** For `o.f = function () {...}`, the object the function is assigned to, which tsc gives it as `this`. */
   private assignedObjectThis(node: TreeNode): Type | undefined {
@@ -168,15 +253,18 @@ export class FunctionChecker {
       this.c.classes.registerContextualThis(node, contextualSignature?.thisType ?? this.assignedObjectThis(node));
     // Parameters take their types from the signature, which the body sees.
     this.bindParameters(node, signature);
-    const contextualReturn = contextualSignature ? contextualSignature.returnType() : undefined;
+    const contextualReturn = this.resolveContextualReturn(contextualSignature);
     const declaredReturn = this.declaredReturnType(node);
     const immediate = isInlinedInvocation(node);
     let returnType = declaredReturn;
     const typed: Signature = {
       ...signature,
       returnType: () => {
-        if (!returnType && immediate) return this.inferBodyReturnType(node, signature, contextualReturn, false);
+        if (!returnType && immediate) {
+          return this.inferAndCommitReturnType(node, signature, contextualReturn, false);
+        }
         returnType ??= this.inferBodyReturnType(node, signature, contextualReturn, true);
+        if (this.committedInferenceDepth > 0) this.commitSelfInferredYields(returnType);
         return returnType;
       },
       checkImmediateBody: immediate
@@ -188,14 +276,41 @@ export class FunctionChecker {
     };
     if (!declaredReturn && !signature.predicate) this.addInferredPredicate(node, typed);
     const type = functionType(typed);
-    const ownName = node.childForFieldName('name');
-    const self = ownName ? this.c.ownScope(node)?.lookupValue(ownName.text) : undefined;
-    if (self?.valueDeclaration?.id === node.id) self.valueType = type;
+    this.registerNamedExpressionType(node, type);
     if (!immediate) {
       const checked = this.checkFunctionLike(node, signature, contextualSignature);
       returnType ??= checked;
     }
     return type;
+  }
+
+  private resolveContextualReturn(contextualSignature: Signature | undefined): Type | undefined {
+    if (!contextualSignature) return undefined;
+    return this.c.silent === 0
+      ? this.withCommittedCallInference(() => contextualSignature.returnType())
+      : contextualSignature.returnType();
+  }
+
+  private inferAndCommitReturnType(
+    node: TreeNode,
+    signature: Signature,
+    contextualReturn: Type | undefined,
+    isolated: boolean
+  ): Type {
+    const inferred = this.inferBodyReturnType(node, signature, contextualReturn, isolated);
+    if (this.committedInferenceDepth > 0) this.commitSelfInferredYields(inferred);
+    return inferred;
+  }
+
+  private registerNamedExpressionType(node: TreeNode, type: Type): void {
+    const ownName = node.childForFieldName('name');
+    const self = ownName ? this.c.ownScope(node)?.lookupValue(ownName.text) : undefined;
+    if (self?.valueDeclaration?.id === node.id) self.valueType = type;
+  }
+
+  private commitSelfInferredYields(type: Type): void {
+    const yields = this.selfInferredYieldErrors.get(type);
+    if (yields) for (const id of yields) this.implicitAnyYieldNodes.add(id);
   }
 
   private inferBodyReturnType(
@@ -204,9 +319,15 @@ export class FunctionChecker {
     contextualReturn: Type | undefined,
     isolated: boolean
   ): Type {
-    return this.c.flow.probe(() =>
-      this.c.silently(() => this.checkFunctionBody(node, signature, contextualReturn, isolated))
-    );
+    const previousTracking = this.trackingReturnYields;
+    this.trackingReturnYields = true;
+    try {
+      return this.c.flow.probe(() =>
+        this.c.silently(() => this.checkFunctionBody(node, signature, contextualReturn, isolated))
+      );
+    } finally {
+      this.trackingReturnYields = previousTracking;
+    }
   }
 
   addInferredPredicate(node: TreeNode, signature: Signature): void {
@@ -407,6 +528,7 @@ export class FunctionChecker {
   checkFunctionBody(node: TreeNode, signature: Signature, contextualReturn: Type | undefined, isolated: boolean): Type {
     if (this.reentersBody(node)) return anyType;
     const body = node.childForFieldName('body');
+    if (this.c.silent === 0 && contextualReturn) this.commitSelfInferredYields(contextualReturn);
     const context = this.newContext(node, contextualReturn, this.declaredReturnType(node));
     this.bindParameters(node, signature);
     this.contexts.push(context);
@@ -422,21 +544,33 @@ export class FunctionChecker {
       this.checkBody(body, context);
       this.recordReturnFlow(context);
       this.checkBodyReturns(context);
-      if (this.circular.has(node.id) && this.c.silent === 0) this.reportCircularReturn(node);
-      if (context.isConstructor && node.parent?.parent) {
-        this.c.classDeclarations.checkPropertyInitialization(
-          node.parent.parent,
-          node,
-          this.c.flow.current,
-          context.returnStates
-        );
-      }
-      return this.returnTypeOf(context);
+      return this.finalizeBodyReturnType(node, context);
     } finally {
       this.c.flow.current = inlined ? this.c.flow.merge([this.c.flow.current, ...context.returnStates]) : outer;
       this.contexts.pop();
       this.capturedTypes.pop();
     }
+  }
+
+  private finalizeBodyReturnType(node: TreeNode, context: FunctionContext): Type {
+    if (this.circular.has(node.id) && this.c.silent === 0) this.reportCircularReturn(node);
+    const inferredReturnType = this.returnTypeOf(context);
+    const returnYields = context.generator?.returnYieldTracker?.returnYields;
+    if (returnYields && returnYields.size > 0) {
+      this.selfInferredYieldErrors.set(inferredReturnType, returnYields);
+      if (this.committedInferenceDepth > 0) {
+        for (const id of returnYields) this.implicitAnyYieldNodes.add(id);
+      }
+    }
+    if (context.isConstructor && node.parent?.parent) {
+      this.c.classDeclarations.checkPropertyInitialization(
+        node.parent.parent,
+        node,
+        this.c.flow.current,
+        context.returnStates
+      );
+    }
+    return inferredReturnType;
   }
 
   private checkBodyReturns(context: FunctionContext): void {
@@ -547,9 +681,11 @@ export class FunctionChecker {
   }
 
   private newContext(node: TreeNode, contextualReturn?: Type, declaredReturn?: Type): FunctionContext {
+    const trackReturnYields = this.trackingReturnYields;
+    this.trackingReturnYields = false;
     const isAsync = hasToken(node, 'async');
     const returns = isGeneratorFunction(node)
-      ? this.generatorReturns(isAsync, contextualReturn, declaredReturn)
+      ? this.generatorReturns(isAsync, contextualReturn, declaredReturn, trackReturnYields)
       : isAsync
         ? this.asyncReturns(node, contextualReturn, declaredReturn)
         : { declaredReturn, contextualReturn };
@@ -593,7 +729,8 @@ export class FunctionChecker {
   private generatorReturns(
     isAsync: boolean,
     contextualReturn: Type | undefined,
-    declaredReturn: Type | undefined
+    declaredReturn: Type | undefined,
+    trackReturnYields = false
   ): Pick<FunctionContext, 'generator' | 'declaredReturn' | 'contextualReturn'> {
     const declared = declaredReturn && this.iterationTypesOf(declaredReturn, isAsync);
     const contextualTypes =
@@ -601,6 +738,7 @@ export class FunctionChecker {
         ? this.iterationTypesOf(contextualReturn, isAsync)
         : undefined;
     const given = declaredReturn ? (declared ?? anyIterationTypes) : contextualTypes;
+    const shouldTrack = trackReturnYields && !declaredReturn && !given?.nextType;
     return {
       generator: {
         annotation: declaredReturn,
@@ -609,6 +747,9 @@ export class FunctionChecker {
         nextType: given?.nextType,
         yieldTypes: [],
         inferredNextTypes: [],
+        returnYieldTracker: shouldTrack
+          ? { collectors: [], symbolYields: new Map(), returnYields: new Set() }
+          : undefined,
       },
       declaredReturn: declaredReturn && given?.returnType,
       contextualReturn: contextualTypes?.returnType,
@@ -873,17 +1014,36 @@ export class FunctionChecker {
       this.checkDelegatedNextType(operand ?? node, operandType, generator, isAsync);
       return this.delegatedReturnType(operand ?? node, operandType, isAsync);
     }
+    if (this.implicitAnyYieldNodes.has(node.id)) {
+      this.reportImplicitAnyYield(node);
+      return anyType;
+    }
     if (generator.nextType) return generator.nextType;
     if (contextual && !isAnyLike(contextual)) {
       generator.inferredNextTypes.push(contextual);
       return contextual;
     }
-    if (!isResultUnused(node))
-      this.c.error(
-        node,
-        "'yield' 式の結果が暗黙に any になります。この式を含むジェネレーターに戻り値の型の注釈がないためです。"
-      );
+    if (!isResultUnused(node)) {
+      this.recordProbedImplicitYield(context, node);
+      this.reportImplicitAnyYield(node);
+    }
     return anyType;
+  }
+
+  private recordProbedImplicitYield(context: FunctionContext | undefined, node: TreeNode): void {
+    const tracker = context?.generator?.returnYieldTracker;
+    if (!tracker) return;
+    tracker.collectors.at(-1)?.add(node.id);
+    if (context?.inReturn) tracker.returnYields.add(node.id);
+  }
+
+  private reportImplicitAnyYield(node: TreeNode): void {
+    if (this.c.silent > 0 || this.reportedImplicitYieldNodes.has(node.id)) return;
+    this.reportedImplicitYieldNodes.add(node.id);
+    this.c.error(
+      node,
+      "'yield' 式の結果が暗黙に any になります。この式を含むジェネレーターに戻り値の型の注釈がないためです。"
+    );
   }
 
   /** What a `yield` yields: its operand, or with `yield*` what that iterates, awaited in an async generator. */

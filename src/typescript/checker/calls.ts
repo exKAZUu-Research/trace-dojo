@@ -765,11 +765,9 @@ export class Calls {
         continue;
       }
       viable.push(candidate);
-      const instantiated = this.c.silently(() => attempt.instantiate(candidate));
-      if (!this.arity.instanceArityMatches(instantiated, candidate, args) || !attempt.checkThis(instantiated)) continue;
-      attempt.previewCallbacks(instantiated);
-      if (this.c.flow.probe(() => this.c.silently(() => this.checkArguments(instantiated, args.nodes, false))))
+      if (this.tryOverloadCandidate(candidate, args, attempt)) {
         return this.finishOverload(node, candidate, args, options, attempt);
+      }
     }
     if (viable.length === 0 && failed) {
       this.typeArguments.reportMismatch(node, failed.mismatch);
@@ -778,6 +776,17 @@ export class Calls {
       return { signature, returnType: signature.returnType() };
     }
     return this.reportUnresolved(node, callee, viable.length > 0 ? viable : candidates, args, attempt);
+  }
+
+  private tryOverloadCandidate(candidate: Signature, args: ExpressionListFlow, attempt: CallAttempt): boolean {
+    return this.c.functions.withoutCommittedCallInference(() => {
+      const instantiated = this.c.silently(() => attempt.instantiate(candidate));
+      if (!this.arity.instanceArityMatches(instantiated, candidate, args) || !attempt.checkThis(instantiated)) {
+        return false;
+      }
+      attempt.previewCallbacks(instantiated);
+      return this.c.flow.probe(() => this.c.silently(() => this.checkArguments(instantiated, args.nodes, false)));
+    });
   }
 
   private finishOverload(
@@ -1103,9 +1112,6 @@ export class Calls {
 
   // Inference ----------------------------------------------------------------------------------------------------
 
-  /** A signature with its type parameters replaced by the given or inferred type arguments. */
-  // code-gauge-allow functionNcss -- Keeps the contextual return, receiver, ordinary arguments, and callbacks in inference order.
-  // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
   private instantiateFor(
     signature: Signature,
     args: ExpressionListFlow,
@@ -1115,6 +1121,24 @@ export class Calls {
   ): Signature {
     if (signature.typeParameters.length === 0) return signature;
     if (typeArguments) return this.typeArguments.instantiate(signature, typeArguments);
+    if (this.c.silent === 0) {
+      return this.c.functions.withCommittedCallInference(() =>
+        this.instantiateSignatureFor(signature, args, typeArguments, contextual, receiver)
+      );
+    }
+    return this.instantiateSignatureFor(signature, args, typeArguments, contextual, receiver);
+  }
+
+  /** A signature with its type parameters replaced by the inferred type arguments. */
+  // code-gauge-allow functionNcss -- Keeps the contextual return, receiver, ordinary arguments, and callbacks in inference order.
+  // code-gauge-allow functionCognitiveComplexity -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
+  private instantiateSignatureFor(
+    signature: Signature,
+    args: ExpressionListFlow,
+    typeArguments: Type[] | undefined,
+    contextual: Type | undefined,
+    receiver: Type | undefined
+  ): Signature {
     const parameters = signature.typeParameters;
     const run = newInferenceRun(parameters, true);
     run.higherOrder = { outer: signature, parameters: [] };

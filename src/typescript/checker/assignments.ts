@@ -58,9 +58,11 @@ export class AssignmentChecker {
       const expressionTypes = new Map<number, Type>();
       this.checkPatternExpressions(leftExpression, expressionTypes);
       const implied = this.patternContext(leftExpression, expressionTypes);
-      const valueType = this.c.expressions.check(right, implied);
+      const { result: valueType, yields } = this.c.functions.collectImplicitYields(() =>
+        this.c.expressions.check(right, implied)
+      );
       if (implied) this.c.expressions.checkExcessProperties(right, valueType, implied);
-      this.destructuringAssignment(leftExpression, valueType, expressionTypes);
+      this.destructuringAssignment(leftExpression, valueType, expressionTypes, yields);
       return valueType;
     }
     if (this.isEvolvingArrayAssignment(leftExpression)) {
@@ -70,7 +72,15 @@ export class AssignmentChecker {
       return valueType;
     }
     const targetType = this.targetType(left, false);
-    const valueType = this.c.expressions.checkAssignedValue(right, targetType === errorType ? undefined : targetType);
+    const { result: valueType, yields } = this.c.functions.collectImplicitYields(() =>
+      this.c.expressions.checkAssignedValue(right, targetType === errorType ? undefined : targetType)
+    );
+    if (leftExpression.type === 'identifier') {
+      const symbol = this.c.scopeOf(leftExpression).lookupValue(leftExpression.text);
+      if (symbol && this.isAutoTyped(symbol)) {
+        this.c.functions.recordVariableYieldDeps(symbol, false, yields, true);
+      }
+    }
     this.c.expressions.expandos.recordAssignment(node, valueType);
     if (targetType !== errorType) this.c.expressions.checkAssignable(leftExpression, valueType, targetType, right);
     this.assignReference(leftExpression, targetType, valueType);
@@ -203,15 +213,27 @@ export class AssignmentChecker {
     return initializer.type === 'null' || this.c.isGlobalUndefined(initializer);
   }
 
-  destructuringAssignment(pattern: TreeNode, type: Type, expressionTypes?: ReadonlyMap<number, Type>): void {
+  destructuringAssignment(
+    pattern: TreeNode,
+    type: Type,
+    expressionTypes?: ReadonlyMap<number, Type>,
+    yields?: Set<number>
+  ): void {
     this.assignmentTargets(
       pattern,
       type,
       (target, valueType) => {
+        const unwrapped = skipParentheses(target);
+        if (unwrapped.type === 'identifier') {
+          const symbol = this.c.scopeOf(unwrapped).lookupValue(unwrapped.text);
+          if (symbol && this.isAutoTyped(symbol)) {
+            this.c.functions.recordVariableYieldDeps(symbol, false, yields, true);
+          }
+        }
         const declared = expressionTypes?.get(target.id) ?? this.targetType(target, false);
         if (declared !== errorType && !this.c.relations.isAssignable(valueType, declared))
           this.c.expressions.reportNotAssignable(target, valueType, declared);
-        this.assignReference(skipParentheses(target), declared, valueType);
+        this.assignReference(unwrapped, declared, valueType);
       },
       { expressionTypes }
     );

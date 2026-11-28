@@ -177,7 +177,7 @@ export class ExpressionChecker {
   check(node: TreeNode, contextual?: Type, retainFreshBoolean = false): Type {
     this.c.budget.spend();
     return this.c.withTypeDemand(node, () => {
-      if (this.c.silent > 0)
+      if (this.c.silent > 0 && !this.c.functions.isTrackingReturnYields())
         return this.silentTypes.check(node, contextual, retainFreshBoolean, () =>
           this.compute(node, contextual, retainFreshBoolean)
         );
@@ -481,9 +481,9 @@ export class ExpressionChecker {
     if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, node.text);
     const enumSymbol = this.c.enums.resolvedEnumSymbol(symbol);
     if (enumSymbol) this.c.enums.checkConstEnumUse(node, enumSymbol);
-    return this.reportUnavailableValue(node, symbol)
-      ? errorType
-      : this.variableReferenceType(node, symbol, undefined, true);
+    if (this.reportUnavailableValue(node, symbol)) return errorType;
+    this.c.functions.noteIdentifierRead(symbol);
+    return this.variableReferenceType(node, symbol, undefined, true);
   }
 
   // Identifiers --------------------------------------------------------------------------------------------------
@@ -509,6 +509,7 @@ export class ExpressionChecker {
     if (symbol.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, symbol)) return errorType;
     const aliased = symbol.valueKind === 'importAlias' ? this.c.namespaces.imported(symbol, 'value') : undefined;
     if (aliased?.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, aliased, name)) return errorType;
+    this.c.functions.noteIdentifierRead(symbol);
     return this.variableReferenceType(node, symbol, contextual);
   }
 
