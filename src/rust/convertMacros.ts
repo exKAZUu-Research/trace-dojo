@@ -268,7 +268,11 @@ export abstract class MacroConverter extends PatternConverter {
           break;
         }
         case 'unary': {
-          if (expr.op === '-' && (expr.operand.kind === 'int' || expr.operand.kind === 'float')) {
+          if (expr.op === '-' && expr.operand.kind === 'int') {
+            text += `-${expr.operand.value.toString()}`;
+            break;
+          }
+          if (expr.op === '-' && expr.operand.kind === 'float') {
             text += `-${arg.text
               .slice(1)
               .trim()
