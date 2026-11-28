@@ -326,7 +326,7 @@ export class StatementChecker {
     const scope = this.c.scopeOf(node);
     for (const own of exportedNames(node)) {
       const others = all.filter((other) => other.name === own.name && other.site.id !== own.site.id);
-      const message = duplicateExportMessage(scope, own, others);
+      const message = duplicateExportMessage(this.c, scope, own, others);
       if (message) this.c.error(own.site, message);
     }
   }
@@ -796,7 +796,7 @@ export class StatementChecker {
           assigned,
           constraint?.id,
           evolving === true,
-          yieldDeps ? [...yieldDeps].toSorted() : undefined,
+          yieldDeps ? [...yieldDeps].toSorted((a, b) => a - b) : undefined,
         ])
     );
     return JSON.stringify([entries.toSorted(), [...state.assignedFields].toSorted(), state.superCalled, state.dead]);
@@ -1317,6 +1317,8 @@ interface ExportedNameEntry {
   site: TreeNode;
   declaration?: TreeNode;
   specifier?: TreeNode;
+  namespaceExport?: TreeNode;
+  source?: TreeNode;
   stmtTypeOnly?: boolean;
 }
 
@@ -1328,25 +1330,74 @@ const defaultMergeableTypes = new Set([
   'generator_function_declaration',
 ]);
 
-function duplicateExportMessage(scope: Scope, own: ExportedNameEntry, others: ExportedNameEntry[]): string | undefined {
+function duplicateExportMessage(
+  c: Checker,
+  scope: Scope,
+  own: ExportedNameEntry,
+  others: ExportedNameEntry[]
+): string | undefined {
   if (others.length === 0) return undefined;
   if (own.name === 'default') {
-    return canMergeDefaultExports(scope, [own, ...others])
+    return canMergeDefaultExports(c, scope, [own, ...others])
       ? undefined
       : 'モジュールに複数の既定のエクスポートを含めることはできません。';
   }
-  if (own.declaration && others.every((other) => other.declaration)) return undefined;
+  const conflicting = others.filter((other) => exportEntriesConflict(c, scope, own, other));
+  if (conflicting.length === 0) return undefined;
   if (own.declaration && !valueDeclarationTypes.has(own.declaration.type)) return undefined;
-  return own.declaration || others.some((other) => other.declaration)
+  return own.declaration || conflicting.some((other) => other.declaration)
     ? `エクスポートされた変数 '${own.name}' を再宣言することはできません。`
     : `識別子 '${own.name}' が重複しています。`;
 }
 
-function canMergeDefaultExports(scope: Scope, entries: ExportedNameEntry[]): boolean {
+function exportEntriesConflict(c: Checker, scope: Scope, a: ExportedNameEntry, b: ExportedNameEntry): boolean {
+  if (a.declaration && b.declaration) return false;
+  if (!a.declaration && !b.declaration) return true;
+  const decl = (a.declaration ?? b.declaration) as TreeNode;
+  const clause = a.declaration ? b : a;
+  if (decl.type === 'interface_declaration' || decl.type === 'type_alias_declaration') {
+    return clauseExportsType(c, scope, clause);
+  }
+  if ((decl.type === 'internal_module' || decl.type === 'module') && !isInstantiatedExportedNamespace(c, scope, decl)) {
+    return Boolean(clause.namespaceExport) || clauseExportsNamespace(c, scope, clause);
+  }
+  return true;
+}
+
+function isInstantiatedExportedNamespace(c: Checker, scope: Scope, decl: TreeNode): boolean {
+  const name = decl.childForFieldName('name');
+  if (!name || name.type === 'string') return true;
+  const symbol = scope.lookupNamespace(canonicalIdentifier(name.text, name), c.budget);
+  return Boolean(
+    symbol && (symbol.valueEntries.some((entry) => entry.kind !== 'namespace') || c.namespaces.isInstantiated(symbol))
+  );
+}
+
+function clauseExportsType(c: Checker, scope: Scope, clause: ExportedNameEntry): boolean {
+  if (clause.namespaceExport) return false;
+  const nameNode = clause.specifier?.childForFieldName('name');
+  if (!nameNode) return false;
+  const sourceName = decodedExportSpecifier(nameNode);
+  if (!clause.source) return Boolean(scope.lookupType(sourceName));
+  const exports = reExportTargetExports(c, clause.source);
+  return Boolean(exports?.types.has(sourceName));
+}
+
+function clauseExportsNamespace(c: Checker, scope: Scope, clause: ExportedNameEntry): boolean {
+  if (clause.namespaceExport) return true;
+  const nameNode = clause.specifier?.childForFieldName('name');
+  if (!nameNode) return false;
+  const sourceName = decodedExportSpecifier(nameNode);
+  if (!clause.source) return Boolean(scope.lookupNamespace(sourceName, c.budget));
+  const exports = reExportTargetExports(c, clause.source);
+  return Boolean(exports?.namespaces.has(sourceName));
+}
+
+function canMergeDefaultExports(c: Checker, scope: Scope, entries: ExportedNameEntry[]): boolean {
   let inlineValueCount = 0;
   const clauses: ExportedNameEntry[] = [];
   for (const entry of entries) {
-    if (entry.specifier) {
+    if (entry.specifier || entry.namespaceExport) {
       clauses.push(entry);
       continue;
     }
@@ -1354,17 +1405,34 @@ function canMergeDefaultExports(scope: Scope, entries: ExportedNameEntry[]): boo
     if (entry.declaration.type !== 'interface_declaration') inlineValueCount++;
   }
   if (clauses.length === 0) return inlineValueCount <= 1;
-  return clauses.length === 1 && inlineValueCount === 0 && isPureValueDefaultClause(scope, clauses[0]);
+  return clauses.length === 1 && inlineValueCount === 0 && isPureValueDefaultClause(c, scope, clauses[0]);
 }
 
-function isPureValueDefaultClause(scope: Scope, clause: ExportedNameEntry): boolean {
+function isPureValueDefaultClause(c: Checker, scope: Scope, clause: ExportedNameEntry): boolean {
+  if (clause.stmtTypeOnly) return false;
+  if (clause.namespaceExport) return true;
   const specifier = clause.specifier;
-  if (!specifier || clause.stmtTypeOnly || hasToken(specifier, 'type')) return false;
+  if (!specifier || hasToken(specifier, 'type')) return false;
   const nameNode = specifier.childForFieldName('name');
   if (!nameNode) return false;
-  const localName = decodedExportSpecifier(nameNode);
-  if (scope.lookupType(localName)) return false;
-  return Boolean(scope.lookupValue(localName) ?? scope.lookupNamespace(localName));
+  const sourceName = decodedExportSpecifier(nameNode);
+  if (!clause.source) {
+    if (scope.lookupType(sourceName)) return false;
+    return Boolean(scope.lookupValue(sourceName) ?? scope.lookupNamespace(sourceName));
+  }
+  const module = c.namespaces.moduleNamed(stringValue(clause.source));
+  if (!module) return false;
+  const exports = reExportTargetExports(c, clause.source);
+  if (exports?.types.has(sourceName)) return false;
+  if (sourceName === 'default' && c.libraryBinder.ambientModules.get(module.name) === module) return true;
+  return Boolean(exports?.values.has(sourceName) || exports?.namespaces.has(sourceName));
+}
+
+function reExportTargetExports(c: Checker, source: TreeNode): Scope | undefined {
+  const module = c.namespaces.moduleNamed(stringValue(source));
+  if (!module) return undefined;
+  const target = module.exportEquals ? c.namespaces.exportEqualsContainerOf(module) : module;
+  return target?.namespaceExports;
 }
 
 export function globalAugmentationPlacementMessage(node: TreeNode): string {
@@ -1408,7 +1476,10 @@ function isInAmbientContext(node: TreeNode): boolean {
  */
 function exportedNames(node: TreeNode): ExportedNameEntry[] {
   const declaration = node.childForFieldName('declaration') ?? undefined;
-  if (node.childForFieldName('source') || declaration?.type === 'function_signature') return [];
+  if (declaration?.type === 'function_signature') return [];
+  const source = node.childForFieldName('source') ?? undefined;
+  const stmtTypeOnly = hasToken(node, 'type');
+  if (source) return reExportedNames(node, source, stmtTypeOnly);
   if (node.children.some((child) => child?.type === 'default'))
     return [{ name: 'default', site: node.childForFieldName('value') ?? declaration ?? node, declaration }];
   if (declaration)
@@ -1417,11 +1488,27 @@ function exportedNames(node: TreeNode): ExportedNameEntry[] {
       site: name,
       declaration,
     }));
-  const stmtTypeOnly = hasToken(node, 'type');
   const clause = named(node).find((child) => child.type === 'export_clause');
   return (clause ? named(clause) : []).flatMap((specifier) => {
     const exported = specifier.childForFieldName('alias') ?? specifier.childForFieldName('name');
     return exported ? [{ name: decodedExportSpecifier(exported), site: exported, specifier, stmtTypeOnly }] : [];
+  });
+}
+
+function reExportedNames(node: TreeNode, source: TreeNode, stmtTypeOnly: boolean): ExportedNameEntry[] {
+  const nsExport = named(node).find((child) => child.type === 'namespace_export');
+  if (nsExport) {
+    const alias = named(nsExport)[0];
+    return alias
+      ? [{ name: decodedExportSpecifier(alias), site: alias, namespaceExport: nsExport, source, stmtTypeOnly }]
+      : [];
+  }
+  const clause = named(node).find((child) => child.type === 'export_clause');
+  return (clause ? named(clause) : []).flatMap((specifier) => {
+    const exported = specifier.childForFieldName('alias') ?? specifier.childForFieldName('name');
+    return exported
+      ? [{ name: decodedExportSpecifier(exported), site: exported, specifier, source, stmtTypeOnly }]
+      : [];
   });
 }
 
